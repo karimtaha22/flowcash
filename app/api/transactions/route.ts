@@ -28,7 +28,17 @@ export async function GET(req: NextRequest) {
   if (to) query = query.lte("occurred_at", to);
   if (q) query = query.ilike("description", `%${q}%`);
   if (type) query = query.eq("type", type);
-  if (account_id) query = query.or(`account_id.eq.${account_id},to_account_id.eq.${account_id}`);
+  if (account_id) {
+    // account_id may be a comma-separated list (e.g. a main account plus its
+    // sub-accounts, for a rolled-up statement) — validate as UUIDs before
+    // splicing into the raw PostgREST .or() filter string.
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const ids = account_id.split(",").map((s) => s.trim()).filter((s) => UUID_RE.test(s));
+    if (ids.length) {
+      const clauses = ids.flatMap((id) => [`account_id.eq.${id}`, `to_account_id.eq.${id}`]);
+      query = query.or(clauses.join(","));
+    }
+  }
 
   const { data, error } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

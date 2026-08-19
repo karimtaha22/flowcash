@@ -2,10 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { getSessionUserId } from "@/lib/session";
 
+// Only the categories the user has switched on (is_active) — this is what
+// shows up everywhere in the app (add page, budgets, recurring items...).
+// The full pick-list (active + inactive master catalog) lives behind
+// /api/categories/catalog, used only by the Settings ← التصنيفات manager.
 export async function GET() {
   const userId = await getSessionUserId();
   if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const { data, error } = await supabaseAdmin.from("categories").select("*").eq("user_id", userId).order("name");
+  const { data, error } = await supabaseAdmin.from("categories").select("*").eq("user_id", userId).eq("is_active", true).order("name");
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ categories: data });
 }

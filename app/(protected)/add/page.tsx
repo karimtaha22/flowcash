@@ -5,7 +5,7 @@ import Card from "@/components/Card";
 import { fmt } from "@/lib/format";
 import { toEGP, fromEGP, type FxRates } from "@/lib/fx";
 import { shrinkImage } from "@/lib/image";
-import { Camera, Loader2, AlertTriangle } from "lucide-react";
+import { Camera, Loader2, AlertTriangle, CalendarDays } from "lucide-react";
 import Link from "next/link";
 
 const TYPES = [
@@ -40,9 +40,18 @@ function AddForm() {
   const [accountsLoaded, setAccountsLoaded] = useState(false);
   const [accountsLoadError, setAccountsLoadError] = useState("");
 
+  // date of the transaction — a calendar picker next to every entry,
+  // defaulting to today unless the user picks a different date.
+  const todayISO = () => new Date().toISOString().slice(0, 10);
+  const [occurredDate, setOccurredDate] = useState(todayISO());
+
   // categories
   const [categories, setCategories] = useState<{ id: string; name: string; icon: string; kind: string }[]>([]);
   const [categoryId, setCategoryId] = useState("");
+
+  // saved people (family / frequent recipients, managed in Settings) — used
+  // to suggest names while typing a counterparty for transfers/expenses.
+  const [people, setPeople] = useState<{ id: string; name: string }[]>([]);
 
   // "العزومة" — split a bill evenly across a group, with per-person overrides + WhatsApp share
   interface SplitPerson { name: string; phone: string; amount: string; edited: boolean }
@@ -75,6 +84,7 @@ function AddForm() {
     });
     fetch("/api/fx").then((r) => r.json()).then((d) => setRates(d.rates || null));
     fetch("/api/categories").then((r) => r.json()).then((d) => setCategories(d.categories || []));
+    fetch("/api/people").then((r) => r.json()).then((d) => setPeople((d.people || []).map((p: any) => ({ id: p.id, name: p.name }))));
   }, []);
 
   // recompute the group-split shares whenever the bill amount, person count, or a
@@ -136,7 +146,7 @@ function AddForm() {
 
   const reset = () => {
     setAmount(""); setDescription(""); setAccountId(""); setToAccountId(""); setCounterparty(""); setSplitDebt(false); setSplitAmount("");
-    setReceiptDataUrl(null); setOcrMsg(""); setCategoryId("");
+    setReceiptDataUrl(null); setOcrMsg(""); setCategoryId(""); setOccurredDate(todayISO());
     setGroupSplit(false); setSplitCount("2"); setSplitPeople([{ name: "", phone: "", amount: "", edited: false }]);
   };
 
@@ -144,7 +154,12 @@ function AddForm() {
     setSaving(true);
     setSaveError("");
     const body: any = { type, amount: parseFloat(amount), account_id: accountId, description, counterparty_name: counterparty, currency: currency || undefined };
-    if (type === "transfer") body.to_account_id = toAccountId;
+    // no date chosen (still today) → let the server default to now(); a
+    // back-dated pick sends noon on that day so same-day ordering stays sane.
+    if (occurredDate && occurredDate !== todayISO()) {
+      body.occurred_at = new Date(`${occurredDate}T12:00:00`).toISOString();
+    }
+    if (type === "transfer") body.to_account_id = toAccountId || undefined;
     if ((type === "expense" || type === "income") && categoryId) body.category_id = categoryId;
     if (type === "expense" && splitDebt && splitAmount && !groupSplit) {
       body.split_debt_amount = parseFloat(splitAmount);
@@ -203,8 +218,11 @@ function AddForm() {
     }
   };
 
+  // shows the base-currency equivalent next to any amount entered in a
+  // different currency — always on, not just in travel mode, since it's
+  // useful any time an account/income currency differs from the base one.
   const convertedPreview = (() => {
-    if (!travelMode || !rates || !amount || !currency || currency === baseCurrency) return null;
+    if (!rates || !amount || !currency || currency === baseCurrency) return null;
     const inEGP = toEGP(parseFloat(amount), currency, rates);
     const inBase = fromEGP(inEGP, baseCurrency, rates);
     return `≈ ${fmt(inBase, baseCurrency)}`;
@@ -285,9 +303,26 @@ function AddForm() {
         />
         {convertedPreview && <p className="text-center text-xs text-neutral-400 -mt-2">{convertedPreview}</p>}
 
+        <label className="flex items-center gap-2 rounded-lg border border-neutral-300 dark:border-neutral-700 px-3 py-2">
+          <CalendarDays size={16} className="text-neutral-400 shrink-0" />
+          <input
+            type="date"
+            value={occurredDate}
+            onChange={(e) => setOccurredDate(e.target.value || todayISO())}
+            max={todayISO()}
+            className="flex-1 bg-transparent text-sm outline-none"
+          />
+        </label>
+
+        {/* suggests names already saved in الإعدادات ← الأشخاص، while still allowing free text */}
+        <datalist id="people-suggestions">
+          {people.map((p) => <option key={p.id} value={p.name} />)}
+        </datalist>
+
         {type === "expense" && (
           <>
             <input placeholder="وصف المصروف" value={description} onChange={(e) => setDescription(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+            <input list="people-suggestions" placeholder="مرتبط بشخص (اختياري)" value={counterparty} onChange={(e) => setCounterparty(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
             <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm">
               <option value="">التصنيف (اختياري)</option>
               {categories.filter((c) => c.kind === "expense").map((c) => (
@@ -298,7 +333,7 @@ function AddForm() {
         )}
         {type === "income" && (
           <>
-            <input placeholder="مصدر الدخل (اختياري)" value={counterparty} onChange={(e) => setCounterparty(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+            <input list="people-suggestions" placeholder="مصدر الدخل (اختياري)" value={counterparty} onChange={(e) => setCounterparty(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
             <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm">
               <option value="">التصنيف (اختياري)</option>
               {categories.filter((c) => c.kind === "income").map((c) => (
@@ -308,7 +343,7 @@ function AddForm() {
           </>
         )}
         {type === "transfer" && (
-          <input placeholder="التحويل إلى (اسم، اختياري إذا كان تحويلاً داخلياً)" value={counterparty} onChange={(e) => setCounterparty(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+          <input list="people-suggestions" placeholder="التحويل إلى (اسم شخص، أو سيبها فاضية لو تحويل بين حساباتك)" value={counterparty} onChange={(e) => setCounterparty(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
         )}
 
         <select value={accountId} onChange={(e) => setAccountId(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm">

@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import Card from "@/components/Card";
 import { fmt } from "@/lib/format";
+import { toEGP, fromEGP, type FxRates } from "@/lib/fx";
 import { FileDown, FileSpreadsheet } from "lucide-react";
 
 interface Account { id: string; name: string; currency: string; parent_account_id?: string | null }
@@ -28,11 +29,22 @@ export default function ExportPage() {
   const [rows, setRows] = useState<any[]>([]);
   const [label, setLabel] = useState("");
   const [loading, setLoading] = useState(false);
+  const [baseCurrency, setBaseCurrency] = useState("EGP");
+  const [rates, setRates] = useState<FxRates | null>(null);
 
   useEffect(() => {
     fetch("/api/accounts").then((r) => r.json()).then((d) => setAccounts(d.accounts || []));
     fetch("/api/people").then((r) => r.json()).then((d) => setPeople((d.people || []).map((p: any) => ({ id: p.id, name: p.name }))));
+    fetch("/api/me").then((r) => r.json()).then((d) => setBaseCurrency(d.user?.base_currency || "EGP"));
+    fetch("/api/fx").then((r) => r.json()).then((d) => setRates(d.rates || null));
   }, []);
+
+  // convert an amount in `currency` into the user's base currency, for
+  // display alongside statement rows/totals when the two differ.
+  const toBase = (amount: number, currency: string) => {
+    if (!rates || currency === baseCurrency) return null;
+    return fromEGP(toEGP(amount, currency, rates), baseCurrency, rates);
+  };
 
   const inRange = (dateStr: string) => {
     if (from && dateStr < from) return false;
@@ -45,8 +57,15 @@ export default function ExportPage() {
     if (mode === "account") {
       if (!accountId) { setLoading(false); return; }
       const acc = accounts.find((a) => a.id === accountId);
-      setLabel(acc?.name || "");
-      const params = new URLSearchParams({ account_id: accountId, limit: "1000" });
+      // a statement is per "account family", not per single row: pick the
+      // main account (the selected one, or its parent if a sub was picked)
+      // and roll its sub-accounts' transactions into the same statement.
+      const mainId = acc?.parent_account_id || accountId;
+      const main = accounts.find((a) => a.id === mainId);
+      const subs = accounts.filter((a) => a.parent_account_id === mainId);
+      const familyIds = [mainId, ...subs.map((s) => s.id)];
+      setLabel(subs.length ? `${main?.name || acc?.name || ""} (شامل الحسابات الفرعية)` : acc?.name || "");
+      const params = new URLSearchParams({ account_id: familyIds.join(","), limit: "1000" });
       if (from) params.set("from", from);
       if (to) params.set("to", `${to}T23:59:59`);
       const d = await fetch(`/api/transactions?${params}`).then((r) => r.json());
@@ -54,6 +73,7 @@ export default function ExportPage() {
         date: new Date(t.occurred_at).toLocaleDateString("ar-EG"),
         type: t.type,
         description: t.description || t.counterparty_name || "",
+        account: t.accounts?.name || "",
         amount: Number(t.amount),
         currency: t.currency,
       })));
@@ -89,8 +109,13 @@ export default function ExportPage() {
   };
 
   const exportCSV = () => {
-    const header = "التاريخ,النوع,الوصف,المبلغ,العملة\n";
-    const body = rows.map((r) => `${r.date},${r.type},"${(r.description || "").replace(/"/g, '""')}",${r.amount},${r.currency}`).join("\n");
+    const header = `التاريخ,النوع,الوصف,المبلغ,العملة,ما يعادلها بـ ${baseCurrency}\n`;
+    const body = rows
+      .map((r) => {
+        const eq = toBase(Math.abs(r.amount), r.currency);
+        return `${r.date},${r.type},"${(r.description || "").replace(/"/g, '""')}",${r.amount},${r.currency},${eq !== null ? eq.toFixed(2) : ""}`;
+      })
+      .join("\n");
     downloadBlob("﻿" + header + body, `كشف-${label || "حساب"}.csv`, "text/csv;charset=utf-8;");
   };
 
@@ -106,14 +131,17 @@ export default function ExportPage() {
     doc.text("Date", 14, y);
     doc.text("Type", 50, y);
     doc.text("Description", 85, y);
-    doc.text("Amount", 175, y);
+    doc.text("Amount", 155, y);
+    doc.text(`≈ ${baseCurrency}`, 185, y);
     y += 6;
     for (const r of rows) {
       if (y > 280) { doc.addPage(); y = 20; }
+      const eq = toBase(Math.abs(r.amount), r.currency);
       doc.text(String(r.date), 14, y);
       doc.text(String(r.type), 50, y);
-      doc.text(String(r.description || "").slice(0, 40), 85, y);
-      doc.text(`${r.amount} ${r.currency}`, 175, y);
+      doc.text(String(r.description || "").slice(0, 35), 85, y);
+      doc.text(`${r.amount} ${r.currency}`, 155, y);
+      doc.text(eq !== null ? eq.toFixed(0) : "-", 185, y);
       y += 6;
     }
     doc.save(`statement-${label || "account"}.pdf`);
@@ -169,15 +197,21 @@ export default function ExportPage() {
             </button>
           </div>
           <div className="space-y-1.5">
-            {rows.map((r, i) => (
-              <Card key={i} className="flex items-center justify-between py-2 text-xs">
-                <div>
-                  <p className="font-medium">{r.description}</p>
-                  <p className="text-neutral-400">{r.date} · {r.type}</p>
-                </div>
-                <p className="font-semibold">{fmt(Math.abs(r.amount), r.currency)}</p>
-              </Card>
-            ))}
+            {rows.map((r, i) => {
+              const eq = toBase(Math.abs(r.amount), r.currency);
+              return (
+                <Card key={i} className="flex items-center justify-between py-2 text-xs">
+                  <div>
+                    <p className="font-medium">{r.description}</p>
+                    <p className="text-neutral-400">{r.date} · {r.type}{r.account ? ` · ${r.account}` : ""}</p>
+                  </div>
+                  <div className="text-left shrink-0">
+                    <p className="font-semibold">{fmt(Math.abs(r.amount), r.currency)}</p>
+                    {eq !== null && <p className="text-[10px] text-neutral-400">≈ {fmt(eq, baseCurrency)}</p>}
+                  </div>
+                </Card>
+              );
+            })}
           </div>
         </>
       )}

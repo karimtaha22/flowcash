@@ -2,8 +2,16 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Card from "@/components/Card";
+import CategoryManager from "@/components/CategoryManager";
+import PeopleManager from "@/components/PeopleManager";
 import { useTheme } from "@/lib/useTheme";
-import { Moon, Sun, LogOut, ShieldCheck, Plane, Fingerprint, TimerOff } from "lucide-react";
+import { Moon, Sun, LogOut, ShieldCheck, Plane, Fingerprint, TimerOff, Coins, Tags, Users, ChevronDown } from "lucide-react";
+
+const CURRENCIES = [
+  { code: "EGP", label: "جنيه مصري" },
+  { code: "USD", label: "دولار أمريكي" },
+  { code: "SAR", label: "ريال سعودي" },
+];
 
 export default function SettingsPage() {
   const { dark, toggle } = useTheme();
@@ -15,6 +23,9 @@ export default function SettingsPage() {
   const [bioMsg, setBioMsg] = useState("");
   const [autoLogoutOn, setAutoLogoutOn] = useState(false);
   const [autoLogoutMinutes, setAutoLogoutMinutes] = useState("15");
+  const [savingCurrency, setSavingCurrency] = useState(false);
+  const [categoriesOpen, setCategoriesOpen] = useState(false);
+  const [peopleOpen, setPeopleOpen] = useState(false);
 
   useEffect(() => {
     fetch("/api/me").then((r) => r.json()).then((d) => {
@@ -72,6 +83,20 @@ export default function SettingsPage() {
     }
   };
 
+  const changeBaseCurrency = async (code: string) => {
+    setBaseCurrency(code);
+    setSavingCurrency(true);
+    try {
+      await fetch("/api/me", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ base_currency: code }),
+      });
+    } finally {
+      setSavingCurrency(false);
+    }
+  };
+
   const toggleTravelMode = async () => {
     const next = !travelMode;
     setTravelMode(next);
@@ -101,6 +126,24 @@ export default function SettingsPage() {
         </button>
       </Card>
 
+      <Card className="space-y-2">
+        <div className="flex items-center gap-2 text-sm">
+          <Coins size={18} />
+          العملة الأساسية
+        </div>
+        <select
+          value={baseCurrency}
+          onChange={(e) => changeBaseCurrency(e.target.value)}
+          disabled={savingCurrency}
+          className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm"
+        >
+          {CURRENCIES.map((c) => <option key={c.code} value={c.code}>{c.label} ({c.code})</option>)}
+        </select>
+        <p className="text-xs text-neutral-400">
+          أي مبلغ أو حساب بعملة مختلفة عن العملة دي، هيظهرلك جمبه ما يعادله بيها تلقائي — في إضافة الحركة، وفي كشوفات الحساب والتقارير.
+        </p>
+      </Card>
+
       <Card className="space-y-1">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-sm">
@@ -112,8 +155,24 @@ export default function SettingsPage() {
           </button>
         </div>
         <p className="text-xs text-neutral-400">
-          لما يكون مفعّل، هيظهرلك تحت أي مبلغ بعملة مختلفة قيمته التقريبية بعملتك الأساسية ({baseCurrency}) لحظيًا وانت بتسجل الحركة.
+          تحويل العملة بيظهر دايمًا بغض النظر عن وضع السفر — الوضع ده لتفاصيل سفر إضافية لاحقًا.
         </p>
+      </Card>
+
+      <Card className="space-y-1">
+        <button onClick={() => setCategoriesOpen((s) => !s)} className="w-full flex items-center justify-between">
+          <span className="flex items-center gap-2 text-sm"><Tags size={18} /> التصنيفات</span>
+          <ChevronDown size={16} className={`text-neutral-400 transition-transform ${categoriesOpen ? "rotate-180" : ""}`} />
+        </button>
+        {categoriesOpen && <div className="pt-2"><CategoryManager /></div>}
+      </Card>
+
+      <Card className="space-y-1">
+        <button onClick={() => setPeopleOpen((s) => !s)} className="w-full flex items-center justify-between">
+          <span className="flex items-center gap-2 text-sm"><Users size={18} /> الأشخاص (الأسرة والتحويلات المتكررة)</span>
+          <ChevronDown size={16} className={`text-neutral-400 transition-transform ${peopleOpen ? "rotate-180" : ""}`} />
+        </button>
+        {peopleOpen && <div className="pt-2"><PeopleManager /></div>}
       </Card>
 
       {bioSupported && (

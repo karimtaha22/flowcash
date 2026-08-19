@@ -81,9 +81,13 @@ export async function createTransaction(input: CreateTxInput) {
       break;
     }
     case "transfer": {
-      if (!input.account_id || !input.to_account_id) throw new Error("account_id and to_account_id required");
+      // to_account_id is optional: a transfer between two of the user's own
+      // accounts sets it and both balances move; a transfer OUT to a person
+      // who isn't one of the user's tracked accounts just debits account_id
+      // and records counterparty_name instead (no second balance to credit).
+      if (!input.account_id) throw new Error("account_id required");
       await adjustBalance(input.account_id, -Math.abs(txAmount));
-      await adjustBalance(input.to_account_id, Math.abs(txAmount));
+      if (input.to_account_id) await adjustBalance(input.to_account_id, Math.abs(txAmount));
       break;
     }
     case "balance_update": {

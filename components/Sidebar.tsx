@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Wallet, Users, PlusCircle, CalendarDays, Settings, Receipt, Wallet2, Repeat, Search, FileDown, Tags } from "lucide-react";
+import { LayoutDashboard, Wallet, Users, PlusCircle, CalendarDays, Settings, Receipt, Wallet2, Repeat, Search, FileDown } from "lucide-react";
 
 const items = [
   { href: "/dashboard", label: "الرئيسية", icon: LayoutDashboard },
@@ -9,7 +9,6 @@ const items = [
   { href: "/activity", label: "الحركة", icon: Receipt },
   { href: "/add", label: "إضافة حركة", icon: PlusCircle },
   { href: "/people", label: "الأشخاص والديون", icon: Users },
-  { href: "/categories", label: "التصنيفات", icon: Tags },
   { href: "/calendar", label: "التقويم", icon: CalendarDays },
   { href: "/planning", label: "التخطيط المالي", icon: Repeat },
   { href: "/search", label: "البحث", icon: Search },

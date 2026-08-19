@@ -2,7 +2,8 @@
 import { useEffect, useState } from "react";
 import Card from "@/components/Card";
 import { fmt } from "@/lib/format";
-import { Plus, Trash2, Pencil, Repeat, PiggyBank, Target, CheckCircle2 } from "lucide-react";
+import { Plus, Trash2, Pencil, Repeat, PiggyBank, Target, CheckCircle2, Moon } from "lucide-react";
+import ZakatCharityPanel from "@/components/ZakatCharityPanel";
 
 interface Account { id: string; name: string; currency: string }
 interface Category { id: string; name: string; icon: string; kind: string }
@@ -21,6 +22,7 @@ const TABS = [
   { key: "recurring", label: "مصاريف ودخل متكرر", icon: Repeat },
   { key: "budgets", label: "الميزانية الشهرية", icon: PiggyBank },
   { key: "goals", label: "أهداف التوفير", icon: Target },
+  { key: "zakat", label: "صدقات وزكاة", icon: Moon },
 ];
 
 function currentMonthKey() {
@@ -277,16 +279,24 @@ export default function PlanningPage() {
         </Card>
       )}
 
-      <div className="grid grid-cols-3 gap-2 bg-neutral-100 dark:bg-neutral-800 rounded-xl p-1">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => { setTab(t.key); setShowForm(false); }}
-            className={`flex items-center justify-center gap-1 py-2 rounded-lg text-xs font-medium ${tab === t.key ? "bg-white dark:bg-neutral-900 shadow text-orange-600" : "text-neutral-500"}`}
-          >
-            <t.icon size={14} /> {t.label}
-          </button>
-        ))}
+      <div className="grid grid-cols-4 gap-2 bg-neutral-100 dark:bg-neutral-800 rounded-xl p-1">
+        {TABS.map((t) => {
+          const isZakat = t.key === "zakat";
+          const activeClass = isZakat
+            ? "bg-emerald-600 shadow text-white"
+            : "bg-white dark:bg-neutral-900 shadow text-orange-600";
+          return (
+            <button
+              key={t.key}
+              onClick={() => { setTab(t.key); setShowForm(false); }}
+              className={`flex items-center justify-center gap-1 py-2 rounded-lg text-xs font-medium ${
+                tab === t.key ? activeClass : isZakat ? "text-emerald-600 dark:text-emerald-400 font-semibold" : "text-neutral-500"
+              }`}
+            >
+              <t.icon size={14} /> {t.label}
+            </button>
+          );
+        })}
       </div>
 
       {tab === "recurring" && (
@@ -505,6 +515,8 @@ export default function PlanningPage() {
           </div>
         </div>
       )}
+
+      {tab === "zakat" && <ZakatCharityPanel />}
 
       {contributeFor && (
         <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50" onClick={() => setContributeFor(null)}>

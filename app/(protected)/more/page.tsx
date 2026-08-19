@@ -1,13 +1,12 @@
 import Link from "next/link";
 import Card from "@/components/Card";
-import { Repeat, Search, FileDown, Settings, ChevronLeft, Tags } from "lucide-react";
+import { Repeat, Search, FileDown, Settings, ChevronLeft } from "lucide-react";
 
 const items = [
-  { href: "/planning", label: "التخطيط المالي", desc: "مصاريف ودخل متكرر، ميزانية، أهداف توفير", icon: Repeat },
-  { href: "/categories", label: "التصنيفات", desc: "إضافة وتعديل تصنيفات المصروفات والدخل", icon: Tags },
+  { href: "/planning", label: "التخطيط المالي", desc: "مصاريف ودخل متكرر، ميزانية، أهداف توفير، صدقات وزكاة", icon: Repeat },
   { href: "/search", label: "البحث", desc: "دور بأي حاجة في حساباتك", icon: Search },
   { href: "/export", label: "تصدير كشف حساب", desc: "PDF أو Excel لأي حساب أو شخص", icon: FileDown },
-  { href: "/settings", label: "الإعدادات", desc: "الوضع الليلي، وضع السفر، تسجيل الخروج", icon: Settings },
+  { href: "/settings", label: "الإعدادات", desc: "العملة الأساسية، التصنيفات، الأشخاص، الوضع الليلي", icon: Settings },
 ];
 
 export default function MorePage() {
