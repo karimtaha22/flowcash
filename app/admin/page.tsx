@@ -1,0 +1,138 @@
+"use client";
+import { useEffect, useState } from "react";
+import Card from "@/components/Card";
+import Footer from "@/components/Footer";
+
+interface AdminUser {
+  id: string;
+  name: string;
+  base_currency: string;
+  telegram_bot_username: string | null;
+  telegram_chat_id: string | null;
+  google_sheet_id: string | null;
+  is_family: boolean;
+  parent_user_id: string | null;
+}
+
+export default function AdminPage() {
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [newUser, setNewUser] = useState({ name: "", pin: "", is_family: false, parent_user_id: "" });
+  const [editing, setEditing] = useState<Record<string, any>>({});
+  const [msg, setMsg] = useState("");
+
+  const load = () => fetch("/api/admin/users").then((r) => r.json()).then((d) => setUsers(d.users || []));
+  useEffect(() => { load(); }, []);
+
+  const createUser = async () => {
+    if (!newUser.name || newUser.pin.length < 4) { setMsg("الاسم و PIN (٤ أرقام على الأقل) مطلوبين"); return; }
+    const res = await fetch("/api/admin/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(newUser.is_family ? newUser : { name: newUser.name, pin: newUser.pin }),
+    });
+    if (res.ok) { setNewUser({ name: "", pin: "", is_family: false, parent_user_id: "" }); setMsg("تم إنشاء المستخدم ✅"); load(); }
+    else setMsg("حصل خطأ");
+  };
+
+  const saveUserSettings = async (id: string) => {
+    const patch = editing[id] || {};
+    const res = await fetch(`/api/admin/users/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      setMsg(data.webhookResult ? `تم الحفظ — ربط البوت: ${data.webhookResult.ok ? "نجح ✅" : "فشل، راجع التوكن"}` : "تم الحفظ ✅");
+      load();
+    } else setMsg("حصل خطأ في الحفظ");
+  };
+
+  return (
+    <div className="max-w-2xl mx-auto p-4 space-y-6 pb-20">
+      <div>
+        <h1 className="text-2xl font-bold text-orange-700 dark:text-orange-400">FlowCash — صفحة الإعداد (Admin)</h1>
+        <p className="text-sm text-neutral-500 mt-1">من هنا تضيف نفسك كمستخدم، وتربط بوت التليجرام والشيت الخاصين بيك.</p>
+      </div>
+
+      {msg && <Card className="text-sm bg-orange-50 dark:bg-orange-950 text-orange-700 dark:text-orange-300">{msg}</Card>}
+
+      <Card className="space-y-3">
+        <h2 className="font-semibold">١. إنشاء مستخدم جديد</h2>
+        <input placeholder="الاسم" value={newUser.name} onChange={(e) => setNewUser({ ...newUser, name: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+        <input placeholder="PIN (٤ أرقام على الأقل)" type="password" inputMode="numeric" value={newUser.pin} onChange={(e) => setNewUser({ ...newUser, pin: e.target.value.replace(/\D/g, "") })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+        <label className="flex items-center gap-2 text-xs">
+          <input type="checkbox" checked={newUser.is_family} onChange={(e) => setNewUser({ ...newUser, is_family: e.target.checked })} />
+          حساب عائلة (صلاحيات محدودة، تابع لمستخدم رئيسي)
+        </label>
+        {newUser.is_family && (
+          <select value={newUser.parent_user_id} onChange={(e) => setNewUser({ ...newUser, parent_user_id: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm">
+            <option value="">-- اختار المستخدم الرئيسي --</option>
+            {users.filter((u) => !u.is_family).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+          </select>
+        )}
+        <button onClick={createUser} className="w-full bg-orange-600 text-white rounded-lg py-2 text-sm font-medium">إنشاء المستخدم</button>
+      </Card>
+
+      <Card className="space-y-3">
+        <h2 className="font-semibold">٢. ازاي تجيب توكن بوت تليجرام؟</h2>
+        <ol className="text-sm space-y-1.5 list-decimal list-inside text-neutral-600 dark:text-neutral-300">
+          <li>افتح تليجرام وابحث عن <b>@BotFather</b></li>
+          <li>ابعتله الأمر <code className="bg-neutral-100 dark:bg-neutral-800 px-1 rounded">/newbot</code></li>
+          <li>اكتب اسم للبوت (مثال: FlowCash Karim)</li>
+          <li>اكتب username ينتهي بـ <code>bot</code> (مثال: karim_flowcash_bot)</li>
+          <li>هيبعتلك BotFather توكن شكله كده: <code className="bg-neutral-100 dark:bg-neutral-800 px-1 rounded">123456:ABC-DEF...</code> — انسخه</li>
+          <li>الصقه في خانة "توكن بوت تليجرام" تحت وادوس حفظ — هيتربط أوتوماتيك</li>
+          <li>افتح شات مع بوتك وابعتله <code>/start</code></li>
+        </ol>
+      </Card>
+
+      <Card className="space-y-3">
+        <h2 className="font-semibold">٣. مزامنة Google Sheets (مرآة اختيارية)</h2>
+        <p className="text-sm text-neutral-600 dark:text-neutral-300">
+          قاعدة البيانات الأساسية للتطبيق شغالة لحظيًا بدون Google Sheets. لو عايز نسخة قابلة للقراءة/التعديل في شيت،
+          محتاجين منك:
+        </p>
+        <ol className="text-sm space-y-1.5 list-decimal list-inside text-neutral-600 dark:text-neutral-300">
+          <li>افتح <b>console.cloud.google.com</b> واعمل مشروع جديد</li>
+          <li>من "APIs &amp; Services" فعّل <b>Google Sheets API</b> و <b>Google Drive API</b></li>
+          <li>اعمل <b>Service Account</b> جديد، وحمّل مفتاحه (JSON key)</li>
+          <li>افتح Google Sheet بتاعك وشير الصلاحية (Editor) على إيميل الـ Service Account</li>
+          <li>ابعت لنا محتوى ملف الـ JSON ده وهنربطه بحسابك</li>
+        </ol>
+        <p className="text-xs text-neutral-400">هذه الخطوة اختيارية ومؤجلة للمرحلة القادمة من التطبيق.</p>
+      </Card>
+
+      <div className="space-y-3">
+        <h2 className="font-semibold">٤. المستخدمون الحاليون</h2>
+        {users.map((u) => (
+          <Card key={u.id} className="space-y-2">
+            <p className="font-medium text-sm">{u.name} {u.is_family && <span className="text-xs text-neutral-400">(عائلة)</span>}</p>
+            <div className="text-xs text-neutral-400">
+              معرّف المستخدم (للاستخدام الداخلي): <code>{u.id}</code>
+            </div>
+            <input
+              placeholder="توكن بوت تليجرام"
+              defaultValue={""}
+              onChange={(e) => setEditing({ ...editing, [u.id]: { ...editing[u.id], telegram_bot_token: e.target.value } })}
+              className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm"
+            />
+            <div className="text-xs text-neutral-400">
+              حالة البوت: {u.telegram_chat_id ? "متصل ✅" : "لسه مش متصل"}
+            </div>
+            <input
+              placeholder="Google Sheet ID (اختياري، لاحقًا)"
+              defaultValue={u.google_sheet_id || ""}
+              onChange={(e) => setEditing({ ...editing, [u.id]: { ...editing[u.id], google_sheet_id: e.target.value } })}
+              className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm"
+            />
+            <button onClick={() => saveUserSettings(u.id)} className="w-full bg-neutral-800 dark:bg-neutral-700 text-white rounded-lg py-2 text-xs">
+              حفظ إعدادات {u.name}
+            </button>
+          </Card>
+        ))}
+      </div>
+      <Footer />
+    </div>
+  );
+}
