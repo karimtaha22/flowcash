@@ -17,7 +17,8 @@ export async function GET(req: NextRequest) {
   const now = new Date();
   const monthKey = now.toISOString().slice(0, 7);
   const dayOfMonth = now.getDate();
-  const tomorrow = dayOfMonth + 1;
+  const in1Day = dayOfMonth + 1;
+  const in2Days = dayOfMonth + 2;
 
   const { data: all, error } = await supabaseAdmin
     .from("recurring_items")
@@ -32,16 +33,18 @@ export async function GET(req: NextRequest) {
     (i) => i.last_confirmed_month !== monthKey && i.last_reminded_month !== monthKey
   );
 
-  // day-before heads-up (informational only, no button, doesn't block the due-day ask)
-  const dayBefore = notDoneThisMonth.filter((i) => i.day_of_month === tomorrow);
+  // heads-up reminders 2 days and 1 day before the due date (informational only, no
+  // button, don't stamp last_reminded_month so they never block the due-day ask below)
+  const twoDaysBefore = notDoneThisMonth.filter((i) => i.day_of_month === in2Days);
+  const oneDayBefore = notDoneThisMonth.filter((i) => i.day_of_month === in1Day);
   // due day (or later, catching up if a previous run was missed) — the real "did you pay?" ask
-  const dueToday = notDoneThisMonth.filter((i) => i.day_of_month <= dayOfMonth && i.day_of_month !== tomorrow);
+  const dueToday = notDoneThisMonth.filter((i) => i.day_of_month <= dayOfMonth && i.day_of_month !== in1Day && i.day_of_month !== in2Days);
 
   let sent = 0;
-  for (const item of dayBefore) {
-    const user = (item as any).app_users as { telegram_bot_token: string | null; telegram_chat_id: string | null } | null;
-    if (!user?.telegram_bot_token || !user?.telegram_chat_id) continue;
-    const verb = item.kind === "income" ? "هتستلم مرتبك بكرة" : "عليك دفعة بكرة";
+  const sendHeadsUp = async (item: any, label: string) => {
+    const user = item.app_users as { telegram_bot_token: string | null; telegram_chat_id: string | null } | null;
+    if (!user?.telegram_bot_token || !user?.telegram_chat_id) return;
+    const verb = item.kind === "income" ? `هتستلم مرتبك ${label}` : `عليك دفعة ${label}`;
     try {
       await tgCall(user.telegram_bot_token, "sendMessage", {
         chat_id: user.telegram_chat_id,
@@ -51,7 +54,9 @@ export async function GET(req: NextRequest) {
     } catch {
       // best-effort; keep going for other users/items
     }
-  }
+  };
+  for (const item of twoDaysBefore) await sendHeadsUp(item, "بعد يومين");
+  for (const item of oneDayBefore) await sendHeadsUp(item, "بكرة");
 
   for (const item of dueToday) {
     const user = (item as any).app_users as { telegram_bot_token: string | null; telegram_chat_id: string | null } | null;
@@ -71,5 +76,5 @@ export async function GET(req: NextRequest) {
     await supabaseAdmin.from("recurring_items").update({ last_reminded_month: monthKey }).eq("id", item.id);
   }
 
-  return NextResponse.json({ ok: true, dayBefore: dayBefore.length, dueToday: dueToday.length, sent });
+  return NextResponse.json({ ok: true, twoDaysBefore: twoDaysBefore.length, oneDayBefore: oneDayBefore.length, dueToday: dueToday.length, sent });
 }

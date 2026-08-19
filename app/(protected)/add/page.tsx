@@ -71,6 +71,7 @@ function AddForm() {
   // manual override changes. Anyone not manually edited splits the remaining pool evenly;
   // "نصيبك" (your own share) is whatever's left after everyone else's row.
   useEffect(() => {
+    if (!groupSplit) return;
     const count = Math.max(2, parseInt(splitCount) || 2);
     const othersCount = count - 1;
     setSplitPeople((prev) => {

@@ -44,7 +44,13 @@ export default function PlanningPage() {
     setTimeout(() => setMsg(""), isError ? 4500 : 2500);
   };
 
-  const [rForm, setRForm] = useState({ kind: "expense", name: "", amount: "", currency: "EGP", account_id: "", category_id: "", day_of_month: "1" });
+  const todayISO = () => new Date().toISOString().slice(0, 10);
+  const dayToDateISO = (day: number) => {
+    const now = new Date();
+    const d = new Date(now.getFullYear(), now.getMonth(), day || 1);
+    return d.toISOString().slice(0, 10);
+  };
+  const [rForm, setRForm] = useState({ kind: "expense", name: "", amount: "", currency: "EGP", account_id: "", category_id: "", due_date: todayISO() });
   const [bForm, setBForm] = useState({ category_id: "", monthly_limit: "", currency: "EGP" });
   const [gForm, setGForm] = useState({ name: "", target_amount: "", currency: "EGP", target_date: "" });
   const [contributeFor, setContributeFor] = useState<Goal | null>(null);
@@ -86,11 +92,11 @@ export default function PlanningPage() {
       const res = await fetch("/api/recurring", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...rForm, amount: parseFloat(rForm.amount), day_of_month: parseInt(rForm.day_of_month) || 1, category_id: rForm.category_id || null }),
+        body: JSON.stringify({ ...rForm, amount: parseFloat(rForm.amount), day_of_month: new Date(rForm.due_date).getDate() || 1, category_id: rForm.category_id || null }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { showMsg(data.error || "حصل خطأ ومتحفظش، حاول تاني", true); return; }
-      setRForm({ kind: "expense", name: "", amount: "", currency: "EGP", account_id: "", category_id: "", day_of_month: "1" });
+      setRForm({ kind: "expense", name: "", amount: "", currency: "EGP", account_id: "", category_id: "", due_date: todayISO() });
       setShowForm(false);
       loadAll();
     } catch {
@@ -114,7 +120,7 @@ export default function PlanningPage() {
 
   const startEditR = (r: RecurringItem) => {
     setEditingR(editingR === r.id ? null : r.id);
-    setRDraft({ name: r.name, amount: String(r.amount), currency: r.currency, account_id: r.account_id, category_id: r.category_id || "", day_of_month: String(r.day_of_month), is_active: r.is_active });
+    setRDraft({ name: r.name, amount: String(r.amount), currency: r.currency, account_id: r.account_id, category_id: r.category_id || "", due_date: dayToDateISO(r.day_of_month), is_active: r.is_active });
   };
 
   const saveEditR = async (id: string) => {
@@ -122,7 +128,7 @@ export default function PlanningPage() {
       const res = await fetch(`/api/recurring/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...rDraft, amount: parseFloat(rDraft.amount) || 0, day_of_month: parseInt(rDraft.day_of_month) || 1, category_id: rDraft.category_id || null }),
+        body: JSON.stringify({ ...rDraft, amount: parseFloat(rDraft.amount) || 0, day_of_month: new Date(rDraft.due_date).getDate() || 1, category_id: rDraft.category_id || null }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { showMsg(data.error || "حصل خطأ ومتحفظش التعديل، حاول تاني", true); return; }
@@ -316,7 +322,7 @@ export default function PlanningPage() {
                   <option value="expense">مصروف ثابت</option>
                   <option value="income">دخل ثابت</option>
                 </select>
-                <input type="number" min="1" max="31" placeholder="يوم الشهر (تاريخ الاستحقاق)" value={rForm.day_of_month} onChange={(e) => setRForm({ ...rForm, day_of_month: e.target.value })} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+                <input type="date" value={rForm.due_date} onChange={(e) => setRForm({ ...rForm, due_date: e.target.value })} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
               </div>
               <input placeholder="الاسم (مثال: إيجار الشقة)" value={rForm.name} onChange={(e) => setRForm({ ...rForm, name: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
               <div className="grid grid-cols-2 gap-2">
@@ -356,7 +362,7 @@ export default function PlanningPage() {
                     <input value={rDraft.name || ""} onChange={(e) => setRDraft({ ...rDraft, name: e.target.value })} placeholder="الاسم" className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
                     <div className="grid grid-cols-2 gap-2">
                       <input type="number" value={rDraft.amount || ""} onChange={(e) => setRDraft({ ...rDraft, amount: e.target.value })} placeholder="المبلغ" className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
-                      <input type="number" min="1" max="31" value={rDraft.day_of_month || ""} onChange={(e) => setRDraft({ ...rDraft, day_of_month: e.target.value })} placeholder="يوم الشهر" className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+                      <input type="date" value={rDraft.due_date || ""} onChange={(e) => setRDraft({ ...rDraft, due_date: e.target.value })} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
                     </div>
                     <select value={rDraft.account_id || ""} onChange={(e) => setRDraft({ ...rDraft, account_id: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm">
                       {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
