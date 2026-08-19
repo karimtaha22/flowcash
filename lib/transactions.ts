@@ -1,4 +1,8 @@
 import { supabaseAdmin } from "./supabaseAdmin";
+import { logEvent } from "./auditLog";
+
+const TX_SELECT =
+  "*, accounts!transactions_account_id_fkey(name,currency), to_accounts:accounts!transactions_to_account_id_fkey(name,currency), categories(name,icon), debts(id,title,people(name))";
 
 export type TxType = "expense" | "withdrawal" | "income" | "transfer" | "balance_update";
 
@@ -119,7 +123,69 @@ export async function createTransaction(input: CreateTxInput) {
     .single();
 
   if (error) throw new Error(error.message);
+
+  await logEvent({
+    user_id: input.user_id,
+    source: input.source === "bot" ? "bot" : "app",
+    action: "transaction_created",
+    payload: { id: tx.id, type: tx.type, amount: tx.amount, currency: tx.currency, account_id: tx.account_id, to_account_id: tx.to_account_id, description: tx.description },
+  });
+
   return tx;
+}
+
+export interface UpdateTxInput {
+  amount?: number;
+  description?: string | null;
+  category_id?: string | null;
+  counterparty_name?: string | null;
+  receipt_url?: string | null;
+  occurred_at?: string;
+}
+
+// Editing is deliberately conservative: account/type/to_account can't be
+// changed here (too easy to corrupt balances), but amount can — and when it
+// does, the account balance is nudged by the delta so it stays correct.
+export async function updateTransaction(id: string, userId: string, updates: UpdateTxInput) {
+  const { data: tx } = await supabaseAdmin.from("transactions").select("*").eq("id", id).eq("user_id", userId).single();
+  if (!tx) throw new Error("الحركة غير موجودة");
+
+  const patch: Record<string, unknown> = {};
+  if (updates.description !== undefined) patch.description = updates.description;
+  if (updates.category_id !== undefined) patch.category_id = updates.category_id;
+  if (updates.counterparty_name !== undefined) patch.counterparty_name = updates.counterparty_name;
+  if (updates.receipt_url !== undefined) patch.receipt_url = updates.receipt_url;
+  if (updates.occurred_at !== undefined) patch.occurred_at = updates.occurred_at;
+
+  if (updates.amount !== undefined && Number.isFinite(updates.amount) && Number(updates.amount) !== Number(tx.amount)) {
+    const newAmount = Number(updates.amount);
+    const oldAmount = Number(tx.amount);
+    if (tx.type === "expense" || tx.type === "withdrawal") {
+      if (tx.account_id) await adjustBalance(tx.account_id, Math.abs(oldAmount) - Math.abs(newAmount));
+    } else if (tx.type === "income") {
+      if (tx.account_id) await adjustBalance(tx.account_id, Math.abs(newAmount) - Math.abs(oldAmount));
+    } else {
+      throw new Error("مبلغ هذا النوع من الحركات (تحويل / تحديث رصيد) مايتغيرش من هنا");
+    }
+    patch.amount = newAmount;
+  }
+
+  if (Object.keys(patch).length === 0) {
+    const { data: unchanged } = await supabaseAdmin.from("transactions").select(TX_SELECT).eq("id", id).single();
+    return unchanged;
+  }
+
+  const { data: updated, error } = await supabaseAdmin
+    .from("transactions")
+    .update(patch)
+    .eq("id", id)
+    .select(TX_SELECT)
+    .single();
+  if (error) throw new Error(error.message);
+
+  await logEvent({ user_id: userId, source: "app", action: "transaction_updated", payload: { id, patch } });
+
+  return updated;
 }
 
 export async function deleteTransactionAndReverse(id: string, userId: string) {
@@ -141,4 +207,11 @@ export async function deleteTransactionAndReverse(id: string, userId: string) {
   }
 
   await supabaseAdmin.from("transactions").delete().eq("id", id);
+
+  await logEvent({
+    user_id: userId,
+    source: "app",
+    action: "transaction_deleted",
+    payload: { id, type: tx.type, amount: tx.amount, currency: tx.currency, account_id: tx.account_id, description: tx.description, source_of_tx: tx.source },
+  });
 }

@@ -77,7 +77,7 @@ export default function SearchPage() {
           {results.transactions.map((t) => (
             <button
               key={t.id}
-              onClick={() => router.push(t.debt_id ? `/people?debt=${t.debt_id}` : `/accounts?account=${t.account_id}`)}
+              onClick={() => router.push(`/transaction/${t.id}`)}
               className="w-full text-right"
             >
               <Card className="flex items-center justify-between py-2.5">

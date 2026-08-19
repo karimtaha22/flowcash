@@ -15,6 +15,27 @@ interface AdminUser {
   parent_user_id: string | null;
 }
 
+interface LogEntry {
+  id: string;
+  user_id: string | null;
+  source: string;
+  action: string;
+  payload: Record<string, any> | null;
+  status: string;
+  created_at: string;
+  app_users?: { name: string } | null;
+}
+
+const SOURCE_LABEL: Record<string, string> = { app: "التطبيق", bot: "تليجرام", sheet: "شيت", voice: "صوت", ocr: "إيصال", admin: "الإعداد", system: "النظام" };
+const ACTION_LABEL: Record<string, string> = {
+  transaction_created: "إضافة حركة",
+  transaction_updated: "تعديل حركة",
+  transaction_deleted: "حذف حركة",
+  account_created: "إضافة حساب",
+  account_updated: "تعديل حساب",
+  account_archived: "أرشفة حساب",
+};
+
 export default function AdminPage() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [newUser, setNewUser] = useState({ name: "", pin: "", is_family: false, parent_user_id: "" });
@@ -24,6 +45,11 @@ export default function AdminPage() {
   const [botBusy, setBotBusy] = useState<Record<string, boolean>>({});
   const [locked, setLocked] = useState(false);
   const [checkedAccess, setCheckedAccess] = useState(false);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logsOpen, setLogsOpen] = useState(false);
+  const [logUserFilter, setLogUserFilter] = useState("");
+  const [logsExhausted, setLogsExhausted] = useState(false);
 
   // /admin used to be reachable by anyone with no login at all — now the API
   // requires a session once a user already exists. Surface that clearly
@@ -75,6 +101,29 @@ export default function AdminPage() {
     } finally {
       setBotBusy((b) => ({ ...b, [id]: false }));
     }
+  };
+
+  const loadLogs = async (older = false) => {
+    setLogsLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: "50" });
+      if (logUserFilter) params.set("user_id", logUserFilter);
+      if (older && logs.length) params.set("before", logs[logs.length - 1].created_at);
+      const res = await fetch(`/api/admin/logs?${params}`);
+      const data = await res.json();
+      if (!res.ok) { setMsg(data.error || "حصل خطأ في تحميل اللوج"); return; }
+      const batch: LogEntry[] = data.logs || [];
+      setLogs((prev) => (older ? [...prev, ...batch] : batch));
+      setLogsExhausted(batch.length < 50);
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  const openLogs = () => {
+    const next = !logsOpen;
+    setLogsOpen(next);
+    if (next) loadLogs(false);
   };
 
   const createUser = async () => {
@@ -228,6 +277,54 @@ export default function AdminPage() {
           </Card>
         ))}
       </div>
+
+      <Card className="space-y-3">
+        <button onClick={openLogs} className="w-full flex items-center justify-between text-sm font-semibold">
+          <span>٥. لوج النظام (سجل كل ما حصل)</span>
+          <span className="text-xs text-neutral-400">{logsOpen ? "إخفاء" : "عرض"}</span>
+        </button>
+        {logsOpen && (
+          <div className="space-y-2">
+            <p className="text-xs text-neutral-500">
+              كل عملية إضافة/تعديل/حذف حركة أو حساب — من التطبيق أو من تليجرام — بتتسجل هنا. لو أي حساب اتلخبط، رجّع الصفحات دي عشان تلاقي إمتى وإزاي.
+            </p>
+            <select
+              value={logUserFilter}
+              onChange={(e) => { setLogUserFilter(e.target.value); setLogs([]); setLogsExhausted(false); }}
+              className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm"
+            >
+              <option value="">كل المستخدمين</option>
+              {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+            </select>
+            <button onClick={() => loadLogs(false)} disabled={logsLoading} className="w-full border border-neutral-300 dark:border-neutral-700 rounded-lg py-1.5 text-xs disabled:opacity-50">
+              {logsLoading ? "جاري التحميل..." : "تحديث"}
+            </button>
+            {logs.length === 0 && !logsLoading && <p className="text-center text-xs text-neutral-400 py-4">لسه مفيش حاجة مسجلة.</p>}
+            <div className="space-y-1.5 max-h-96 overflow-y-auto">
+              {logs.map((l) => (
+                <div key={l.id} className={`text-xs rounded-lg p-2 border ${l.status === "error" ? "border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950" : "border-neutral-200 dark:border-neutral-800"}`}>
+                  <div className="flex justify-between items-center">
+                    <span className="font-medium">{ACTION_LABEL[l.action] || l.action}</span>
+                    <span className="text-neutral-400">{new Date(l.created_at).toLocaleString("ar-EG")}</span>
+                  </div>
+                  <div className="text-neutral-400 mt-0.5">
+                    {l.app_users?.name || "—"} · {SOURCE_LABEL[l.source] || l.source}
+                  </div>
+                  {l.payload && (
+                    <pre className="mt-1 whitespace-pre-wrap break-all text-[10px] text-neutral-500">{JSON.stringify(l.payload)}</pre>
+                  )}
+                </div>
+              ))}
+            </div>
+            {logs.length > 0 && !logsExhausted && (
+              <button onClick={() => loadLogs(true)} disabled={logsLoading} className="w-full border border-neutral-300 dark:border-neutral-700 rounded-lg py-1.5 text-xs disabled:opacity-50">
+                {logsLoading ? "جاري التحميل..." : "حمّل الأقدم"}
+              </button>
+            )}
+          </div>
+        )}
+      </Card>
+
       <Footer />
     </div>
   );

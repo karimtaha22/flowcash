@@ -1,11 +1,13 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import Card from "@/components/Card";
 import { fmt } from "@/lib/format";
 import { startOfMonth, endOfMonth, eachDayOfInterval, format, getDay, addMonths, subMonths } from "date-fns";
 import { ChevronRight, ChevronLeft } from "lucide-react";
 
 export default function CalendarPage() {
+  const router = useRouter();
   const [month, setMonth] = useState(new Date());
   const [txs, setTxs] = useState<any[]>([]);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
@@ -68,10 +70,14 @@ export default function CalendarPage() {
           <div className="bg-white dark:bg-neutral-900 rounded-t-2xl sm:rounded-2xl w-full max-w-sm p-4 space-y-2 max-h-[70vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <p className="font-semibold text-sm">{selectedDay} — {fmt(byDay[selectedDay].total)}</p>
             {byDay[selectedDay].items.map((t) => (
-              <div key={t.id} className="flex justify-between text-xs border-b border-neutral-100 dark:border-neutral-800 py-1.5">
+              <button
+                key={t.id}
+                onClick={() => router.push(`/transaction/${t.id}`)}
+                className="w-full flex justify-between text-xs border-b border-neutral-100 dark:border-neutral-800 py-1.5 text-right"
+              >
                 <span>{t.categories?.icon} {t.description || t.type}</span>
                 <span className="font-medium">{fmt(Math.abs(Number(t.amount)), t.currency)}</span>
-              </div>
+              </button>
             ))}
           </div>
         </div>

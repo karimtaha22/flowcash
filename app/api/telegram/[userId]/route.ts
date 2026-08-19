@@ -54,6 +54,16 @@ async function reply(botToken: string, chatId: string, text: string, keyboard: a
   return tgCall(botToken, "sendMessage", { chat_id: chatId, text: text + BRAND_FOOTER, reply_markup: keyboard });
 }
 
+// Telegram can't show a persistent reply keyboard (like CANCEL_KEYBOARD) and
+// an inline keyboard on the same message — so every step that prompts with
+// an inline keyboard (account pickers, etc.) sends a tiny companion message
+// carrying the ❌ إنهاء button first, then the actual inline-keyboard prompt.
+// This is what makes "إنهاء" reachable at ANY step, not just typed-input ones.
+async function replyInlineWithCancel(botToken: string, chatId: string, text: string, inlineKeyboard: any) {
+  await reply(botToken, chatId, "اضغط ❌ إنهاء في أي وقت لو غيّرت رأيك.", CANCEL_KEYBOARD);
+  return tgCall(botToken, "sendMessage", { chat_id: chatId, text, reply_markup: inlineKeyboard });
+}
+
 async function handleMessage(userId: string, botToken: string, msg: any) {
   const chatId = String(msg.chat.id);
   const text: string | undefined = msg.text;
@@ -169,8 +179,7 @@ async function startFlow(userId: string, botToken: string, chatId: string, flow:
     const accounts = await getAccounts(userId);
     if (!accounts.length) return reply(botToken, chatId, "لسه معملتش أي حساب. ضيفه من التطبيق الأول.");
     await setSession(userId, chatId, "account_statement", "await_account", {});
-    await reply(botToken, chatId, "اضغط ❌ إنهاء في أي وقت لو غيّرت رأيك.", CANCEL_KEYBOARD);
-    return tgCall(botToken, "sendMessage", { chat_id: chatId, text: "كشف حساب مين؟", reply_markup: accountsKeyboard(accounts, "acct") });
+    return replyInlineWithCancel(botToken, chatId, "كشف حساب مين؟", accountsKeyboard(accounts, "acct"));
   }
   if (flow === "balance_update") {
     const accounts = await getAccounts(userId);
@@ -276,7 +285,7 @@ async function continueFlow(userId: string, botToken: string, chatId: string, se
       const accounts = await getAccounts(userId);
       if (!accounts.length) return reply(botToken, chatId, "لسه معملتش أي حساب. ضيفه من التطبيق.");
       await setSession(userId, chatId, flow, "await_account", payload);
-      return reply(botToken, chatId, "من انهي حساب؟", accountsKeyboard(accounts, "acc"));
+      return replyInlineWithCancel(botToken, chatId, "من انهي حساب؟", accountsKeyboard(accounts, "acc"));
     }
 
     if (step === "await_description") {
@@ -287,7 +296,7 @@ async function continueFlow(userId: string, botToken: string, chatId: string, se
       const accounts = await getAccounts(userId);
       if (!accounts.length) return reply(botToken, chatId, "لسه معملتش أي حساب. ضيفه من التطبيق.");
       await setSession(userId, chatId, flow, "await_account", payload);
-      return reply(botToken, chatId, "من انهي حساب؟", accountsKeyboard(accounts, "acc"));
+      return replyInlineWithCancel(botToken, chatId, "من انهي حساب؟", accountsKeyboard(accounts, "acc"));
     }
 
     if (step === "await_source") {
@@ -295,7 +304,7 @@ async function continueFlow(userId: string, botToken: string, chatId: string, se
       const accounts = await getAccounts(userId);
       if (!accounts.length) return reply(botToken, chatId, "لسه معملتش أي حساب. ضيفه من التطبيق.");
       await setSession(userId, chatId, flow, "await_account", payload);
-      return reply(botToken, chatId, "دخلت انهي حساب؟", accountsKeyboard(accounts, "acc"));
+      return replyInlineWithCancel(botToken, chatId, "دخلت انهي حساب؟", accountsKeyboard(accounts, "acc"));
     }
 
     if (step === "await_account" && cbPrefix === "acc") {
@@ -303,7 +312,7 @@ async function continueFlow(userId: string, botToken: string, chatId: string, se
       if (flow === "transfer") {
         const accounts = (await getAccounts(userId)).filter((a) => a.id !== input);
         await setSession(userId, chatId, flow, "await_to_account", payload);
-        return reply(botToken, chatId, "تحويل لانهي حساب؟", accountsKeyboard(accounts, "to"));
+        return replyInlineWithCancel(botToken, chatId, "تحويل لانهي حساب؟", accountsKeyboard(accounts, "to"));
       }
       return finalizeSimpleTx(userId, botToken, chatId, flow, payload);
     }

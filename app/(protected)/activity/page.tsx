@@ -16,6 +16,7 @@ interface Tx {
   account_id: string | null;
   to_account_id: string | null;
   debt_id: string | null;
+  source?: string | null;
   accounts?: { name: string; currency: string };
   to_accounts?: { name: string; currency: string };
   categories?: { name: string; icon: string };
@@ -77,12 +78,10 @@ export default function ActivityPage() {
     });
   }, [txs, q]);
 
+  // clicking a transaction should show the transaction itself — view, edit,
+  // delete, receipt — not jump away to the accounts page.
   const goToSource = (t: Tx) => {
-    if (t.debt_id && t.debts?.id) {
-      router.push(`/people?debt=${t.debts.id}`);
-    } else if (t.account_id) {
-      router.push(`/accounts?account=${t.account_id}`);
-    }
+    router.push(`/transaction/${t.id}`);
   };
 
   const signAndColor = (t: Tx) => {
@@ -132,9 +131,12 @@ export default function ActivityPage() {
                   <Icon size={16} />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">
+                  <p className="text-sm font-medium truncate flex items-center gap-1.5">
                     {t.categories?.icon ? `${t.categories.icon} ` : ""}
                     {t.description || t.categories?.name || TYPE_LABEL[t.type]}
+                    {t.source === "bot" && (
+                      <span className="shrink-0 text-[10px] bg-sky-50 dark:bg-sky-950 text-sky-600 dark:text-sky-400 rounded-full px-1.5 py-0.5">تليجرام</span>
+                    )}
                   </p>
                   <p className="text-[11px] text-neutral-400 truncate">
                     {t.accounts?.name}

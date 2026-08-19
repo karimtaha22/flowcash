@@ -52,7 +52,9 @@ function AccountsInner() {
   const subsOf = (id: string) => accounts.filter((a) => a.parent_account_id === id);
 
   const submit = async () => {
-    if (!form.name) { showMsg("اسم الحساب لازم يتملى", true); return; }
+    // empty name is just a warning now — the save still goes through
+    // (server falls back to a placeholder name), per explicit request.
+    if (!form.name) showMsg("تنبيه: الاسم فاضي، هيتحفظ الحساب باسم مؤقت لحد ما تعدّله", true);
     setSaving(true);
     try {
       const res = await fetch("/api/accounts", {
@@ -64,6 +66,7 @@ function AccountsInner() {
       if (!res.ok) { showMsg(data.error || "حصل خطأ ومتحفظش الحساب، حاول تاني", true); return; }
       setShowForm(false);
       setForm(emptyForm);
+      if (form.name) showMsg("تم حفظ الحساب ✅");
       load();
     } catch {
       showMsg("مفيش اتصال بالإنترنت، حاول تاني", true);
@@ -73,7 +76,7 @@ function AccountsInner() {
   };
 
   const submitSub = async (parentId: string) => {
-    if (!subForm.name) { showMsg("اسم الحساب الفرعي لازم يتملى", true); return; }
+    if (!subForm.name) showMsg("تنبيه: الاسم فاضي، هيتحفظ الحساب الفرعي باسم مؤقت لحد ما تعدّله", true);
     setSaving(true);
     try {
       const res = await fetch("/api/accounts", {
@@ -85,6 +88,7 @@ function AccountsInner() {
       if (!res.ok) { showMsg(data.error || "حصل خطأ ومتحفظش الحساب الفرعي، حاول تاني", true); return; }
       setSubFormFor(null);
       setSubForm(emptyForm);
+      if (subForm.name) showMsg("تم حفظ الحساب الفرعي ✅");
       load();
     } catch {
       showMsg("مفيش اتصال بالإنترنت، حاول تاني", true);

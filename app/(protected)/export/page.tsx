@@ -4,7 +4,7 @@ import Card from "@/components/Card";
 import { fmt } from "@/lib/format";
 import { FileDown, FileSpreadsheet } from "lucide-react";
 
-interface Account { id: string; name: string; currency: string }
+interface Account { id: string; name: string; currency: string; parent_account_id?: string | null }
 interface Person { id: string; name: string }
 
 function downloadBlob(content: BlobPart, filename: string, type: string) {
@@ -132,7 +132,16 @@ export default function ExportPage() {
         {mode === "account" ? (
           <select value={accountId} onChange={(e) => setAccountId(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm">
             <option value="">اختار الحساب</option>
-            {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            {/* show every account (بما فيها الحسابات الفرعية والعملات غير الجنيه) —
+                subs are indented under their parent so they're clearly visible and selectable. */}
+            {accounts.filter((a) => !a.parent_account_id).map((a) => (
+              <optgroup key={a.id} label={`${a.name} (${a.currency})`}>
+                <option value={a.id}>{a.name} — {a.currency}</option>
+                {accounts.filter((s) => s.parent_account_id === a.id).map((s) => (
+                  <option key={s.id} value={s.id}>&nbsp;&nbsp;└ {s.name} — {s.currency}</option>
+                ))}
+              </optgroup>
+            ))}
           </select>
         ) : (
           <select value={personId} onChange={(e) => setPersonId(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm">
