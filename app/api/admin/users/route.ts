@@ -10,7 +10,9 @@ export async function GET() {
 
   const { data, error } = await supabaseAdmin
     .from("app_users")
-    .select("id,name,base_currency,telegram_bot_username,telegram_chat_id,google_sheet_id,is_family,parent_user_id,created_at")
+    .select(
+      "id,name,base_currency,telegram_bot_username,telegram_chat_id,google_sheet_id,is_family,parent_user_id,created_at,debt_reminder_hour,recurring_reminder_hour"
+    )
     .order("created_at", { ascending: true });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ users: data });

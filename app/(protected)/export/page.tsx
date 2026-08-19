@@ -31,6 +31,7 @@ export default function ExportPage() {
   const [loading, setLoading] = useState(false);
   const [baseCurrency, setBaseCurrency] = useState("EGP");
   const [rates, setRates] = useState<FxRates | null>(null);
+  const [hasSearched, setHasSearched] = useState(false);
 
   useEffect(() => {
     fetch("/api/accounts").then((r) => r.json()).then((d) => setAccounts(d.accounts || []));
@@ -54,6 +55,7 @@ export default function ExportPage() {
 
   const load = async () => {
     setLoading(true);
+    setHasSearched(true);
     if (mode === "account") {
       if (!accountId) { setLoading(false); return; }
       const acc = accounts.find((a) => a.id === accountId);
@@ -152,8 +154,8 @@ export default function ExportPage() {
       <h1 className="text-xl font-bold">تصدير كشف حساب</h1>
 
       <div className="grid grid-cols-2 gap-2 bg-neutral-100 dark:bg-neutral-800 rounded-xl p-1">
-        <button onClick={() => { setMode("account"); setRows([]); }} className={`py-2 rounded-lg text-sm font-medium ${mode === "account" ? "bg-white dark:bg-neutral-900 shadow" : ""}`}>كشف حساب بنكي</button>
-        <button onClick={() => { setMode("person"); setRows([]); }} className={`py-2 rounded-lg text-sm font-medium ${mode === "person" ? "bg-white dark:bg-neutral-900 shadow" : ""}`}>كشف حساب شخص</button>
+        <button onClick={() => { setMode("account"); setRows([]); setHasSearched(false); }} className={`py-2 rounded-lg text-sm font-medium ${mode === "account" ? "bg-white dark:bg-neutral-900 shadow" : ""}`}>كشف حساب بنكي</button>
+        <button onClick={() => { setMode("person"); setRows([]); setHasSearched(false); }} className={`py-2 rounded-lg text-sm font-medium ${mode === "person" ? "bg-white dark:bg-neutral-900 shadow" : ""}`}>كشف حساب شخص</button>
       </div>
 
       <Card className="space-y-2">
@@ -185,6 +187,12 @@ export default function ExportPage() {
           {loading ? "جاري التحميل..." : "عرض الكشف"}
         </button>
       </Card>
+
+      {hasSearched && !loading && rows.length === 0 && (
+        <Card className="text-center text-sm text-neutral-400">
+          لا يوجد معاملات في {mode === "account" ? "الحساب" : "سجل الشخص"} ده{from || to ? " خلال الفترة المحددة" : ""} — الكشف مش فاضي بسبب خطأ، ده معناه إنه فعلاً لسه مفيش حركات مسجلة عليه.
+        </Card>
+      )}
 
       {rows.length > 0 && (
         <>

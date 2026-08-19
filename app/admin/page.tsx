@@ -13,7 +13,12 @@ interface AdminUser {
   google_sheet_id: string | null;
   is_family: boolean;
   parent_user_id: string | null;
+  debt_reminder_hour: number | null;
+  recurring_reminder_hour: number | null;
 }
+
+const HOURS = Array.from({ length: 24 }, (_, h) => h);
+const hourLabel = (h: number) => `${h.toString().padStart(2, "0")}:00`;
 
 interface LogEntry {
   id: string;
@@ -206,8 +211,24 @@ export default function AdminPage() {
         <p className="text-xs text-neutral-400">هذه الخطوة اختيارية ومؤجلة للمرحلة القادمة من التطبيق.</p>
       </Card>
 
+      <Card className="space-y-3">
+        <h2 className="font-semibold">٤. تفعيل تذكيرات الساعة المختارة + الصدقة كل ٣ ساعات</h2>
+        <p className="text-sm text-neutral-600 dark:text-neutral-300">
+          خطة Vercel المجانية (Hobby) بتشغّل الـ Cron بتاعها مرة واحدة بس في اليوم — عشان تذكير الديون/الالتزامات يشتغل في
+          الساعة اللي تختارها لكل مستخدم تحت، وتذكير الصدقة يتكرر كل ٣ ساعات، لازم خدمة مجانية خارجية تنده على رابط واحد كل ساعة:
+        </p>
+        <ol className="text-sm space-y-1.5 list-decimal list-inside text-neutral-600 dark:text-neutral-300">
+          <li>افتح <b>cron-job.org</b> واعمل حساب مجاني</li>
+          <li>اعمل "Cronjob" جديد بالرابط: <code className="bg-neutral-100 dark:bg-neutral-800 px-1 rounded break-all">https://flowcash-ruddy.vercel.app/api/cron/tick</code></li>
+          <li>خلي التكرار "Every hour" (كل ساعة)</li>
+          <li>من "Advanced" ضيف Header باسم <code className="bg-neutral-100 dark:bg-neutral-800 px-1 rounded">Authorization</code> وقيمته <code className="bg-neutral-100 dark:bg-neutral-800 px-1 rounded">Bearer &lt;CRON_SECRET بتاعك&gt;</code> — هو نفس الـ CRON_SECRET المسجل في Vercel، مفيش سيكرت جديد مطلوب</li>
+          <li>احفظ — من دلوقتي هيوصلك تذكير الديون/الالتزامات في الساعة اللي اخترتها تحت، وتذكير الصدقة كل ٣ ساعات</li>
+        </ol>
+        <p className="text-xs text-neutral-400">الـ Cron اليومي القديم في vercel.json فاضل شغال كـ احتياطي — لو الخدمة الخارجية وقفت لأي سبب، برضو هتوصلك تذكيرات (مرة واحدة باليوم بدل بالساعة).</p>
+      </Card>
+
       <div className="space-y-3">
-        <h2 className="font-semibold">٤. المستخدمون الحاليون</h2>
+        <h2 className="font-semibold">٥. المستخدمون الحاليون</h2>
         {users.map((u) => (
           <Card key={u.id} className="space-y-2">
             <p className="font-medium text-sm">{u.name} {u.is_family && <span className="text-xs text-neutral-400">(عائلة)</span>}</p>
@@ -271,6 +292,33 @@ export default function AdminPage() {
               onChange={(e) => setEditing({ ...editing, [u.id]: { ...editing[u.id], google_sheet_id: e.target.value } })}
               className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm"
             />
+
+            <div className="border-t border-neutral-100 dark:border-neutral-800 pt-2 space-y-2">
+              <p className="text-xs font-medium text-neutral-500">وقت تذكيرات تليجرام (بتوقيت القاهرة) — بتتفعّل بالساعة لو ربطت الـ tick الخارجي (شوف تعليمات cron-job.org)</p>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] text-neutral-400">تذكير الديون المتأخرة</label>
+                  <select
+                    defaultValue={u.debt_reminder_hour ?? 8}
+                    onChange={(e) => setEditing({ ...editing, [u.id]: { ...editing[u.id], debt_reminder_hour: parseInt(e.target.value) } })}
+                    className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm"
+                  >
+                    {HOURS.map((h) => <option key={h} value={h}>{hourLabel(h)}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] text-neutral-400">تذكير الالتزامات الشهرية</label>
+                  <select
+                    defaultValue={u.recurring_reminder_hour ?? 8}
+                    onChange={(e) => setEditing({ ...editing, [u.id]: { ...editing[u.id], recurring_reminder_hour: parseInt(e.target.value) } })}
+                    className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm"
+                  >
+                    {HOURS.map((h) => <option key={h} value={h}>{hourLabel(h)}</option>)}
+                  </select>
+                </div>
+              </div>
+            </div>
+
             <button onClick={() => saveUserSettings(u.id)} className="w-full bg-neutral-800 dark:bg-neutral-700 text-white rounded-lg py-2 text-xs">
               حفظ إعدادات {u.name}
             </button>
@@ -280,7 +328,7 @@ export default function AdminPage() {
 
       <Card className="space-y-3">
         <button onClick={openLogs} className="w-full flex items-center justify-between text-sm font-semibold">
-          <span>٥. لوج النظام (سجل كل ما حصل)</span>
+          <span>٦. لوج النظام (سجل كل ما حصل)</span>
           <span className="text-xs text-neutral-400">{logsOpen ? "إخفاء" : "عرض"}</span>
         </button>
         {logsOpen && (

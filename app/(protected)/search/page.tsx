@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Card from "@/components/Card";
+import TransactionRow from "@/components/TransactionRow";
 import { fmt } from "@/lib/format";
 import { Search as SearchIcon, User, Receipt, HandCoins } from "lucide-react";
 
@@ -11,16 +12,20 @@ export default function SearchPage() {
   const [results, setResults] = useState<{ transactions: any[]; debts: any[]; people: any[] } | null>(null);
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
+  const runSearch = () => {
     if (!q.trim()) { setResults(null); return; }
     setLoading(true);
-    const t = setTimeout(() => {
-      fetch(`/api/search?q=${encodeURIComponent(q)}`)
-        .then((r) => r.json())
-        .then(setResults)
-        .finally(() => setLoading(false));
-    }, 350);
+    fetch(`/api/search?q=${encodeURIComponent(q)}`)
+      .then((r) => r.json())
+      .then(setResults)
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    if (!q.trim()) { setResults(null); return; }
+    const t = setTimeout(runSearch, 350);
     return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);
 
   const empty = results && !results.transactions.length && !results.debts.length && !results.people.length;
@@ -75,19 +80,7 @@ export default function SearchPage() {
         <div className="space-y-2">
           <p className="text-xs font-semibold text-neutral-500 flex items-center gap-1"><Receipt size={13} /> حركات</p>
           {results.transactions.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => router.push(`/transaction/${t.id}`)}
-              className="w-full text-right"
-            >
-              <Card className="flex items-center justify-between py-2.5">
-                <div>
-                  <p className="text-sm font-medium">{t.categories?.icon} {t.description || t.counterparty_name || t.type}</p>
-                  <p className="text-[11px] text-neutral-400">{t.accounts?.name} · {new Date(t.occurred_at).toLocaleDateString("ar-EG")}</p>
-                </div>
-                <p className="font-semibold text-sm">{fmt(Math.abs(Number(t.amount)), t.currency)}</p>
-              </Card>
-            </button>
+            <TransactionRow key={t.id} tx={t} onChanged={runSearch} />
           ))}
         </div>
       )}

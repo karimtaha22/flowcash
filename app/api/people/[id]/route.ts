@@ -7,9 +7,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
   const body = await req.json();
-  const allowed = ["name", "phone", "notes"];
+  const allowed = ["name", "phone", "notes", "phones", "payment_accounts"];
   const update: Record<string, any> = {};
   for (const k of allowed) if (k in body) update[k] = body[k];
+  if (Array.isArray(update.phones)) {
+    update.phones = update.phones.filter(Boolean);
+    update.phone = update.phones[0] || null; // keep legacy single column in sync
+  }
+  if (Array.isArray(update.payment_accounts)) {
+    update.payment_accounts = update.payment_accounts.filter((a: any) => a && a.account_number);
+  }
   const { data, error } = await supabaseAdmin
     .from("people")
     .update(update)

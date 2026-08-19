@@ -2,6 +2,7 @@
 import { useEffect, useState, useRef, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Card from "@/components/Card";
+import TransactionRow, { type Tx as TxRow } from "@/components/TransactionRow";
 import { fmt } from "@/lib/format";
 import { toEGP, fromEGP, type FxRates } from "@/lib/fx";
 import { shrinkImage } from "@/lib/image";
@@ -18,19 +19,26 @@ const TYPES = [
 const CURRENCIES = ["EGP", "USD", "SAR"];
 
 interface Account { id: string; name: string; currency: string; balance: number }
-interface Tx { id: string; type: string; amount: number; currency: string; description: string | null; occurred_at: string; counterparty_name: string | null; accounts?: { name: string } }
 
 function AddForm() {
   const params = useSearchParams();
   const router = useRouter();
   const [type, setType] = useState(params.get("type") || "expense");
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [history, setHistory] = useState<Tx[]>([]);
-  const [amount, setAmount] = useState("");
-  const [description, setDescription] = useState("");
+  const [history, setHistory] = useState<TxRow[]>([]);
+  // a caller (e.g. the "أخرج زكاتك الآن" button in الزكاة) can deep-link
+  // here with a suggested amount/description already filled in.
+  const [amount, setAmount] = useState(params.get("amount") || "");
+  const [description, setDescription] = useState(params.get("description") || "");
   const [accountId, setAccountId] = useState("");
   const [toAccountId, setToAccountId] = useState("");
   const [counterparty, setCounterparty] = useState("");
+  // "تحويل داخلي" moves money between two of the user's own accounts;
+  // "تحويل خارجي" sends it out to someone who isn't a tracked account — an
+  // explicit toggle instead of the old implicit "leave to-account empty".
+  const [transferKind, setTransferKind] = useState<"internal" | "external">("internal");
+  const [transferReceiptDataUrl, setTransferReceiptDataUrl] = useState<string | null>(null);
+  const transferFileInputRef = useRef<HTMLInputElement>(null);
   const [currency, setCurrency] = useState("");
   const [splitDebt, setSplitDebt] = useState(false);
   const [splitAmount, setSplitAmount] = useState("");
@@ -148,6 +156,7 @@ function AddForm() {
     setAmount(""); setDescription(""); setAccountId(""); setToAccountId(""); setCounterparty(""); setSplitDebt(false); setSplitAmount("");
     setReceiptDataUrl(null); setOcrMsg(""); setCategoryId(""); setOccurredDate(todayISO());
     setGroupSplit(false); setSplitCount("2"); setSplitPeople([{ name: "", phone: "", amount: "", edited: false }]);
+    setTransferKind("internal"); setTransferReceiptDataUrl(null);
   };
 
   const submitSimple = async () => {
@@ -159,7 +168,8 @@ function AddForm() {
     if (occurredDate && occurredDate !== todayISO()) {
       body.occurred_at = new Date(`${occurredDate}T12:00:00`).toISOString();
     }
-    if (type === "transfer") body.to_account_id = toAccountId || undefined;
+    if (type === "transfer") body.to_account_id = transferKind === "internal" ? toAccountId || undefined : undefined;
+    if (type === "transfer" && transferReceiptDataUrl) body.receipt_url = transferReceiptDataUrl;
     if ((type === "expense" || type === "income") && categoryId) body.category_id = categoryId;
     if (type === "expense" && splitDebt && splitAmount && !groupSplit) {
       body.split_debt_amount = parseFloat(splitAmount);
@@ -293,6 +303,30 @@ function AddForm() {
           <img src={receiptDataUrl} alt="الإيصال" className="w-full max-h-32 object-contain rounded-lg border border-neutral-200 dark:border-neutral-800" />
         )}
 
+        {type === "transfer" && (
+          <div className="space-y-2">
+            <input
+              ref={transferFileInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={async (e) => { const f = e.target.files?.[0]; if (f) setTransferReceiptDataUrl(await shrinkImage(f)); }}
+            />
+            {transferReceiptDataUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={transferReceiptDataUrl} alt="صورة التحويل" className="w-full max-h-32 object-contain rounded-lg border border-neutral-200 dark:border-neutral-800" />
+            ) : null}
+            <button
+              type="button"
+              onClick={() => transferFileInputRef.current?.click()}
+              className="w-full flex items-center justify-center gap-1 text-xs text-orange-600 dark:text-orange-400 border border-orange-200 dark:border-orange-900 rounded-full px-3 py-1.5"
+            >
+              <Camera size={13} /> {transferReceiptDataUrl ? "تغيير صورة التحويل" : "إرفاق صورة التحويل"}
+            </button>
+          </div>
+        )}
+
         <input
           autoFocus
           type="number"
@@ -343,7 +377,25 @@ function AddForm() {
           </>
         )}
         {type === "transfer" && (
-          <input list="people-suggestions" placeholder="التحويل إلى (اسم شخص، أو سيبها فاضية لو تحويل بين حساباتك)" value={counterparty} onChange={(e) => setCounterparty(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+          <div className="grid grid-cols-2 gap-2 bg-neutral-100 dark:bg-neutral-800 rounded-xl p-1">
+            <button
+              type="button"
+              onClick={() => { setTransferKind("internal"); setCounterparty(""); }}
+              className={`py-2 rounded-lg text-xs font-medium ${transferKind === "internal" ? "bg-white dark:bg-neutral-900 shadow" : ""}`}
+            >
+              تحويل داخلي (بين حساباتي)
+            </button>
+            <button
+              type="button"
+              onClick={() => { setTransferKind("external"); setToAccountId(""); }}
+              className={`py-2 rounded-lg text-xs font-medium ${transferKind === "external" ? "bg-white dark:bg-neutral-900 shadow" : ""}`}
+            >
+              تحويل خارجي (لشخص/جهة)
+            </button>
+          </div>
+        )}
+        {type === "transfer" && transferKind === "external" && (
+          <input list="people-suggestions" placeholder="التحويل إلى (اسم الشخص أو الجهة)" value={counterparty} onChange={(e) => setCounterparty(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
         )}
 
         <select value={accountId} onChange={(e) => setAccountId(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm">
@@ -360,9 +412,9 @@ function AddForm() {
           </select>
         )}
 
-        {type === "transfer" && (
+        {type === "transfer" && transferKind === "internal" && (
           <select value={toAccountId} onChange={(e) => setToAccountId(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm">
-            <option value="">إلى أي حساب؟ (تحويل بين حساباتك)</option>
+            <option value="">إلى أي حساب؟</option>
             {accounts.filter((a) => a.id !== accountId).map((a) => (
               <option key={a.id} value={a.id}>{a.name}</option>
             ))}
@@ -451,27 +503,28 @@ function AddForm() {
           </div>
         )}
 
-        <button disabled={saving || !amount || !accountId} onClick={submitSimple} className="w-full bg-orange-600 text-white rounded-lg py-2.5 text-sm font-medium disabled:opacity-40">
-          {saving ? "جاري الحفظ..." : "حفظ الحركة"}
-        </button>
-        {!saving && (!amount || !accountId) && accounts.length > 0 && (
-          <p className="text-[11px] text-center text-neutral-400">
-            {!amount ? "اكتب المبلغ الأول" : "اختار الحساب الأول"} عشان تقدر تحفظ
-          </p>
-        )}
+        {(() => {
+          const transferMissing = type === "transfer" && ((transferKind === "internal" && !toAccountId) || (transferKind === "external" && !counterparty.trim()));
+          return (
+            <>
+              <button disabled={saving || !amount || !accountId || transferMissing} onClick={submitSimple} className="w-full bg-orange-600 text-white rounded-lg py-2.5 text-sm font-medium disabled:opacity-40">
+                {saving ? "جاري الحفظ..." : "حفظ الحركة"}
+              </button>
+              {!saving && (!amount || !accountId || transferMissing) && accounts.length > 0 && (
+                <p className="text-[11px] text-center text-neutral-400">
+                  {!amount ? "اكتب المبلغ الأول" : !accountId ? "اختار الحساب الأول" : transferKind === "internal" ? "اختار الحساب اللي هيستقبل التحويل" : "اكتب اسم الشخص أو الجهة"} عشان تقدر تحفظ
+                </p>
+              )}
+            </>
+          );
+        })()}
       </Card>
 
       <div className="space-y-2">
         <p className="text-sm font-semibold text-neutral-600 dark:text-neutral-300">آخر حركات {typeLabel[type]}</p>
         {history.length === 0 && <p className="text-center text-sm text-neutral-400 py-4">لا توجد حركات {typeLabel[type]} بعد.</p>}
         {history.map((t) => (
-          <Card key={t.id} className="flex items-center justify-between py-2.5">
-            <div className="min-w-0">
-              <p className="text-sm truncate">{t.description || t.counterparty_name || typeLabel[t.type]}</p>
-              <p className="text-[11px] text-neutral-400">{t.accounts?.name} · {new Date(t.occurred_at).toLocaleDateString("ar-EG")}</p>
-            </div>
-            <p className="font-semibold text-sm shrink-0">{fmt(Math.abs(Number(t.amount)), t.currency)}</p>
-          </Card>
+          <TransactionRow key={t.id} tx={t} categories={categories} onChanged={loadHistory} />
         ))}
       </div>
     </div>

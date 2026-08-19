@@ -18,6 +18,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     "base_currency",
     "dark_mode",
     "travel_mode",
+    "debt_reminder_hour",
+    "recurring_reminder_hour",
   ];
   const update: Record<string, any> = {};
   for (const k of allowed) if (k in body) update[k] = body[k];

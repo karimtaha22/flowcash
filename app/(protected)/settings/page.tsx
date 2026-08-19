@@ -5,7 +5,14 @@ import Card from "@/components/Card";
 import CategoryManager from "@/components/CategoryManager";
 import PeopleManager from "@/components/PeopleManager";
 import { useTheme } from "@/lib/useTheme";
-import { Moon, Sun, LogOut, ShieldCheck, Plane, Fingerprint, TimerOff, Coins, Tags, Users, ChevronDown } from "lucide-react";
+import { useFontScale, type FontScale } from "@/lib/useFontScale";
+import { Moon, Sun, LogOut, ShieldCheck, Plane, Fingerprint, TimerOff, Coins, Tags, Users, ChevronDown, Type } from "lucide-react";
+
+const FONT_SCALES: { key: FontScale; label: string }[] = [
+  { key: "small", label: "أصغر" },
+  { key: "medium", label: "عادي" },
+  { key: "large", label: "أكبر" },
+];
 
 const CURRENCIES = [
   { code: "EGP", label: "جنيه مصري" },
@@ -15,6 +22,7 @@ const CURRENCIES = [
 
 export default function SettingsPage() {
   const { dark, toggle } = useTheme();
+  const { scale: fontScale, change: changeFontScale } = useFontScale();
   const router = useRouter();
   const [travelMode, setTravelMode] = useState(false);
   const [baseCurrency, setBaseCurrency] = useState("EGP");
@@ -124,6 +132,24 @@ export default function SettingsPage() {
         <button onClick={toggle} className={`w-11 h-6 rounded-full transition ${dark ? "bg-orange-600" : "bg-neutral-300"}`}>
           <span className={`block w-5 h-5 bg-white rounded-full shadow transition ${dark ? "translate-x-[-22px]" : "translate-x-[-2px]"}`} />
         </button>
+      </Card>
+
+      <Card className="space-y-2">
+        <div className="flex items-center gap-2 text-sm">
+          <Type size={18} />
+          حجم الخط
+        </div>
+        <div className="grid grid-cols-3 gap-2 bg-neutral-100 dark:bg-neutral-800 rounded-xl p-1">
+          {FONT_SCALES.map((f) => (
+            <button
+              key={f.key}
+              onClick={() => changeFontScale(f.key)}
+              className={`py-2 rounded-lg text-sm font-medium ${fontScale === f.key ? "bg-white dark:bg-neutral-900 shadow text-orange-600" : ""}`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
       </Card>
 
       <Card className="space-y-2">
