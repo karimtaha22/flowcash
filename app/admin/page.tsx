@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import Card from "@/components/Card";
 import Footer from "@/components/Footer";
+import Link from "next/link";
 
 interface AdminUser {
   id: string;
@@ -21,9 +22,31 @@ export default function AdminPage() {
   const [msg, setMsg] = useState("");
   const [botStatus, setBotStatus] = useState<Record<string, any>>({});
   const [botBusy, setBotBusy] = useState<Record<string, boolean>>({});
+  const [locked, setLocked] = useState(false);
+  const [checkedAccess, setCheckedAccess] = useState(false);
 
-  const load = () => fetch("/api/admin/users").then((r) => r.json()).then((d) => setUsers(d.users || []));
+  // /admin used to be reachable by anyone with no login at all — now the API
+  // requires a session once a user already exists. Surface that clearly
+  // instead of silently showing an empty/broken-looking panel.
+  const load = () =>
+    fetch("/api/admin/users").then((r) => {
+      if (r.status === 401) { setLocked(true); setCheckedAccess(true); return { users: [] }; }
+      setCheckedAccess(true);
+      return r.json();
+    }).then((d) => setUsers(d.users || []));
   useEffect(() => { load(); }, []);
+
+  if (checkedAccess && locked) {
+    return (
+      <div className="max-w-md mx-auto p-4 pt-16 text-center space-y-4">
+        <p className="text-lg font-semibold">لازم تسجل دخول الأول</p>
+        <p className="text-sm text-neutral-500">صفحة الإعداد بقت محمية دلوقتي — سجل دخول بحسابك الأول عشان تدخلها.</p>
+        <Link href="/login" className="inline-block bg-orange-600 text-white rounded-lg px-5 py-2 text-sm font-medium">
+          روح صفحة الدخول
+        </Link>
+      </div>
+    );
+  }
 
   const checkBotStatus = async (id: string) => {
     setBotBusy((b) => ({ ...b, [id]: true }));

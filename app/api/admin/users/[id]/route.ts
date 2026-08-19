@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { setWebhook } from "@/lib/telegram";
+import { requireAdminAuth } from "@/lib/adminGuard";
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const guard = await requireAdminAuth();
+  if (guard) return guard;
+
   const { id } = await params;
   const body = await req.json();
   const allowed = [
@@ -41,6 +45,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const guard = await requireAdminAuth();
+  if (guard) return guard;
+
   const { id } = await params;
   const { error } = await supabaseAdmin.from("app_users").delete().eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

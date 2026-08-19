@@ -2,8 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { DEFAULT_CATEGORIES } from "@/lib/categories";
+import { requireAdminAuthOrBootstrap } from "@/lib/adminGuard";
 
 export async function GET() {
+  const guard = await requireAdminAuthOrBootstrap();
+  if (guard) return guard;
+
   const { data, error } = await supabaseAdmin
     .from("app_users")
     .select("id,name,base_currency,telegram_bot_username,telegram_chat_id,google_sheet_id,is_family,parent_user_id,created_at")
@@ -13,6 +17,9 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const guard = await requireAdminAuthOrBootstrap();
+  if (guard) return guard;
+
   const body = await req.json();
   const { name, pin, base_currency, is_family, parent_user_id } = body;
   if (!name || !pin || pin.length < 4) {

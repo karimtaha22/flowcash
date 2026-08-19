@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { setWebhook, getWebhookInfo } from "@/lib/telegram";
+import { requireAdminAuth } from "@/lib/adminGuard";
 
 // GET  → real-time status straight from Telegram (getWebhookInfo), including
 //        last_error_message — this is what actually explains "the bot is silent"
@@ -16,6 +17,9 @@ async function getToken(id: string) {
 }
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const guard = await requireAdminAuth();
+  if (guard) return guard;
+
   const { id } = await params;
   const token = await getToken(id);
   if (!token) return NextResponse.json({ ok: false, error: "لسه مفيش توكن بوت متسجل للمستخدم ده." });
@@ -38,6 +42,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 }
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const guard = await requireAdminAuth();
+  if (guard) return guard;
+
   const { id } = await params;
   const token = await getToken(id);
   if (!token) return NextResponse.json({ ok: false, error: "لسه مفيش توكن بوت متسجل للمستخدم ده." });

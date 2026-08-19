@@ -1,4 +1,4 @@
-const CACHE = "flowcash-v1";
+const CACHE = "flowcash-v2";
 const OFFLINE_URLS = ["/dashboard", "/add", "/accounts", "/people", "/manifest.json"];
 
 self.addEventListener("install", (event) => {
