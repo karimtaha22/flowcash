@@ -41,9 +41,14 @@ export default function AdminPage() {
     try {
       const res = await fetch(`/api/admin/telegram/${id}`, { method: "POST" });
       const data = await res.json();
-      const urlNote = data.computedUrl ? `\nالرابط اللي اتحاول تسجيله: ${data.computedUrl}` : "";
-      setMsg(data.ok ? "تم إعادة تسجيل الويب هوك ✅ ابعت /start للبوت دلوقتي" : `فشلت إعادة التسجيل: ${data.error}${urlNote}`);
-      await checkBotStatus(id);
+      if (!data.ok) {
+        // shown inside this user's own Telegram card, not the page-wide banner —
+        // it's specific to this bot, not a general "saved settings" message.
+        setBotStatus((s) => ({ ...s, [id]: { ok: false, error: `فشلت إعادة التسجيل: ${data.error}`, computedUrl: data.computedUrl } }));
+      } else {
+        await checkBotStatus(id);
+        setBotStatus((s) => ({ ...s, [id]: { ...s[id], resyncMsg: "تم إعادة تسجيل الويب هوك ✅ ابعت /start للبوت دلوقتي" } }));
+      }
     } finally {
       setBotBusy((b) => ({ ...b, [id]: false }));
     }
@@ -167,8 +172,14 @@ export default function AdminPage() {
             </div>
 
             {botStatus[u.id] && (
-              <div className={`text-xs rounded-lg p-2 space-y-1 ${botStatus[u.id].ok && !botStatus[u.id].hasErrors ? "bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300" : "bg-red-50 dark:bg-red-950 text-red-600 dark:text-red-400"}`}>
-                {!botStatus[u.id].ok && <p>خطأ: {botStatus[u.id].error}</p>}
+              <div className={`text-xs rounded-lg p-2 space-y-1 whitespace-pre-wrap break-all ${botStatus[u.id].ok && !botStatus[u.id].hasErrors ? "bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300" : "bg-red-50 dark:bg-red-950 text-red-600 dark:text-red-400"}`}>
+                {botStatus[u.id].resyncMsg && <p className="text-green-700 dark:text-green-300">{botStatus[u.id].resyncMsg}</p>}
+                {!botStatus[u.id].ok && (
+                  <>
+                    <p>خطأ: {botStatus[u.id].error}</p>
+                    {botStatus[u.id].computedUrl && <p>الرابط اللي اتحاول تسجيله: {botStatus[u.id].computedUrl}</p>}
+                  </>
+                )}
                 {botStatus[u.id].ok && (
                   <>
                     <p>الرابط المسجل عند تليجرام: {botStatus[u.id].url ? <code className="break-all">{botStatus[u.id].url}</code> : "مفيش رابط متسجل خالص ⚠️"}</p>
