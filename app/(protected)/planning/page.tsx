@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import Card from "@/components/Card";
 import { fmt } from "@/lib/format";
 import { Plus, Trash2, Pencil, Repeat, PiggyBank, Target, CheckCircle2, Moon } from "lucide-react";
@@ -30,7 +31,17 @@ function currentMonthKey() {
 }
 
 export default function PlanningPage() {
-  const [tab, setTab] = useState("recurring");
+  return (
+    <Suspense fallback={<p className="text-center text-neutral-400 mt-10">جاري التحميل...</p>}>
+      <PlanningPageInner />
+    </Suspense>
+  );
+}
+
+function PlanningPageInner() {
+  const searchParams = useSearchParams();
+  const initialTab = searchParams.get("tab");
+  const [tab, setTab] = useState(TABS.some((t) => t.key === initialTab) ? (initialTab as string) : "recurring");
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [recurring, setRecurring] = useState<RecurringItem[]>([]);

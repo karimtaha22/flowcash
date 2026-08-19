@@ -1,5 +1,6 @@
 import { supabaseAdmin } from "./supabaseAdmin";
 import { sendText, tgCall } from "./telegram";
+import { formatHijriFromDate } from "./hijri";
 
 // Shared, per-user reminder logic used by BOTH the daily vercel.json crons
 // (a harmless once-a-day-at-a-fixed-hour fallback — Vercel Hobby can't run
@@ -145,6 +146,53 @@ export async function runCharityReminderForUser(user: CharityUser) {
     await sendText(user.telegram_bot_token, user.telegram_chat_id, text);
     await supabaseAdmin.from("app_users").update({ charity_last_reminded_at: new Date().toISOString() }).eq("id", user.id);
     return { notified: true };
+  } catch {
+    return { notified: false, reason: "send_failed" };
+  }
+}
+
+// ---------------- zakat due-date reminder ----------------
+// Set by "احفظ الزكاة" in صدقات وزكاة (see /api/zakat) — reminds once as the
+// due date (one Hijri year after the last recorded payment) gets close, then
+// again if the day itself arrives unconfirmed. Guarded by zakat_last_reminded_at
+// so it doesn't repeat every single tick once triggered for a given window.
+interface ZakatUser extends ReminderUser {
+  hijri_correction_days?: number | null;
+  zakat_next_due_at: string | null;
+  zakat_reminder_enabled: boolean | null;
+  zakat_last_reminded_at: string | null;
+}
+
+const ZAKAT_REMINDER_WINDOW_DAYS = 7;
+// re-notify at most once every this many hours once inside the reminder window
+const ZAKAT_REMINDER_REPEAT_HOURS = 24;
+
+export async function runZakatReminderForUser(user: ZakatUser) {
+  if (!user.telegram_bot_token || !user.telegram_chat_id) return { notified: false, reason: "no_telegram" };
+  if (!user.zakat_reminder_enabled || !user.zakat_next_due_at) return { notified: false, reason: "not_set" };
+
+  const dueDate = new Date(user.zakat_next_due_at + "T00:00:00");
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const daysUntil = Math.round((dueDate.getTime() - today.getTime()) / 86_400_000);
+
+  if (daysUntil > ZAKAT_REMINDER_WINDOW_DAYS) return { notified: false, reason: "too_early" };
+
+  const lastMs = user.zakat_last_reminded_at ? new Date(user.zakat_last_reminded_at).getTime() : 0;
+  const hoursSince = (Date.now() - lastMs) / 3_600_000;
+  if (hoursSince < ZAKAT_REMINDER_REPEAT_HOURS) return { notified: false, reason: "too_soon" };
+
+  const correctionDays = Number(user.hijri_correction_days) || 0;
+  const hijriLabel = formatHijriFromDate(dueDate, correctionDays);
+  const whenLine =
+    daysUntil > 0 ? `باقي ${daysUntil} يوم على معاد زكاتك (${hijriLabel})` : daysUntil === 0 ? `النهاردة معاد زكاتك (${hijriLabel})` : `فات معاد زكاتك (${hijriLabel}) من ${Math.abs(daysUntil)} يوم — لسه محتاج تخرجها`;
+
+  const text = `🕌 تذكير الزكاة\n${whenLine}\n\nافتح تبويب "صدقات وزكاة" في التطبيق عشان تحسبها وتخرجها، وبعدها احفظ التاريخ عشان يتحسب معاد السنة الجاية.`;
+
+  try {
+    await sendText(user.telegram_bot_token, user.telegram_chat_id, text);
+    await supabaseAdmin.from("app_users").update({ zakat_last_reminded_at: new Date().toISOString() }).eq("id", user.id);
+    return { notified: true, daysUntil };
   } catch {
     return { notified: false, reason: "send_failed" };
   }

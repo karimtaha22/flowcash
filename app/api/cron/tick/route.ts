@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { runOverdueDebtsForUser, runRecurringRemindersForUser, runCharityReminderForUser } from "@/lib/reminders";
+import { runOverdueDebtsForUser, runRecurringRemindersForUser, runCharityReminderForUser, runZakatReminderForUser } from "@/lib/reminders";
 
 // Unified reminder endpoint meant to be pinged HOURLY by a free external
 // scheduler (e.g. cron-job.org) — Vercel's own Cron Jobs are capped at
@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
   const { data: users, error } = await supabaseAdmin
     .from("app_users")
     .select(
-      "id,base_currency,telegram_bot_token,telegram_chat_id,charity_amount,charity_frequency,charity_reminder_enabled,charity_last_reminded_at,charity_muted_date,debt_reminder_hour,recurring_reminder_hour"
+      "id,base_currency,telegram_bot_token,telegram_chat_id,charity_amount,charity_frequency,charity_reminder_enabled,charity_last_reminded_at,charity_muted_date,debt_reminder_hour,recurring_reminder_hour,hijri_correction_days,zakat_next_due_at,zakat_reminder_enabled,zakat_last_reminded_at"
     );
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
@@ -42,6 +42,9 @@ export async function GET(req: NextRequest) {
     }
     if (u.charity_reminder_enabled) {
       entry.charity = await runCharityReminderForUser(u);
+    }
+    if (u.zakat_reminder_enabled) {
+      entry.zakat = await runZakatReminderForUser(u);
     }
     if (Object.keys(entry).length > 1) results.push(entry);
   }

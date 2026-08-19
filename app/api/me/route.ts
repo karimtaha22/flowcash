@@ -8,7 +8,7 @@ export async function GET() {
   const { data, error } = await supabaseAdmin
     .from("app_users")
     .select(
-      "id,name,base_currency,dark_mode,travel_mode,auto_logout_minutes,charity_amount,charity_frequency,charity_reminder_enabled,telegram_chat_id,charity_muted_date,debt_reminder_hour,recurring_reminder_hour,font_scale"
+      "id,name,base_currency,dark_mode,travel_mode,auto_logout_minutes,charity_amount,charity_frequency,charity_reminder_enabled,telegram_chat_id,charity_muted_date,debt_reminder_hour,recurring_reminder_hour,font_scale,hijri_correction_days,zakat_last_paid_at,zakat_next_due_at,zakat_reminder_enabled,zakat_gold_karat,zakat_country"
     )
     .eq("id", userId)
     .single();
@@ -32,6 +32,9 @@ export async function PATCH(req: NextRequest) {
     "debt_reminder_hour",
     "recurring_reminder_hour",
     "font_scale",
+    "hijri_correction_days",
+    "zakat_gold_karat",
+    "zakat_country",
   ];
   const update: Record<string, any> = {};
   for (const k of allowed) if (k in body) update[k] = body[k];

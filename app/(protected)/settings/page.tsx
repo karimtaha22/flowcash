@@ -6,7 +6,8 @@ import CategoryManager from "@/components/CategoryManager";
 import PeopleManager from "@/components/PeopleManager";
 import { useTheme } from "@/lib/useTheme";
 import { useFontScale, type FontScale } from "@/lib/useFontScale";
-import { Moon, Sun, LogOut, ShieldCheck, Plane, Fingerprint, TimerOff, Coins, Tags, Users, ChevronDown, Type } from "lucide-react";
+import { formatHijriFromDate } from "@/lib/hijri";
+import { Moon, Sun, LogOut, ShieldCheck, Plane, Fingerprint, TimerOff, Coins, Tags, Users, ChevronDown, Type, CalendarClock, Minus, Plus } from "lucide-react";
 
 const FONT_SCALES: { key: FontScale; label: string }[] = [
   { key: "small", label: "أصغر" },
@@ -34,6 +35,8 @@ export default function SettingsPage() {
   const [savingCurrency, setSavingCurrency] = useState(false);
   const [categoriesOpen, setCategoriesOpen] = useState(false);
   const [peopleOpen, setPeopleOpen] = useState(false);
+  const [hijriCorrection, setHijriCorrection] = useState(0);
+  const [savingHijri, setSavingHijri] = useState(false);
 
   useEffect(() => {
     fetch("/api/me").then((r) => r.json()).then((d) => {
@@ -43,10 +46,26 @@ export default function SettingsPage() {
         const mins = Number(d.user.auto_logout_minutes) || 0;
         setAutoLogoutOn(mins > 0);
         if (mins > 0) setAutoLogoutMinutes(String(mins));
+        setHijriCorrection(Number(d.user.hijri_correction_days) || 0);
       }
     });
     setBioSupported(typeof window !== "undefined" && !!window.PublicKeyCredential);
   }, []);
+
+  const changeHijriCorrection = async (delta: number) => {
+    const next = Math.max(-3, Math.min(3, hijriCorrection + delta));
+    setHijriCorrection(next);
+    setSavingHijri(true);
+    try {
+      await fetch("/api/me", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hijri_correction_days: next }),
+      });
+    } finally {
+      setSavingHijri(false);
+    }
+  };
 
   const saveAutoLogout = async (enabled: boolean, minutes: string) => {
     await fetch("/api/me", {
@@ -168,6 +187,29 @@ export default function SettingsPage() {
         <p className="text-xs text-neutral-400">
           أي مبلغ أو حساب بعملة مختلفة عن العملة دي، هيظهرلك جمبه ما يعادله بيها تلقائي — في إضافة الحركة، وفي كشوفات الحساب والتقارير.
         </p>
+      </Card>
+
+      <Card className="space-y-2">
+        <div className="flex items-center gap-2 text-sm">
+          <CalendarClock size={18} />
+          تصحيح التاريخ الهجري
+        </div>
+        <p className="text-xs text-neutral-400">
+          التقويم الهجري المحسوب تقريبي وممكن يفرق يوم عن إعلان الرؤية في بلدك — زوّد أو قلّل هنا لو محتاج يتظبط.
+        </p>
+        <div className="flex items-center justify-center gap-4">
+          <button disabled={savingHijri} onClick={() => changeHijriCorrection(-1)} className="w-9 h-9 flex items-center justify-center rounded-full border border-neutral-300 dark:border-neutral-700 disabled:opacity-50">
+            <Minus size={15} />
+          </button>
+          <div className="text-center">
+            <p className="text-lg font-bold">{hijriCorrection > 0 ? `+${hijriCorrection}` : hijriCorrection}</p>
+            <p className="text-[10px] text-neutral-400">يوم</p>
+          </div>
+          <button disabled={savingHijri} onClick={() => changeHijriCorrection(1)} className="w-9 h-9 flex items-center justify-center rounded-full border border-neutral-300 dark:border-neutral-700 disabled:opacity-50">
+            <Plus size={15} />
+          </button>
+        </div>
+        <p className="text-xs text-center text-neutral-500">النهاردة: {formatHijriFromDate(new Date(), hijriCorrection)}</p>
       </Card>
 
       <Card className="space-y-1">

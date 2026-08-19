@@ -5,7 +5,7 @@ import { fmt } from "@/lib/format";
 import { toEGP, fromEGP, type FxRates } from "@/lib/fx";
 import { FileDown, FileSpreadsheet } from "lucide-react";
 
-interface Account { id: string; name: string; currency: string; parent_account_id?: string | null }
+interface Account { id: string; name: string; currency: string; parent_account_id?: string | null; balance?: number }
 interface Person { id: string; name: string }
 
 function downloadBlob(content: BlobPart, filename: string, type: string) {
@@ -32,6 +32,7 @@ export default function ExportPage() {
   const [baseCurrency, setBaseCurrency] = useState("EGP");
   const [rates, setRates] = useState<FxRates | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
+  const [familyAccounts, setFamilyAccounts] = useState<Account[]>([]);
 
   useEffect(() => {
     fetch("/api/accounts").then((r) => r.json()).then((d) => setAccounts(d.accounts || []));
@@ -66,6 +67,7 @@ export default function ExportPage() {
       const main = accounts.find((a) => a.id === mainId);
       const subs = accounts.filter((a) => a.parent_account_id === mainId);
       const familyIds = [mainId, ...subs.map((s) => s.id)];
+      setFamilyAccounts([main, ...subs].filter(Boolean) as Account[]);
       setLabel(subs.length ? `${main?.name || acc?.name || ""} (شامل الحسابات الفرعية)` : acc?.name || "");
       const params = new URLSearchParams({ account_id: familyIds.join(","), limit: "1000" });
       if (from) params.set("from", from);
@@ -80,6 +82,7 @@ export default function ExportPage() {
         currency: t.currency,
       })));
     } else {
+      setFamilyAccounts([]);
       if (!personId) { setLoading(false); return; }
       const person = people.find((p) => p.id === personId);
       setLabel(person?.name || "");
@@ -154,8 +157,8 @@ export default function ExportPage() {
       <h1 className="text-xl font-bold">تصدير كشف حساب</h1>
 
       <div className="grid grid-cols-2 gap-2 bg-neutral-100 dark:bg-neutral-800 rounded-xl p-1">
-        <button onClick={() => { setMode("account"); setRows([]); setHasSearched(false); }} className={`py-2 rounded-lg text-sm font-medium ${mode === "account" ? "bg-white dark:bg-neutral-900 shadow" : ""}`}>كشف حساب بنكي</button>
-        <button onClick={() => { setMode("person"); setRows([]); setHasSearched(false); }} className={`py-2 rounded-lg text-sm font-medium ${mode === "person" ? "bg-white dark:bg-neutral-900 shadow" : ""}`}>كشف حساب شخص</button>
+        <button onClick={() => { setMode("account"); setRows([]); setHasSearched(false); setFamilyAccounts([]); }} className={`py-2 rounded-lg text-sm font-medium ${mode === "account" ? "bg-white dark:bg-neutral-900 shadow" : ""}`}>كشف حساب بنكي</button>
+        <button onClick={() => { setMode("person"); setRows([]); setHasSearched(false); setFamilyAccounts([]); }} className={`py-2 rounded-lg text-sm font-medium ${mode === "person" ? "bg-white dark:bg-neutral-900 shadow" : ""}`}>كشف حساب شخص</button>
       </div>
 
       <Card className="space-y-2">
@@ -189,8 +192,21 @@ export default function ExportPage() {
       </Card>
 
       {hasSearched && !loading && rows.length === 0 && (
-        <Card className="text-center text-sm text-neutral-400">
-          لا يوجد معاملات في {mode === "account" ? "الحساب" : "سجل الشخص"} ده{from || to ? " خلال الفترة المحددة" : ""} — الكشف مش فاضي بسبب خطأ، ده معناه إنه فعلاً لسه مفيش حركات مسجلة عليه.
+        <Card className="text-center text-sm text-neutral-400 space-y-3">
+          <p>
+            لا يوجد معاملات في {mode === "account" ? "الحساب" : "سجل الشخص"} ده{from || to ? " خلال الفترة المحددة" : ""} — الكشف مش فاضي بسبب خطأ، ده معناه إنه فعلاً لسه مفيش حركات مسجلة عليه.
+          </p>
+          {mode === "account" && familyAccounts.length > 0 && (
+            <div className="border-t border-neutral-100 dark:border-neutral-800 pt-3 space-y-1.5 text-right">
+              <p className="text-xs text-neutral-500 font-medium">الرصيد الحالي مسجل على الحساب، بس من غير حركات:</p>
+              {familyAccounts.map((a) => (
+                <div key={a.id} className="flex items-center justify-between text-xs">
+                  <span>{a.name}</span>
+                  <span className="font-semibold text-neutral-700 dark:text-neutral-300">{fmt(Number(a.balance) || 0, a.currency)}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </Card>
       )}
 
