@@ -41,7 +41,8 @@ export default function AdminPage() {
     try {
       const res = await fetch(`/api/admin/telegram/${id}`, { method: "POST" });
       const data = await res.json();
-      setMsg(data.ok ? "تم إعادة تسجيل الويب هوك ✅ ابعت /start للبوت دلوقتي" : `فشلت إعادة التسجيل: ${data.error}`);
+      const urlNote = data.computedUrl ? `\nالرابط اللي اتحاول تسجيله: ${data.computedUrl}` : "";
+      setMsg(data.ok ? "تم إعادة تسجيل الويب هوك ✅ ابعت /start للبوت دلوقتي" : `فشلت إعادة التسجيل: ${data.error}${urlNote}`);
       await checkBotStatus(id);
     } finally {
       setBotBusy((b) => ({ ...b, [id]: false }));
@@ -80,7 +81,7 @@ export default function AdminPage() {
         <p className="text-sm text-neutral-500 mt-1">من هنا تضيف نفسك كمستخدم، وتربط بوت التليجرام والشيت الخاصين بيك.</p>
       </div>
 
-      {msg && <Card className="text-sm bg-orange-50 dark:bg-orange-950 text-orange-700 dark:text-orange-300">{msg}</Card>}
+      {msg && <Card className="text-sm bg-orange-50 dark:bg-orange-950 text-orange-700 dark:text-orange-300 whitespace-pre-wrap break-all">{msg}</Card>}
 
       <Card className="space-y-3">
         <h2 className="font-semibold">١. إنشاء مستخدم جديد</h2>

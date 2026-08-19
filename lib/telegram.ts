@@ -7,18 +7,41 @@ export async function tgCall(botToken: string, method: string, payload: any = {}
   return res.json();
 }
 
+// Always returns a URL that starts with a protocol — trims accidental
+// whitespace and adds "https://" if whoever set APP_BASE_URL forgot it
+// (a bare host like "flowcash-ruddy.vercel.app" makes Telegram reject the
+// whole webhook registration with "invalid webhook URL specified").
 function resolveBaseUrl() {
-  if (process.env.APP_BASE_URL) return process.env.APP_BASE_URL;
-  const host = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
+  const explicit = (process.env.APP_BASE_URL || "").trim();
+  if (explicit) {
+    const withProtocol = /^https?:\/\//i.test(explicit) ? explicit : `https://${explicit}`;
+    return withProtocol.replace(/\/+$/, "");
+  }
+  const host = (process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL || "").trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "");
   if (host) return `https://${host}`;
   return "http://localhost:3000";
 }
 
 export async function setWebhook(botToken: string, userId: string) {
   const base = resolveBaseUrl();
-  const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
-  const url = `${base}/api/telegram/${userId}?secret=${secret}`;
-  return tgCall(botToken, "setWebhook", { url });
+  const secret = (process.env.TELEGRAM_WEBHOOK_SECRET || "").trim();
+  const url = `${base}/api/telegram/${userId}?secret=${encodeURIComponent(secret)}`;
+  const redactedUrl = secret ? url.replace(secret, "<secret>") : url;
+
+  if (!secret) {
+    return { ok: false, description: "TELEGRAM_WEBHOOK_SECRET مش متسجل في Vercel خالص.", computedUrl: redactedUrl };
+  }
+  if (!/^https:\/\//i.test(url)) {
+    return { ok: false, description: `الرابط اللي هيتسجل عند تليجرام لازم يبدأ بـ https:// وده مش بيبدأ بيها. راجع APP_BASE_URL في Vercel.`, computedUrl: redactedUrl };
+  }
+  try {
+    new URL(url);
+  } catch {
+    return { ok: false, description: "الرابط اللي اتحسب مش صالح (URL غير صحيح).", computedUrl: redactedUrl };
+  }
+
+  const result = await tgCall(botToken, "setWebhook", { url });
+  return { ...result, computedUrl: redactedUrl };
 }
 
 export async function getWebhookInfo(botToken: string) {

@@ -43,8 +43,12 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   if (!token) return NextResponse.json({ ok: false, error: "لسه مفيش توكن بوت متسجل للمستخدم ده." });
 
   try {
-    const result = await setWebhook(token, id);
-    return NextResponse.json({ ok: !!result.ok, error: result.ok ? null : result.description || "فشل تسجيل الويب هوك", raw: result });
+    const result: any = await setWebhook(token, id);
+    return NextResponse.json({
+      ok: !!result.ok,
+      error: result.ok ? null : result.description || "فشل تسجيل الويب هوك",
+      computedUrl: result.computedUrl || null,
+    });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e.message || "فشل الاتصال بتليجرام" });
   }
