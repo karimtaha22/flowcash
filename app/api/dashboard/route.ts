@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { getSessionUserId } from "@/lib/session";
-import { getFxRates, toEGP } from "@/lib/fx";
+import { toEGP } from "@/lib/fx";
+import { getFxRates } from "@/lib/fxRates";
 import { startOfDay, startOfWeek, startOfMonth } from "date-fns";
 
 export async function GET() {

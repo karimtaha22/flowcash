@@ -4,7 +4,8 @@ import { sendText, tgCall, MAIN_KEYBOARD, CANCEL_KEYBOARD, CANCEL_TEXT, BRAND_FO
 import { getSession, setSession, clearSession, accountsKeyboard, yesNoKeyboard, parseAmount } from "@/lib/botHelpers";
 import { createTransaction } from "@/lib/transactions";
 import { classifyExpense } from "@/lib/categories";
-import { getFxRates, toEGP } from "@/lib/fx";
+import { toEGP } from "@/lib/fx";
+import { getFxRates } from "@/lib/fxRates";
 import { startOfDay, startOfWeek, startOfMonth } from "date-fns";
 
 const KEY_MAP: Record<string, string> = {
