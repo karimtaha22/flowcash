@@ -5,7 +5,8 @@ import Card from "@/components/Card";
 import { fmt } from "@/lib/format";
 import { toEGP, fromEGP, type FxRates } from "@/lib/fx";
 import { shrinkImage } from "@/lib/image";
-import { Camera, Loader2 } from "lucide-react";
+import { Camera, Loader2, AlertTriangle } from "lucide-react";
+import Link from "next/link";
 
 const TYPES = [
   { key: "expense", label: "💸 مصروف" },
@@ -36,6 +37,8 @@ function AddForm() {
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [accountsLoaded, setAccountsLoaded] = useState(false);
+  const [accountsLoadError, setAccountsLoadError] = useState("");
 
   // categories
   const [categories, setCategories] = useState<{ id: string; name: string; icon: string; kind: string }[]>([]);
@@ -59,7 +62,14 @@ function AddForm() {
   const [ocrMsg, setOcrMsg] = useState("");
 
   useEffect(() => {
-    fetch("/api/accounts").then((r) => r.json()).then((d) => setAccounts(d.accounts || []));
+    fetch("/api/accounts")
+      .then((r) => {
+        if (!r.ok) throw new Error(String(r.status));
+        return r.json();
+      })
+      .then((d) => setAccounts(d.accounts || []))
+      .catch(() => setAccountsLoadError("مقدرناش نجيب حساباتك من السيرفر. جرب تسجل خروج وتدخل تاني، ولو استمرت المشكلة كلم الدعم."))
+      .finally(() => setAccountsLoaded(true));
     fetch("/api/me").then((r) => r.json()).then((d) => {
       if (d.user) { setTravelMode(!!d.user.travel_mode); setBaseCurrency(d.user.base_currency || "EGP"); }
     });
@@ -218,6 +228,24 @@ function AddForm() {
 
       {done && <Card className="bg-orange-50 dark:bg-orange-950 border-orange-300 text-orange-700 dark:text-orange-300 text-center text-sm">تم الحفظ ✅</Card>}
       {saveError && <Card className="bg-red-50 dark:bg-red-950 border-red-300 text-red-600 dark:text-red-400 text-center text-sm">{saveError}</Card>}
+
+      {accountsLoadError && (
+        <Card className="bg-red-50 dark:bg-red-950 border-red-300 text-red-600 dark:text-red-400 text-sm flex items-start gap-2">
+          <AlertTriangle size={18} className="shrink-0 mt-0.5" />
+          <span>{accountsLoadError}</span>
+        </Card>
+      )}
+      {accountsLoaded && !accountsLoadError && accounts.length === 0 && (
+        <Card className="bg-orange-50 dark:bg-orange-950 border-orange-300 text-orange-700 dark:text-orange-300 text-sm space-y-2">
+          <div className="flex items-start gap-2">
+            <AlertTriangle size={18} className="shrink-0 mt-0.5" />
+            <span>لسه معملتش أي حساب — لازم تضيف حساب واحد على الأقل الأول عشان تقدر تسجل أي حركة.</span>
+          </div>
+          <Link href="/accounts" className="block text-center bg-orange-600 text-white rounded-lg py-2 text-sm font-medium">
+            ضيف حساب دلوقتي
+          </Link>
+        </Card>
+      )}
 
       <Card className="space-y-3">
         {type === "expense" && (
@@ -391,6 +419,11 @@ function AddForm() {
         <button disabled={saving || !amount || !accountId} onClick={submitSimple} className="w-full bg-orange-600 text-white rounded-lg py-2.5 text-sm font-medium disabled:opacity-40">
           {saving ? "جاري الحفظ..." : "حفظ الحركة"}
         </button>
+        {!saving && (!amount || !accountId) && accounts.length > 0 && (
+          <p className="text-[11px] text-center text-neutral-400">
+            {!amount ? "اكتب المبلغ الأول" : "اختار الحساب الأول"} عشان تقدر تحفظ
+          </p>
+        )}
       </Card>
 
       <div className="space-y-2">

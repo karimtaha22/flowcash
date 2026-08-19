@@ -21,6 +21,10 @@ export async function setWebhook(botToken: string, userId: string) {
   return tgCall(botToken, "setWebhook", { url });
 }
 
+export async function getWebhookInfo(botToken: string) {
+  return tgCall(botToken, "getWebhookInfo", {});
+}
+
 export const MAIN_KEYBOARD = {
   keyboard: [
     [{ text: "💸 مصروف" }, { text: "🏧 سحب من حساب" }],
@@ -30,6 +34,15 @@ export const MAIN_KEYBOARD = {
   ],
   resize_keyboard: true,
 };
+
+// shown during every step of every multi-step flow so the user can always bail
+// out immediately, even before typing/selecting anything for that step.
+export const CANCEL_KEYBOARD = {
+  keyboard: [[{ text: "❌ إنهاء" }]],
+  resize_keyboard: true,
+};
+
+export const CANCEL_TEXT = "❌ إنهاء";
 
 export function sendText(botToken: string, chatId: string | number, text: string, extra: any = {}) {
   return tgCall(botToken, "sendMessage", {

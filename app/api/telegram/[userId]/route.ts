@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { sendText, tgCall, MAIN_KEYBOARD, BRAND_FOOTER } from "@/lib/telegram";
+import { sendText, tgCall, MAIN_KEYBOARD, CANCEL_KEYBOARD, CANCEL_TEXT, BRAND_FOOTER } from "@/lib/telegram";
 import { getSession, setSession, clearSession, accountsKeyboard, yesNoKeyboard, parseAmount } from "@/lib/botHelpers";
 import { createTransaction } from "@/lib/transactions";
 import { classifyExpense } from "@/lib/categories";
@@ -66,9 +66,12 @@ async function handleMessage(userId: string, botToken: string, msg: any) {
     await clearSession(userId, chatId);
     return reply(botToken, chatId, `أهلاً بيك في FlowCash 👋\nاختار من الأزرار تحت.`);
   }
-  if (text === "/cancel") {
+  // "إنهاء" works at ANY step of ANY flow — even before typing/selecting anything —
+  // so an accidental tap (e.g. "سحب من حساب" by mistake) can always be backed out of.
+  if (text === "/cancel" || text === CANCEL_TEXT) {
+    const hadFlow = !!session?.flow;
     await clearSession(userId, chatId);
-    return reply(botToken, chatId, "تم الإلغاء ✅");
+    return reply(botToken, chatId, hadFlow ? "تم الإلغاء ✅ رجعنا للقائمة الرئيسية" : "القائمة الرئيسية 👇");
   }
 
   // photo → treat as receipt for the last created transaction in this session, if any
@@ -96,8 +99,12 @@ async function handleMessage(userId: string, botToken: string, msg: any) {
     return reply(botToken, chatId, "استلمت الرسالة الصوتية، جاري تحويلها لنص...");
   }
 
-  // starting a new flow from the keyboard
-  if (text && KEY_MAP[text] && !session?.flow) {
+  // starting a new flow from the keyboard — if a different flow was already
+  // mid-way (e.g. user tapped "سحب من حساب" by mistake while an "expense" flow
+  // was active), silently cancel it and start the newly tapped one instead of
+  // swallowing the tap as raw input for the old flow's current step.
+  if (text && KEY_MAP[text]) {
+    if (session?.flow) await clearSession(userId, chatId);
     return startFlow(userId, botToken, chatId, KEY_MAP[text]);
   }
 
@@ -161,7 +168,8 @@ async function startFlow(userId: string, botToken: string, chatId: string, flow:
     const accounts = await getAccounts(userId);
     if (!accounts.length) return reply(botToken, chatId, "لسه معملتش أي حساب. ضيفه من التطبيق الأول.");
     await setSession(userId, chatId, "account_statement", "await_account", {});
-    return reply(botToken, chatId, "كشف حساب مين؟", accountsKeyboard(accounts, "acct"));
+    await reply(botToken, chatId, "اضغط ❌ إنهاء في أي وقت لو غيّرت رأيك.", CANCEL_KEYBOARD);
+    return tgCall(botToken, "sendMessage", { chat_id: chatId, text: "كشف حساب مين؟", reply_markup: accountsKeyboard(accounts, "acct") });
   }
   if (flow === "balance_update") {
     const accounts = await getAccounts(userId);
@@ -171,7 +179,8 @@ async function startFlow(userId: string, botToken: string, chatId: string, flow:
     return reply(
       botToken,
       chatId,
-      `اكتب الأرصدة الجديدة بالترتيب مفصولة بفاصلة:\n${list}\n\nمثال: 1500, 200, 3000`
+      `اكتب الأرصدة الجديدة بالترتيب مفصولة بفاصلة:\n${list}\n\nمثال: 1500, 200, 3000`,
+      CANCEL_KEYBOARD
     );
   }
 
@@ -183,7 +192,7 @@ async function startFlow(userId: string, botToken: string, chatId: string, flow:
     income: "وصلك كام؟ 💰",
     transfer: "هتحول كام؟ 🔁",
   };
-  return reply(botToken, chatId, prompts[flow] || "كام؟", { remove_keyboard: true });
+  return reply(botToken, chatId, prompts[flow] || "كام؟", CANCEL_KEYBOARD);
 }
 
 async function quickStatement(userId: string, botToken: string, chatId: string) {
@@ -256,11 +265,11 @@ async function continueFlow(userId: string, botToken: string, chatId: string, se
       payload.amount = n;
       if (flow === "expense") {
         await setSession(userId, chatId, flow, "await_description", payload);
-        return reply(botToken, chatId, "اتصرف في ايه؟ ✍️");
+        return reply(botToken, chatId, "اتصرف في ايه؟ ✍️", CANCEL_KEYBOARD);
       }
       if (flow === "income") {
         await setSession(userId, chatId, flow, "await_source", payload);
-        return reply(botToken, chatId, "جاتلك من مين؟ (اختياري، اكتب - لو مفيش)");
+        return reply(botToken, chatId, "جاتلك من مين؟ (اختياري، اكتب - لو مفيش)", CANCEL_KEYBOARD);
       }
       // withdrawal & transfer go straight to account selection
       const accounts = await getAccounts(userId);

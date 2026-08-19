@@ -19,9 +19,34 @@ export default function AdminPage() {
   const [newUser, setNewUser] = useState({ name: "", pin: "", is_family: false, parent_user_id: "" });
   const [editing, setEditing] = useState<Record<string, any>>({});
   const [msg, setMsg] = useState("");
+  const [botStatus, setBotStatus] = useState<Record<string, any>>({});
+  const [botBusy, setBotBusy] = useState<Record<string, boolean>>({});
 
   const load = () => fetch("/api/admin/users").then((r) => r.json()).then((d) => setUsers(d.users || []));
   useEffect(() => { load(); }, []);
+
+  const checkBotStatus = async (id: string) => {
+    setBotBusy((b) => ({ ...b, [id]: true }));
+    try {
+      const res = await fetch(`/api/admin/telegram/${id}`);
+      const data = await res.json();
+      setBotStatus((s) => ({ ...s, [id]: data }));
+    } finally {
+      setBotBusy((b) => ({ ...b, [id]: false }));
+    }
+  };
+
+  const resyncWebhook = async (id: string) => {
+    setBotBusy((b) => ({ ...b, [id]: true }));
+    try {
+      const res = await fetch(`/api/admin/telegram/${id}`, { method: "POST" });
+      const data = await res.json();
+      setMsg(data.ok ? "تم إعادة تسجيل الويب هوك ✅ ابعت /start للبوت دلوقتي" : `فشلت إعادة التسجيل: ${data.error}`);
+      await checkBotStatus(id);
+    } finally {
+      setBotBusy((b) => ({ ...b, [id]: false }));
+    }
+  };
 
   const createUser = async () => {
     if (!newUser.name || newUser.pin.length < 4) { setMsg("الاسم و PIN (٤ أرقام على الأقل) مطلوبين"); return; }
@@ -120,6 +145,42 @@ export default function AdminPage() {
             <div className="text-xs text-neutral-400">
               حالة البوت: {u.telegram_chat_id ? "متصل ✅" : "لسه مش متصل"}
             </div>
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={botBusy[u.id]}
+                onClick={() => checkBotStatus(u.id)}
+                className="flex-1 border border-neutral-300 dark:border-neutral-700 rounded-lg py-1.5 text-xs disabled:opacity-50"
+              >
+                {botBusy[u.id] ? "جاري الفحص..." : "افحص حالة البوت"}
+              </button>
+              <button
+                type="button"
+                disabled={botBusy[u.id]}
+                onClick={() => resyncWebhook(u.id)}
+                className="flex-1 border border-orange-300 dark:border-orange-800 text-orange-600 dark:text-orange-400 rounded-lg py-1.5 text-xs disabled:opacity-50"
+              >
+                أعد ربط الويب هوك
+              </button>
+            </div>
+
+            {botStatus[u.id] && (
+              <div className={`text-xs rounded-lg p-2 space-y-1 ${botStatus[u.id].ok && !botStatus[u.id].hasErrors ? "bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300" : "bg-red-50 dark:bg-red-950 text-red-600 dark:text-red-400"}`}>
+                {!botStatus[u.id].ok && <p>خطأ: {botStatus[u.id].error}</p>}
+                {botStatus[u.id].ok && (
+                  <>
+                    <p>الرابط المسجل عند تليجرام: {botStatus[u.id].url ? <code className="break-all">{botStatus[u.id].url}</code> : "مفيش رابط متسجل خالص ⚠️"}</p>
+                    {botStatus[u.id].hasErrors && (
+                      <p>آخر خطأ من تليجرام: {botStatus[u.id].last_error_message} {botStatus[u.id].last_error_date ? `(${new Date(botStatus[u.id].last_error_date).toLocaleString("ar-EG")})` : ""}</p>
+                    )}
+                    {!botStatus[u.id].hasErrors && botStatus[u.id].url && <p>الويب هوك شغال وملوش أخطاء ✅</p>}
+                    <p>رسائل واقفة معلقة: {botStatus[u.id].pending_update_count}</p>
+                  </>
+                )}
+              </div>
+            )}
+
             <input
               placeholder="Google Sheet ID (اختياري، لاحقًا)"
               defaultValue={u.google_sheet_id || ""}
