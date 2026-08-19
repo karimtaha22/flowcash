@@ -7,6 +7,14 @@ export async function tgCall(botToken: string, method: string, payload: any = {}
   return res.json();
 }
 
+// The one stable, confirmed-working alias for this specific project (from
+// Vercel's own project.domains — verified directly, not guessed). On this
+// account VERCEL_PROJECT_PRODUCTION_URL resolves to an unaliased team-scoped
+// fallback host (flowcash-karimtaha22s-projects.vercel.app) that 404s on
+// every request — confirmed via Telegram's own "last_error_message". So in
+// production we trust this hardcoded domain over that env var.
+const KNOWN_GOOD_PRODUCTION_DOMAIN = "flowcash-ruddy.vercel.app";
+
 // Always returns a URL that starts with a protocol — trims accidental
 // whitespace and adds "https://" if whoever set APP_BASE_URL forgot it
 // (a bare host like "flowcash-ruddy.vercel.app" makes Telegram reject the
@@ -17,7 +25,8 @@ function resolveBaseUrl() {
     const withProtocol = /^https?:\/\//i.test(explicit) ? explicit : `https://${explicit}`;
     return withProtocol.replace(/\/+$/, "");
   }
-  const host = (process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL || "").trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+  if (process.env.VERCEL_ENV === "production") return `https://${KNOWN_GOOD_PRODUCTION_DOMAIN}`;
+  const host = (process.env.VERCEL_URL || "").trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "");
   if (host) return `https://${host}`;
   return "http://localhost:3000";
 }
