@@ -9,6 +9,7 @@ export interface RecurringPeriodItem {
   frequency?: string | null;
   last_confirmed_month?: string | null;
   last_confirmed_date?: string | null;
+  interval_count?: number | null;
 }
 
 export function periodKeyFor(item: { frequency?: string | null }, now: Date = new Date()): string {
@@ -18,10 +19,36 @@ export function periodKeyFor(item: { frequency?: string | null }, now: Date = ne
   return now.toISOString().slice(0, 7);
 }
 
+// how many whole periods (days/weeks/months) have to pass between one
+// confirmation and the item being due again — defaults to 1 (every
+// day/week/month, the original behavior) but supports custom cadences like
+// "every 3 months" or "every 20 days".
+function intervalCountOf(item: { interval_count?: number | null }): number {
+  const n = Math.floor(Number(item.interval_count) || 1);
+  return n >= 1 ? n : 1;
+}
+
 export function isConfirmedForCurrentPeriod(item: RecurringPeriodItem, now: Date = new Date()): boolean {
   const freq = item.frequency || "monthly";
-  const key = periodKeyFor(item, now);
-  if (freq === "monthly") return item.last_confirmed_month === key;
+  const interval = intervalCountOf(item);
+
+  if (interval <= 1) {
+    // exact legacy behavior for every-1 items (the vast majority) —
+    // calendar period-key comparison, left untouched.
+    const key = periodKeyFor(item, now);
+    if (freq === "monthly") return item.last_confirmed_month === key;
+    if (!item.last_confirmed_date) return false;
+    return periodKeyFor(item, new Date(item.last_confirmed_date + "T00:00:00")) === key;
+  }
+
+  // custom interval (every N days/weeks/months) — elapsed-time based: once
+  // confirmed, the item stays "confirmed" until N full periods have passed
+  // since the confirmation date, then it becomes due again.
   if (!item.last_confirmed_date) return false;
-  return periodKeyFor(item, new Date(item.last_confirmed_date + "T00:00:00")) === key;
+  const last = new Date(item.last_confirmed_date + "T00:00:00");
+  const nextDue = new Date(last);
+  if (freq === "daily") nextDue.setDate(nextDue.getDate() + interval);
+  else if (freq === "weekly") nextDue.setDate(nextDue.getDate() + interval * 7);
+  else nextDue.setMonth(nextDue.getMonth() + interval);
+  return now.getTime() < nextDue.getTime();
 }

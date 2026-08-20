@@ -22,7 +22,12 @@ export async function GET() {
       .limit(500),
   ]);
 
-  const owned = (accounts || []).reduce((sum, a) => sum + toEGP(Number(a.balance), a.currency, rates), 0);
+  // accounts with include_in_net_worth === false (a per-account toggle for
+  // FX-converted balances the user doesn't want counted — e.g. a foreign
+  // account they're just tracking, not counting as real wealth) are excluded here.
+  const owned = (accounts || [])
+    .filter((a) => a.include_in_net_worth !== false)
+    .reduce((sum, a) => sum + toEGP(Number(a.balance), a.currency, rates), 0);
   const owedToMe = (debts || [])
     .filter((d) => d.direction === "owed_to_me")
     .reduce((sum, d) => sum + toEGP(Number(d.remaining_amount), d.currency, rates), 0);

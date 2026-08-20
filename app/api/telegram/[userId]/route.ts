@@ -141,6 +141,14 @@ async function handleCallback(userId: string, botToken: string, cbq: any) {
     return startRecurConfirm(userId, botToken, chatId, value);
   }
 
+  // "تم إخراج الصدقة" button on the charity reminder — mutes today's reminders,
+  // mirroring the in-app "سكّت تذكير النهاردة" toggle on صدقات وزكاة.
+  if (prefix === "charity_mute") {
+    const todayIso = new Date().toISOString().slice(0, 10);
+    await supabaseAdmin.from("app_users").update({ charity_muted_date: todayIso }).eq("id", userId);
+    return reply(botToken, chatId, "تم تسجيل إخراج الصدقة ✅ مش هتوصلك تذكيرات صدقة تانية النهاردة.");
+  }
+
   const session = await getSession(userId, chatId);
   if (!session?.flow) return;
 
@@ -207,7 +215,9 @@ async function quickStatement(userId: string, botToken: string, chatId: string) 
     supabaseAdmin.from("debts").select("*").eq("user_id", userId).eq("status", "open"),
     supabaseAdmin.from("transactions").select("*").eq("user_id", userId).order("occurred_at", { ascending: false }).limit(300),
   ]);
-  const owned = (accounts || []).reduce((s, a) => s + toEGP(Number(a.balance), a.currency, rates), 0);
+  const owned = (accounts || [])
+    .filter((a: any) => a.include_in_net_worth !== false)
+    .reduce((s, a) => s + toEGP(Number(a.balance), a.currency, rates), 0);
   const owedToMe = (debts || []).filter((d) => d.direction === "owed_to_me").reduce((s, d) => s + toEGP(Number(d.remaining_amount), d.currency, rates), 0);
   const iOwe = (debts || []).filter((d) => d.direction === "i_owe").reduce((s, d) => s + toEGP(Number(d.remaining_amount), d.currency, rates), 0);
   const net = owned + owedToMe - iOwe;

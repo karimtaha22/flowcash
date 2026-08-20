@@ -10,6 +10,10 @@ import Link from "next/link";
 const num = (s: string) => parseFloat(s) || 0;
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
+// karats shown in the scrolling price ticker inside the gold-price box —
+// the common jewelry/investment purities across the tracked markets.
+const TICKER_KARATS = [24, 22, 21, 18, 14];
+
 // country -> commonly-traded local gold karat, used both to label the live
 // price box and as the basis for the nisab/gold-value calculation. Egypt
 // (21k) is the default since that's the market the reference design used.
@@ -144,6 +148,17 @@ export default function ZakatCharityPanel() {
   // worth, for local familiarity — NOT used in the actual zakat math anymore.
   const localKaratPriceEGP = goldPricePerGram24kEGP * (karat / 24);
 
+  // scrolling ticker: price per gram at every common karat, in the selected
+  // country's currency — purely informational, derived from the 24k price.
+  const karatTicker = useMemo(() => {
+    if (goldPricePerGram24kEGP <= 0) return [];
+    return TICKER_KARATS.map((k) => {
+      const priceEGP = goldPricePerGram24kEGP * (k / 24);
+      const price = rates ? fromEGP(priceEGP, countryCurrency, rates) : countryCurrency === "EGP" ? priceEGP : 0;
+      return { karat: k, price };
+    });
+  }, [goldPricePerGram24kEGP, rates, countryCurrency]);
+
   // pure (24k) gold price in the user's base currency — this is what actually
   // drives the gold-value input and the nisab below, so zakat is always
   // calculated on the pure-gold standard regardless of the selected country.
@@ -275,6 +290,18 @@ export default function ZakatCharityPanel() {
             <p className="text-[11px] text-neutral-500 mt-1">سعر عيار {karat} المتداول في {COUNTRY_KARAT.find((c) => c.code === country)?.label} (تقريبًا): {fmt(localKaratPriceEGP, "EGP")} / جرام</p>
           )}
         </div>
+
+        {karatTicker.length > 0 && (
+          <div className="overflow-hidden -mx-1 border-t border-emerald-100 dark:border-emerald-900 pt-2">
+            <div className="flex w-max animate-marquee">
+              {[...karatTicker, ...karatTicker].map((t, i) => (
+                <span key={i} className="shrink-0 text-[11px] text-emerald-700 dark:text-emerald-400 px-3 border-l border-emerald-100 dark:border-emerald-900 whitespace-nowrap">
+                  عيار {t.karat}: {t.price > 0 ? fmt(t.price, countryCurrency) : "..."}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
 
         {goldPriceError && <p className="text-[11px] text-amber-700 dark:text-amber-400">{goldPriceError}</p>}
 

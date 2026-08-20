@@ -42,13 +42,15 @@ function CurrencyConverter({ rates, baseCurrency }: { rates: Record<string, numb
     setTo(from);
   };
 
-  // scrolling ticker: 1 unit of the app's base currency against every other
-  // tracked currency — re-derives automatically whenever base_currency changes.
+  // scrolling ticker: 1 unit of every other tracked currency against the
+  // app's base currency (e.g. "1 SAR = X EGP") — re-derives automatically
+  // whenever base_currency changes.
   const tickerEntries = useMemo(() => {
     if (!rates || !rates[baseCurrency]) return [];
     return FX_CURRENCIES.filter((c) => c.code !== baseCurrency).map((c) => {
-      const inEgp = 1 / rates[baseCurrency];
-      const value = inEgp * (rates[c.code] || 0);
+      if (!rates[c.code]) return { code: c.code, value: 0 };
+      const inEgp = 1 / rates[c.code];
+      const value = inEgp * rates[baseCurrency];
       return { code: c.code, value };
     });
   }, [rates, baseCurrency]);
@@ -61,7 +63,7 @@ function CurrencyConverter({ rates, baseCurrency }: { rates: Record<string, numb
           <div className="flex w-max animate-marquee">
             {[...tickerEntries, ...tickerEntries].map((t, i) => (
               <span key={i} className="shrink-0 text-[11px] text-neutral-500 px-3 border-l border-neutral-200 dark:border-neutral-800 whitespace-nowrap">
-                1 {baseCurrency} = {t.value.toLocaleString("ar-EG", { maximumFractionDigits: 3 })} {t.code}
+                1 {t.code} = {t.value.toLocaleString("ar-EG", { maximumFractionDigits: 3 })} {baseCurrency}
               </span>
             ))}
           </div>
@@ -147,19 +149,19 @@ export default function Dashboard() {
 
       <Link href="/planning?tab=zakat">
         <div
-          className="rounded-2xl border border-fuchsia-500/30 bg-neutral-900 px-4 py-3 flex items-center justify-between gap-2 cursor-pointer"
-          style={{ boxShadow: "0 0 18px rgba(217,70,239,0.35), inset 0 0 18px rgba(217,70,239,0.08)" }}
+          className="rounded-2xl border border-emerald-500/30 bg-neutral-900 px-4 py-3 flex items-center justify-between gap-2 cursor-pointer"
+          style={{ boxShadow: "0 0 18px rgba(16,185,129,0.35), inset 0 0 18px rgba(16,185,129,0.08)" }}
         >
           <div className="flex items-center gap-2 min-w-0">
-            <Sparkles size={16} className="text-fuchsia-400 shrink-0" />
+            <Sparkles size={16} className="text-emerald-400 shrink-0" />
             <p
               className="text-sm font-semibold truncate"
-              style={{ color: "#f0abfc", textShadow: "0 0 6px rgba(240,171,252,0.9), 0 0 16px rgba(217,70,239,0.7)" }}
+              style={{ color: "#6ee7b7", textShadow: "0 0 6px rgba(110,231,183,0.9), 0 0 16px rgba(16,185,129,0.7)" }}
             >
               هل تحققت من الصدقات والزكاة اليوم؟
             </p>
           </div>
-          <ChevronLeft size={16} className="text-fuchsia-400 shrink-0" />
+          <ChevronLeft size={16} className="text-emerald-400 shrink-0" />
         </div>
       </Link>
 

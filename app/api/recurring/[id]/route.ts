@@ -8,9 +8,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
   const body = await req.json();
-  const allowed = ["name", "amount", "currency", "account_id", "category_id", "day_of_month", "is_active", "frequency", "day_of_week"];
+  const allowed = ["name", "amount", "currency", "account_id", "category_id", "day_of_month", "is_active", "frequency", "day_of_week", "interval_count"];
   const update: Record<string, any> = {};
   for (const k of allowed) if (k in body) update[k] = body[k];
+  if ("interval_count" in update) {
+    const n = parseInt(update.interval_count);
+    update.interval_count = Number.isFinite(n) && n >= 1 ? n : 1;
+  }
   const { data, error } = await supabaseAdmin
     .from("recurring_items")
     .update(update)

@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
   const userId = await getSessionUserId();
   if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const body = await req.json();
-  const { name, type, account_number, currency, balance, parent_account_id } = body;
+  const { name, type, account_number, currency, balance, parent_account_id, include_in_net_worth } = body;
   if (!type) return NextResponse.json({ error: "نوع الحساب مطلوب" }, { status: 400 });
   // name is allowed to be empty — the UI already warns the user before
   // calling this, but the save must still go through per their request, so
@@ -35,6 +35,7 @@ export async function POST(req: NextRequest) {
       currency: currency || "EGP",
       balance: balance || 0,
       parent_account_id: parent_account_id || null,
+      include_in_net_worth: include_in_net_worth !== false,
     })
     .select()
     .single();

@@ -12,11 +12,18 @@ interface Category { id: string; name: string; icon: string; kind: string }
 interface RecurringItem {
   id: string; kind: "expense" | "income"; name: string; amount: number; currency: string;
   account_id: string; category_id: string | null; day_of_month: number; last_confirmed_month: string | null; is_active: boolean;
-  frequency?: "daily" | "weekly" | "monthly"; day_of_week?: number | null; last_confirmed_date?: string | null;
+  frequency?: "daily" | "weekly" | "monthly"; day_of_week?: number | null; last_confirmed_date?: string | null; interval_count?: number;
   accounts?: { name: string; currency: string }; categories?: { name: string; icon: string };
 }
 
 const FREQ_LABEL: Record<string, string> = { daily: "يوميًا", weekly: "أسبوعيًا", monthly: "شهريًا" };
+const FREQ_UNIT: Record<string, string> = { daily: "يوم", weekly: "أسبوع", monthly: "شهر" };
+function freqLabelFor(r: { frequency?: string | null; interval_count?: number | null }): string {
+  const freq = r.frequency || "monthly";
+  const n = Math.floor(Number(r.interval_count) || 1);
+  if (n <= 1) return FREQ_LABEL[freq];
+  return `كل ${n} ${FREQ_UNIT[freq]}`;
+}
 const WEEKDAYS = ["الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
 interface Budget {
   id: string; category_id: string; monthly_limit: number; currency: string; alert_threshold_pct: number;
@@ -65,7 +72,7 @@ function PlanningPageInner() {
     const d = new Date(now.getFullYear(), now.getMonth(), day || 1);
     return d.toISOString().slice(0, 10);
   };
-  const [rForm, setRForm] = useState({ kind: "expense", name: "", amount: "", currency: "EGP", account_id: "", category_id: "", due_date: todayISO(), frequency: "monthly", day_of_week: "0" });
+  const [rForm, setRForm] = useState({ kind: "expense", name: "", amount: "", currency: "EGP", account_id: "", category_id: "", due_date: todayISO(), frequency: "monthly", day_of_week: "0", interval_count: "1" });
   const [bForm, setBForm] = useState({ category_id: "", monthly_limit: "", currency: "EGP" });
   const [gForm, setGForm] = useState({ name: "", target_amount: "", currency: "EGP", target_date: "" });
   const [contributeFor, setContributeFor] = useState<Goal | null>(null);
@@ -107,6 +114,10 @@ function PlanningPageInner() {
   useEffect(() => { loadAll(); }, []);
 
   const dueRecurring = recurring.filter((r) => r.is_active && !isConfirmedForCurrentPeriod(r));
+  // split the full list into "still needs confirming" vs "already paid this
+  // period" so the paid ones can be grouped under their own header.
+  const notYetPaidRecurring = recurring.filter((r) => !(r.is_active && isConfirmedForCurrentPeriod(r)));
+  const paidRecurring = recurring.filter((r) => r.is_active && isConfirmedForCurrentPeriod(r));
 
   const submitRecurring = async () => {
     if (!rForm.name || !rForm.amount || !rForm.account_id) { showMsg("الاسم والمبلغ والحساب لازم يتملوا", true); return; }
@@ -120,11 +131,12 @@ function PlanningPageInner() {
           day_of_month: new Date(rForm.due_date).getDate() || 1,
           day_of_week: parseInt(rForm.day_of_week) || 0,
           category_id: rForm.category_id || null,
+          interval_count: parseInt(rForm.interval_count) || 1,
         }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { showMsg(data.error || "حصل خطأ ومتحفظش، حاول تاني", true); return; }
-      setRForm({ kind: "expense", name: "", amount: "", currency: "EGP", account_id: "", category_id: "", due_date: todayISO(), frequency: "monthly", day_of_week: "0" });
+      setRForm({ kind: "expense", name: "", amount: "", currency: "EGP", account_id: "", category_id: "", due_date: todayISO(), frequency: "monthly", day_of_week: "0", interval_count: "1" });
       setShowForm(false);
       loadAll();
     } catch {
@@ -194,6 +206,7 @@ function PlanningPageInner() {
       is_active: r.is_active,
       frequency: r.frequency || "monthly",
       day_of_week: String(r.day_of_week ?? 0),
+      interval_count: String((r as any).interval_count ?? 1),
     });
   };
 
@@ -341,6 +354,69 @@ function PlanningPageInner() {
     }
   };
 
+  const RecurringCard = ({ r }: { r: RecurringItem }) => (
+    <Card className="!p-3 space-y-2">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-medium">{r.categories?.icon} {r.name}</p>
+          <p className="text-[11px] text-neutral-400">
+            {fmt(Number(r.amount), r.currency)} · {freqLabelFor(r)}
+            {(r.frequency || "monthly") === "monthly" && ` (يوم ${r.day_of_month})`}
+            {r.frequency === "weekly" && ` (${WEEKDAYS[r.day_of_week ?? 0]})`}
+            {" · "}{r.accounts?.name}
+          </p>
+        </div>
+        <div className="flex items-center gap-1">
+          <button onClick={() => startEditR(r)} className="text-neutral-400 hover:text-orange-600 p-2"><Pencil size={14} /></button>
+          <button onClick={() => setConfirmDeleteR(r)} className="text-neutral-400 hover:text-red-600 p-2"><Trash2 size={14} /></button>
+        </div>
+      </div>
+      {editingR === r.id && (
+        <div className="space-y-2 border-t border-neutral-100 dark:border-neutral-800 pt-2">
+          <input value={rDraft.name || ""} onChange={(e) => setRDraft({ ...rDraft, name: e.target.value })} placeholder="الاسم" className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+          <div className="grid grid-cols-2 gap-2">
+            <input type="number" value={rDraft.amount || ""} onChange={(e) => setRDraft({ ...rDraft, amount: e.target.value })} placeholder="المبلغ" className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+            <select value={rDraft.frequency || "monthly"} onChange={(e) => setRDraft({ ...rDraft, frequency: e.target.value })} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm">
+              <option value="monthly">شهريًا</option>
+              <option value="weekly">أسبوعيًا</option>
+              <option value="daily">يوميًا</option>
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-2 items-end">
+            <div>
+              <label className="text-[10px] text-neutral-400">
+                {(rDraft.frequency || "monthly") === "monthly" ? "كل كام شهر" : (rDraft.frequency || "monthly") === "weekly" ? "كل كام أسبوع" : "كل كام يوم"}
+              </label>
+              <input
+                type="number"
+                min="1"
+                value={rDraft.interval_count || "1"}
+                onChange={(e) => setRDraft({ ...rDraft, interval_count: e.target.value })}
+                className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm"
+              />
+            </div>
+          </div>
+          {(rDraft.frequency || "monthly") === "monthly" && (
+            <input type="date" value={rDraft.due_date || ""} onChange={(e) => setRDraft({ ...rDraft, due_date: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+          )}
+          {rDraft.frequency === "weekly" && (
+            <select value={rDraft.day_of_week ?? "0"} onChange={(e) => setRDraft({ ...rDraft, day_of_week: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm">
+              {WEEKDAYS.map((w, i) => <option key={i} value={i}>كل {w}</option>)}
+            </select>
+          )}
+          <select value={rDraft.account_id || ""} onChange={(e) => setRDraft({ ...rDraft, account_id: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm">
+            {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+          <label className="flex items-center gap-2 text-xs">
+            <input type="checkbox" checked={!!rDraft.is_active} onChange={(e) => setRDraft({ ...rDraft, is_active: e.target.checked })} />
+            نشط (هيتم تذكيري بيه)
+          </label>
+          <button onClick={() => saveEditR(r.id)} className="w-full bg-orange-600 text-white rounded-lg py-2 text-sm font-medium">حفظ التعديل</button>
+        </div>
+      )}
+    </Card>
+  );
+
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-bold">التخطيط المالي</h1>
@@ -382,7 +458,9 @@ function PlanningPageInner() {
                     <p className="text-sm font-medium">{r.name}</p>
                     <p className="text-[11px] text-neutral-400">
                       {fmt(Number(r.amount), r.currency)} ·{" "}
-                      {(r.frequency || "monthly") === "monthly"
+                      {Math.floor(Number(r.interval_count) || 1) > 1
+                        ? freqLabelFor(r)
+                        : (r.frequency || "monthly") === "monthly"
                         ? `يوم ${r.day_of_month} من كل شهر`
                         : (r.frequency || "monthly") === "weekly"
                         ? `كل ${WEEKDAYS[r.day_of_week ?? 0]}`
@@ -417,6 +495,18 @@ function PlanningPageInner() {
                   <option value="daily">يتكرر يوميًا</option>
                 </select>
               </div>
+              <div>
+                <label className="text-[10px] text-neutral-400">
+                  {rForm.frequency === "monthly" ? "كل كام شهر (مثال: 3 = كل 3 شهور)" : rForm.frequency === "weekly" ? "كل كام أسبوع" : "كل كام يوم (مثال: 20 = كل 20 يوم)"}
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  value={rForm.interval_count}
+                  onChange={(e) => setRForm({ ...rForm, interval_count: e.target.value })}
+                  className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm"
+                />
+              </div>
               {rForm.frequency === "monthly" && (
                 <input type="date" value={rForm.due_date} onChange={(e) => setRForm({ ...rForm, due_date: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
               )}
@@ -446,53 +536,14 @@ function PlanningPageInner() {
           )}
 
           <div className="space-y-2">
-            {recurring.map((r) => (
-              <Card key={r.id} className="!p-3 space-y-2">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium">{r.categories?.icon} {r.name}</p>
-                    <p className="text-[11px] text-neutral-400">
-                      {fmt(Number(r.amount), r.currency)} · {FREQ_LABEL[r.frequency || "monthly"]}
-                      {(r.frequency || "monthly") === "monthly" && ` (يوم ${r.day_of_month})`}
-                      {r.frequency === "weekly" && ` (${WEEKDAYS[r.day_of_week ?? 0]})`}
-                      {" · "}{r.accounts?.name}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <button onClick={() => startEditR(r)} className="text-neutral-400 hover:text-orange-600 p-2"><Pencil size={14} /></button>
-                    <button onClick={() => setConfirmDeleteR(r)} className="text-neutral-400 hover:text-red-600 p-2"><Trash2 size={14} /></button>
-                  </div>
-                </div>
-                {editingR === r.id && (
-                  <div className="space-y-2 border-t border-neutral-100 dark:border-neutral-800 pt-2">
-                    <input value={rDraft.name || ""} onChange={(e) => setRDraft({ ...rDraft, name: e.target.value })} placeholder="الاسم" className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
-                    <div className="grid grid-cols-2 gap-2">
-                      <input type="number" value={rDraft.amount || ""} onChange={(e) => setRDraft({ ...rDraft, amount: e.target.value })} placeholder="المبلغ" className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
-                      <select value={rDraft.frequency || "monthly"} onChange={(e) => setRDraft({ ...rDraft, frequency: e.target.value })} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm">
-                        <option value="monthly">شهريًا</option>
-                        <option value="weekly">أسبوعيًا</option>
-                        <option value="daily">يوميًا</option>
-                      </select>
-                    </div>
-                    {(rDraft.frequency || "monthly") === "monthly" && (
-                      <input type="date" value={rDraft.due_date || ""} onChange={(e) => setRDraft({ ...rDraft, due_date: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
-                    )}
-                    {rDraft.frequency === "weekly" && (
-                      <select value={rDraft.day_of_week ?? "0"} onChange={(e) => setRDraft({ ...rDraft, day_of_week: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm">
-                        {WEEKDAYS.map((w, i) => <option key={i} value={i}>كل {w}</option>)}
-                      </select>
-                    )}
-                    <select value={rDraft.account_id || ""} onChange={(e) => setRDraft({ ...rDraft, account_id: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm">
-                      {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                    </select>
-                    <label className="flex items-center gap-2 text-xs">
-                      <input type="checkbox" checked={!!rDraft.is_active} onChange={(e) => setRDraft({ ...rDraft, is_active: e.target.checked })} />
-                      نشط (هيتم تذكيري بيه)
-                    </label>
-                    <button onClick={() => saveEditR(r.id)} className="w-full bg-orange-600 text-white rounded-lg py-2 text-sm font-medium">حفظ التعديل</button>
-                  </div>
-                )}
-              </Card>
+            {notYetPaidRecurring.map((r) => (
+              <RecurringCard key={r.id} r={r} />
+            ))}
+            {paidRecurring.length > 0 && (
+              <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 pt-2">عمليات مدفوعة ✅</p>
+            )}
+            {paidRecurring.map((r) => (
+              <RecurringCard key={r.id} r={r} />
             ))}
             {recurring.length === 0 && <p className="text-center text-sm text-neutral-400 py-6">لسه مفيش مصاريف أو دخل متكرر مسجل.</p>}
           </div>

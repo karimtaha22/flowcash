@@ -1,6 +1,7 @@
 import { supabaseAdmin } from "./supabaseAdmin";
 import { sendText, tgCall } from "./telegram";
 import { formatHijriFromDate } from "./hijri";
+import { isConfirmedForCurrentPeriod } from "./recurringPeriod";
 import { getISOWeek, getISOWeekYear } from "date-fns";
 
 // Shared, per-user reminder logic used by BOTH the daily vercel.json crons
@@ -115,9 +116,15 @@ export async function runRecurringRemindersForUser(user: ReminderUser) {
     await supabaseAdmin.from("recurring_items").update({ last_reminded_month: guardKey }).eq("id", item.id);
   };
 
-  const monthlyItems = all.filter((i) => (i.frequency || "monthly") === "monthly");
-  const weeklyItems = all.filter((i) => i.frequency === "weekly");
-  const dailyItems = all.filter((i) => i.frequency === "daily");
+  // items with a custom cadence (every N days/weeks/months, N>1) don't fit the
+  // calendar-period-key logic below — they're handled separately via
+  // isConfirmedForCurrentPeriod's elapsed-time math instead.
+  const isCustomInterval = (i: any) => (Math.floor(Number(i.interval_count)) || 1) > 1;
+
+  const monthlyItems = all.filter((i) => (i.frequency || "monthly") === "monthly" && !isCustomInterval(i));
+  const weeklyItems = all.filter((i) => i.frequency === "weekly" && !isCustomInterval(i));
+  const dailyItems = all.filter((i) => i.frequency === "daily" && !isCustomInterval(i));
+  const customItems = all.filter(isCustomInterval);
 
   // ----- monthly (original day_of_month-based cadence, unchanged) -----
   const notDoneThisMonth = monthlyItems.filter((i) => i.last_confirmed_month !== monthKey && i.last_reminded_month !== monthKey);
@@ -144,10 +151,14 @@ export async function runRecurringRemindersForUser(user: ReminderUser) {
   const dueDaily = dailyItems.filter((i) => i.last_confirmed_date !== todayKey && i.last_reminded_month !== todayKey);
   for (const item of dueDaily) await sendDueNow(item, todayKey);
 
+  // ----- custom interval (every N days/weeks/months) -----
+  const dueCustom = customItems.filter((i) => !isConfirmedForCurrentPeriod(i, now) && i.last_reminded_month !== todayKey);
+  for (const item of dueCustom) await sendDueNow(item, todayKey);
+
   return {
     twoDaysBefore: twoDaysBefore.length,
     oneDayBefore: oneDayBefore.length,
-    dueToday: dueTodayMonthly.length + dueWeekly.length + dueDaily.length,
+    dueToday: dueTodayMonthly.length + dueWeekly.length + dueDaily.length + dueCustom.length,
     sent,
   };
 }
@@ -181,7 +192,11 @@ export async function runCharityReminderForUser(user: CharityUser) {
     `"وَمَا أَنفَقْتُم مِّن شَيْءٍ فَهُوَ يُخْلِفُهُ وَهُوَ خَيْرُ الرَّازِقِينَ" {سبأ:39}`;
 
   try {
-    await sendText(user.telegram_bot_token, user.telegram_chat_id, text);
+    await tgCall(user.telegram_bot_token, "sendMessage", {
+      chat_id: user.telegram_chat_id,
+      text,
+      reply_markup: { inline_keyboard: [[{ text: "✅ تم إخراج الصدقة", callback_data: "charity_mute" }]] },
+    });
     await supabaseAdmin.from("app_users").update({ charity_last_reminded_at: new Date().toISOString() }).eq("id", user.id);
     return { notified: true };
   } catch {

@@ -3,6 +3,7 @@ import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Card from "@/components/Card";
 import { fmt } from "@/lib/format";
+import { toEGP, fromEGP, type FxRates } from "@/lib/fx";
 import { Plus, Landmark, Smartphone, ChevronDown, Trash2, CornerDownLeft, RefreshCcw } from "lucide-react";
 
 const CURRENCIES = [
@@ -19,6 +20,7 @@ interface Account {
   currency: string;
   balance: number;
   parent_account_id: string | null;
+  include_in_net_worth?: boolean;
 }
 
 const emptyForm = { name: "", type: "bank", account_number: "", currency: "EGP", balance: "" };
@@ -38,6 +40,8 @@ function AccountsInner() {
   const [confirmDelete, setConfirmDelete] = useState<Account | null>(null);
   const [msg, setMsg] = useState("");
   const [msgIsError, setMsgIsError] = useState(false);
+  const [baseCurrency, setBaseCurrency] = useState("EGP");
+  const [rates, setRates] = useState<FxRates | null>(null);
 
   const showMsg = (text: string, isError = false) => {
     setMsg(text);
@@ -46,7 +50,18 @@ function AccountsInner() {
   };
 
   const load = () => fetch("/api/accounts").then((r) => r.json()).then((d) => setAccounts(d.accounts || []));
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    fetch("/api/me").then((r) => r.json()).then((d) => setBaseCurrency(d?.user?.base_currency || "EGP")).catch(() => {});
+    fetch("/api/fx").then((r) => r.json()).then((d) => setRates(d.rates || null)).catch(() => {});
+  }, []);
+
+  // convert an account's balance into the app's base currency — via EGP,
+  // since rates are all EGP-relative (see lib/fx.ts).
+  const toBaseCurrency = (amount: number, currency: string) => {
+    if (!rates || currency === baseCurrency) return null;
+    return fromEGP(toEGP(amount, currency, rates), baseCurrency, rates);
+  };
 
   const mains = accounts.filter((a) => !a.parent_account_id);
   const subsOf = (id: string) => accounts.filter((a) => a.parent_account_id === id);
@@ -99,7 +114,7 @@ function AccountsInner() {
 
   const startEdit = (a: Account) => {
     setExpanded(expanded === a.id ? null : a.id);
-    setEditing({ ...editing, [a.id]: { name: a.name, type: a.type, currency: a.currency, account_number: a.account_number || "", balance: String(a.balance) } });
+    setEditing({ ...editing, [a.id]: { name: a.name, type: a.type, currency: a.currency, account_number: a.account_number || "", balance: String(a.balance), include_in_net_worth: a.include_in_net_worth !== false } });
   };
 
   const saveEdit = async (id: string) => {
@@ -191,6 +206,23 @@ function AccountsInner() {
         </div>
         <input placeholder="رقم الحساب/المحفظة" value={e.account_number || ""} onChange={(ev) => setEditing({ ...editing, [a.id]: { ...e, account_number: ev.target.value } })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
         <input type="number" placeholder="الرصيد" value={e.balance} onChange={(ev) => setEditing({ ...editing, [a.id]: { ...e, balance: ev.target.value } })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+        {e.currency && e.currency !== baseCurrency && (
+          <div className="rounded-lg bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-700 px-3 py-2 space-y-1.5">
+            <label className="flex items-center justify-between text-xs text-neutral-700 dark:text-neutral-300">
+              <span>احسب المبلغ المحوّل من الحساب ده ضمن صافي الثروة</span>
+              <button
+                type="button"
+                onClick={() => setEditing({ ...editing, [a.id]: { ...e, include_in_net_worth: !e.include_in_net_worth } })}
+                className={`w-11 h-6 rounded-full transition shrink-0 ${e.include_in_net_worth ? "bg-orange-600" : "bg-neutral-300 dark:bg-neutral-600"}`}
+              >
+                <span className={`block w-5 h-5 bg-white rounded-full shadow transition ${e.include_in_net_worth ? "translate-x-[-22px]" : "translate-x-[-2px]"}`} />
+              </button>
+            </label>
+            <p className="text-[10px] leading-relaxed text-neutral-500">
+              المبلغ اللي في الحساب ده متحسوب بعملة {e.currency}، ومضاف له معادله بالعملة الرئيسية ({baseCurrency}) عشان يدخل في حساب صافي الثروة. اقفل السويتش لو مش عايز المبلغ ده يتحسب ضمن صافي ثروتك.
+            </p>
+          </div>
+        )}
         <div className="flex gap-2">
           <button disabled={saving} onClick={() => saveEdit(a.id)} className="flex-1 bg-orange-600 text-white rounded-lg py-2 text-sm font-medium">حفظ التعديلات</button>
           <button onClick={() => setConfirmDelete(a)} className="px-3 rounded-lg bg-red-50 dark:bg-red-950 text-red-600 dark:text-red-400"><Trash2 size={16} /></button>
@@ -207,7 +239,9 @@ function AccountsInner() {
     );
   };
 
-  const renderAccountCard = (a: Account, isSub = false) => (
+  const renderAccountCard = (a: Account, isSub = false) => {
+    const converted = toBaseCurrency(Number(a.balance), a.currency);
+    return (
     <div key={a.id} className={isSub ? "mr-6 border-r-2 border-orange-100 dark:border-orange-950 pr-3" : ""}>
       <Card className={isSub ? "bg-neutral-50/60 dark:bg-neutral-900/60" : ""}>
         <button onClick={() => startEdit(a)} className="w-full flex items-center gap-3 text-right">
@@ -218,7 +252,15 @@ function AccountsInner() {
             <p className="font-medium text-sm truncate">{a.name}</p>
             {a.account_number && <p className="text-xs text-neutral-400 truncate">{a.account_number}</p>}
           </div>
-          <p className="font-bold text-sm shrink-0">{fmt(Number(a.balance), a.currency)}</p>
+          <div className="text-left shrink-0">
+            <p className="font-bold text-sm">{fmt(Number(a.balance), a.currency)}</p>
+            {converted !== null && (
+              <p className="text-[10px] text-neutral-400">
+                ≈ {fmt(converted, baseCurrency)}
+                {a.include_in_net_worth === false && " (مش محسوبة في صافي الثروة)"}
+              </p>
+            )}
+          </div>
           <ChevronDown size={16} className={`shrink-0 text-neutral-400 transition-transform ${expanded === a.id ? "rotate-180" : ""}`} />
         </button>
         {expanded === a.id && renderEditPanel(a)}
@@ -236,7 +278,8 @@ function AccountsInner() {
         )}
       </Card>
     </div>
-  );
+    );
+  };
 
   return (
     <div className="space-y-4">

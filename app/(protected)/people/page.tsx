@@ -3,7 +3,7 @@ import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Card from "@/components/Card";
 import { fmt } from "@/lib/format";
-import { Plus, ChevronDown, Trash2, Pencil, Paperclip, BookOpenText, Download, Share2, FileDown, Image as ImageIcon } from "lucide-react";
+import { Plus, ChevronDown, Trash2, Pencil, Paperclip, Download, Share2, FileDown, Image as ImageIcon } from "lucide-react";
 import { shrinkImage } from "@/lib/image";
 import { downloadFile, shareFile } from "@/lib/shareFile";
 import ReceiptActions from "@/components/ReceiptActions";
@@ -58,6 +58,7 @@ function PeopleInner() {
   const [exportFor, setExportFor] = useState<Debt | null>(null);
   const [exportIncludeAyah, setExportIncludeAyah] = useState(true);
   const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
 
   const load = async () => {
     const d = await fetch("/api/debts").then((r) => r.json());
@@ -199,6 +200,7 @@ function PeopleInner() {
   const generateDebtExport = async (format: "image" | "pdf") => {
     if (!exportFor) return;
     setExporting(true);
+    setExportError("");
     const d = exportFor;
     try {
       const paidAmt = Number(d.original_amount) - Number(d.remaining_amount);
@@ -268,11 +270,17 @@ function PeopleInner() {
         const h = canvas.height / 2;
         const pdf = new jsPDF({ unit: "px", format: [w, h] });
         pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, w, h);
-        pdf.save(`${filenameBase}.pdf`);
+        // use shareFile (native share sheet + hardened download fallback)
+        // instead of pdf.save() directly — pdf.save() relies on the same
+        // detached-anchor .click() pattern that fails silently in some
+        // mobile/PWA-standalone webviews.
+        const pdfDataUrl = pdf.output("dataurlstring");
+        await shareFile(pdfDataUrl, `${filenameBase}.pdf`, "application/pdf");
       }
       setExportFor(null);
-    } catch {
-      setEditError("حصل خطأ في تصدير الدين، حاول تاني");
+    } catch (err) {
+      const detail = err instanceof Error && err.message ? ` (${err.message})` : "";
+      setExportError(`حصل خطأ في تصدير الدين، حاول تاني${detail}`);
     } finally {
       setExporting(false);
     }
@@ -305,16 +313,21 @@ function PeopleInner() {
       {/* آية الدَّين — mus-haf-styled reminder box; tap to read the full verse */}
       <button
         onClick={() => setShowAyah((s) => !s)}
-        className="w-full text-right rounded-2xl border-2 border-amber-200 dark:border-amber-900/60 bg-gradient-to-br from-amber-50 to-yellow-50 dark:from-amber-950/40 dark:to-neutral-900 px-4 py-3 space-y-1.5"
+        className="w-full text-right rounded-2xl border-2 border-amber-900/40 bg-cover bg-center px-4 py-3 space-y-1.5"
+        style={{ backgroundImage: "url(/images/ayah-bg.jpg)" }}
       >
-        <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400">
-          <BookOpenText size={14} />
-          <span className="text-[11px] font-semibold">آية الدَّين — سورة البقرة</span>
-        </div>
-        <p className="text-sm leading-loose text-amber-900 dark:text-amber-200 font-serif">
-          {showAyah ? AYAH_DAYN : `${AYAH_DAYN_OPENING}...`} <span className="text-[11px] text-amber-600 dark:text-amber-500">{"﴿البقرة: ٢٨٢﴾"}</span>
+        <p
+          className="text-sm leading-loose font-serif"
+          style={{ color: "#f3dfae", textShadow: "0 1px 4px rgba(0,0,0,0.85), 0 0 1px rgba(0,0,0,0.9)" }}
+        >
+          {showAyah ? AYAH_DAYN : `${AYAH_DAYN_OPENING}...`}{" "}
+          <span className="text-[11px]" style={{ color: "#d9bd82", textShadow: "0 1px 3px rgba(0,0,0,0.85)" }}>
+            {"﴿البقرة: ٢٨٢﴾"}
+          </span>
         </p>
-        <p className="text-[10px] text-amber-600 dark:text-amber-500 underline">{showAyah ? "اطوِ الآية" : "اقرأ الآية كاملة"}</p>
+        <p className="text-[10px] underline" style={{ color: "#e6cd93", textShadow: "0 1px 3px rgba(0,0,0,0.85)" }}>
+          {showAyah ? "اطوِ الآية" : "اقرأ الآية كاملة"}
+        </p>
       </button>
 
       <div className="grid grid-cols-2 gap-2 bg-neutral-100 dark:bg-neutral-800 rounded-xl p-1">
@@ -456,7 +469,7 @@ function PeopleInner() {
                     </button>
                   </div>
                   <button
-                    onClick={() => { setExportFor(d); setExportIncludeAyah(true); }}
+                    onClick={() => { setExportFor(d); setExportIncludeAyah(true); setExportError(""); }}
                     className="w-full flex items-center justify-center gap-1.5 text-xs border border-neutral-300 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 rounded-lg py-2"
                   >
                     <FileDown size={13} /> تصدير تفاصيل الدين (صورة / PDF)
@@ -520,7 +533,8 @@ function PeopleInner() {
               </button>
             </div>
             {exporting && <p className="text-[11px] text-center text-neutral-400">جاري التجهيز...</p>}
-            <button onClick={() => setExportFor(null)} disabled={exporting} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 py-2 text-sm disabled:opacity-60">إلغاء</button>
+            {exportError && <p className="text-xs text-red-500 text-center">{exportError}</p>}
+            <button onClick={() => { setExportFor(null); setExportError(""); }} disabled={exporting} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 py-2 text-sm disabled:opacity-60">إلغاء</button>
           </div>
         </div>
       )}

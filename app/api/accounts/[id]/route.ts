@@ -8,7 +8,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
   const body = await req.json();
-  const allowed = ["name", "type", "account_number", "currency", "balance", "is_archived", "parent_account_id"];
+  const allowed = ["name", "type", "account_number", "currency", "balance", "is_archived", "parent_account_id", "include_in_net_worth"];
   const update: Record<string, any> = {};
   for (const k of allowed) if (k in body) update[k] = body[k];
   // name may arrive empty (warn-but-save flow) — never write a blank name.
