@@ -18,3 +18,13 @@ html {
   background: rgba(249, 115, 22, 0.4);
   border-radius: 999px;
 }
+
+/* scrolling FX-rate ticker on the dashboard — the track is the content
+   duplicated twice back-to-back, animated exactly -50% so it loops seamlessly */
+@keyframes marquee-rtl {
+  from { transform: translateX(0); }
+  to { transform: translateX(50%); }
+}
+.animate-marquee {
+  animation: marquee-rtl 22s linear infinite;
+}

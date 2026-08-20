@@ -1,6 +1,7 @@
 import { supabaseAdmin } from "./supabaseAdmin";
 import { sendText, tgCall } from "./telegram";
 import { formatHijriFromDate } from "./hijri";
+import { getISOWeek, getISOWeekYear } from "date-fns";
 
 // Shared, per-user reminder logic used by BOTH the daily vercel.json crons
 // (a harmless once-a-day-at-a-fixed-hour fallback — Vercel Hobby can't run
@@ -59,14 +60,25 @@ export async function runOverdueDebtsForUser(user: ReminderUser) {
 // ---------------- recurring items ----------------
 // Fires once per item per month (guarded by last_confirmed_month /
 // last_reminded_month) — same hour-only-controls-timing note as above.
+// Each item's cadence now depends on its frequency: monthly (day_of_month,
+// with 2-day/1-day advance heads-up — the original behavior), weekly
+// (day_of_week, reminded once per ISO week), or daily (reminded once per
+// day it hasn't been confirmed). last_reminded_month is reused as a generic
+// "already reminded for this period" guard across all three — for
+// daily/weekly items it holds a day-key/week-key instead of a month-key,
+// which is fine since it's only ever compared for equality against a
+// freshly computed key of the same shape.
 export async function runRecurringRemindersForUser(user: ReminderUser) {
   if (!user.telegram_bot_token || !user.telegram_chat_id) return { sent: 0 };
 
   const now = new Date();
   const monthKey = now.toISOString().slice(0, 7);
+  const todayKey = now.toISOString().slice(0, 10);
   const dayOfMonth = now.getDate();
   const in1Day = dayOfMonth + 1;
   const in2Days = dayOfMonth + 2;
+  const todayDow = now.getDay();
+  const weekKey = `${getISOWeekYear(now)}-W${getISOWeek(now)}`;
 
   const { data: all, error } = await supabaseAdmin
     .from("recurring_items")
@@ -74,11 +86,6 @@ export async function runRecurringRemindersForUser(user: ReminderUser) {
     .eq("user_id", user.id)
     .eq("is_active", true);
   if (error || !all) return { sent: 0 };
-
-  const notDoneThisMonth = all.filter((i) => i.last_confirmed_month !== monthKey && i.last_reminded_month !== monthKey);
-  const twoDaysBefore = notDoneThisMonth.filter((i) => i.day_of_month === in2Days);
-  const oneDayBefore = notDoneThisMonth.filter((i) => i.day_of_month === in1Day);
-  const dueToday = notDoneThisMonth.filter((i) => i.day_of_month <= dayOfMonth && i.day_of_month !== in1Day && i.day_of_month !== in2Days);
 
   let sent = 0;
   const sendHeadsUp = async (item: any, label: string) => {
@@ -93,11 +100,8 @@ export async function runRecurringRemindersForUser(user: ReminderUser) {
       // best-effort
     }
   };
-  for (const item of twoDaysBefore) await sendHeadsUp(item, "بعد يومين");
-  for (const item of oneDayBefore) await sendHeadsUp(item, "بكرة");
-
-  for (const item of dueToday) {
-    const verb = item.kind === "income" ? "مرتبك نزل؟" : `عليك ${Number(item.amount).toLocaleString()} ${item.currency} الشهر ده`;
+  const sendDueNow = async (item: any, guardKey: string) => {
+    const verb = item.kind === "income" ? "مرتبك نزل؟" : `عليك ${Number(item.amount).toLocaleString()} ${item.currency}`;
     try {
       await tgCall(user.telegram_bot_token as string, "sendMessage", {
         chat_id: user.telegram_chat_id,
@@ -108,10 +112,44 @@ export async function runRecurringRemindersForUser(user: ReminderUser) {
     } catch {
       // best-effort
     }
-    await supabaseAdmin.from("recurring_items").update({ last_reminded_month: monthKey }).eq("id", item.id);
-  }
+    await supabaseAdmin.from("recurring_items").update({ last_reminded_month: guardKey }).eq("id", item.id);
+  };
 
-  return { twoDaysBefore: twoDaysBefore.length, oneDayBefore: oneDayBefore.length, dueToday: dueToday.length, sent };
+  const monthlyItems = all.filter((i) => (i.frequency || "monthly") === "monthly");
+  const weeklyItems = all.filter((i) => i.frequency === "weekly");
+  const dailyItems = all.filter((i) => i.frequency === "daily");
+
+  // ----- monthly (original day_of_month-based cadence, unchanged) -----
+  const notDoneThisMonth = monthlyItems.filter((i) => i.last_confirmed_month !== monthKey && i.last_reminded_month !== monthKey);
+  const twoDaysBefore = notDoneThisMonth.filter((i) => i.day_of_month === in2Days);
+  const oneDayBefore = notDoneThisMonth.filter((i) => i.day_of_month === in1Day);
+  const dueTodayMonthly = notDoneThisMonth.filter((i) => i.day_of_month <= dayOfMonth && i.day_of_month !== in1Day && i.day_of_month !== in2Days);
+  for (const item of twoDaysBefore) await sendHeadsUp(item, "بعد يومين");
+  for (const item of oneDayBefore) await sendHeadsUp(item, "بكرة");
+  for (const item of dueTodayMonthly) await sendDueNow(item, monthKey);
+
+  // ----- weekly: remind on the chosen weekday if not confirmed since this ISO week -----
+  const dueWeekly = weeklyItems.filter((i) => {
+    if (i.day_of_week === null || i.day_of_week === undefined || i.day_of_week !== todayDow) return false;
+    if (i.last_reminded_month === weekKey) return false;
+    if (i.last_confirmed_date) {
+      const c = new Date(i.last_confirmed_date + "T00:00:00");
+      if (`${getISOWeekYear(c)}-W${getISOWeek(c)}` === weekKey) return false;
+    }
+    return true;
+  });
+  for (const item of dueWeekly) await sendDueNow(item, weekKey);
+
+  // ----- daily: remind every day it hasn't been confirmed yet -----
+  const dueDaily = dailyItems.filter((i) => i.last_confirmed_date !== todayKey && i.last_reminded_month !== todayKey);
+  for (const item of dueDaily) await sendDueNow(item, todayKey);
+
+  return {
+    twoDaysBefore: twoDaysBefore.length,
+    oneDayBefore: oneDayBefore.length,
+    dueToday: dueTodayMonthly.length + dueWeekly.length + dueDaily.length,
+    sent,
+  };
 }
 
 // ---------------- charity reminder ----------------

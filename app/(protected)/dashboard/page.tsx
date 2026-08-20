@@ -19,10 +19,14 @@ const FX_CURRENCIES = [
   { code: "AED", label: "درهم إماراتي" },
 ];
 
-function CurrencyConverter({ rates }: { rates: Record<string, number> | undefined }) {
+function CurrencyConverter({ rates, baseCurrency }: { rates: Record<string, number> | undefined; baseCurrency: string }) {
   const [amount, setAmount] = useState("100");
   const [from, setFrom] = useState("EGP");
   const [to, setTo] = useState("USD");
+
+  useEffect(() => {
+    setFrom(baseCurrency);
+  }, [baseCurrency]);
 
   const converted = useMemo(() => {
     if (!rates) return null;
@@ -38,9 +42,31 @@ function CurrencyConverter({ rates }: { rates: Record<string, number> | undefine
     setTo(from);
   };
 
+  // scrolling ticker: 1 unit of the app's base currency against every other
+  // tracked currency — re-derives automatically whenever base_currency changes.
+  const tickerEntries = useMemo(() => {
+    if (!rates || !rates[baseCurrency]) return [];
+    return FX_CURRENCIES.filter((c) => c.code !== baseCurrency).map((c) => {
+      const inEgp = 1 / rates[baseCurrency];
+      const value = inEgp * (rates[c.code] || 0);
+      return { code: c.code, value };
+    });
+  }, [rates, baseCurrency]);
+
   return (
     <Card>
-      <p className="text-sm font-semibold mb-3">أسعار العملات لحظيًا</p>
+      <p className="text-sm font-semibold mb-1">أسعار العملات لحظيًا</p>
+      {tickerEntries.length > 0 && (
+        <div className="overflow-hidden mb-3 -mx-1">
+          <div className="flex w-max animate-marquee">
+            {[...tickerEntries, ...tickerEntries].map((t, i) => (
+              <span key={i} className="shrink-0 text-[11px] text-neutral-500 px-3 border-l border-neutral-200 dark:border-neutral-800 whitespace-nowrap">
+                1 {baseCurrency} = {t.value.toLocaleString("ar-EG", { maximumFractionDigits: 3 })} {t.code}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="flex items-center gap-2">
         <div className="flex-1 space-y-1">
           <input
@@ -85,13 +111,17 @@ export default function Dashboard() {
   const [data, setData] = useState<any>(null);
   const [alerts, setAlerts] = useState<{ count: number; dueRecurring: number; overBudget: number; overdueCount: number } | null>(null);
   const [hijriCorrection, setHijriCorrection] = useState(0);
+  const [baseCurrency, setBaseCurrency] = useState("EGP");
 
   useEffect(() => {
     fetch("/api/dashboard").then((r) => r.json()).then(setData);
     fetch("/api/alerts-count").then((r) => r.json()).then(setAlerts);
     fetch("/api/me")
       .then((r) => r.json())
-      .then((d) => setHijriCorrection(Number(d?.user?.hijri_correction_days) || 0))
+      .then((d) => {
+        setHijriCorrection(Number(d?.user?.hijri_correction_days) || 0);
+        setBaseCurrency(d?.user?.base_currency || "EGP");
+      })
       .catch(() => {});
   }, []);
 
@@ -167,7 +197,7 @@ export default function Dashboard() {
         </div>
       </Card>
 
-      <CurrencyConverter rates={rates} />
+      <CurrencyConverter rates={rates} baseCurrency={baseCurrency} />
 
       <div className="grid grid-cols-3 gap-2">
         <Card className="text-center">

@@ -68,16 +68,28 @@ export async function createTransaction(input: CreateTxInput) {
     debtId = debt?.id || null;
   }
 
+  // running balances after this transaction, when a real account was
+  // touched — returned to the caller so the UI can show a toast like
+  // "المتبقي بعد التحويل كذا" without a second round-trip.
+  let accountBalanceAfter: number | null = null;
+  let toAccountBalanceAfter: number | null = null;
+
   switch (input.type) {
     case "expense":
-    case "withdrawal": {
-      if (!input.account_id) throw new Error("account_id required");
-      await adjustBalance(input.account_id, -Math.abs(txAmount));
+    case "income": {
+      // account_id is OPTIONAL for expense/income only — the user can save
+      // the transaction "على أي حال" without picking an account yet; no
+      // balance is touched until one is chosen (see updateTransaction's
+      // account_id support, or re-entering the transaction).
+      if (input.account_id) {
+        const delta = input.type === "income" ? Math.abs(txAmount) : -Math.abs(txAmount);
+        accountBalanceAfter = await adjustBalance(input.account_id, delta);
+      }
       break;
     }
-    case "income": {
+    case "withdrawal": {
       if (!input.account_id) throw new Error("account_id required");
-      await adjustBalance(input.account_id, Math.abs(txAmount));
+      accountBalanceAfter = await adjustBalance(input.account_id, -Math.abs(txAmount));
       break;
     }
     case "transfer": {
@@ -86,8 +98,8 @@ export async function createTransaction(input: CreateTxInput) {
       // who isn't one of the user's tracked accounts just debits account_id
       // and records counterparty_name instead (no second balance to credit).
       if (!input.account_id) throw new Error("account_id required");
-      await adjustBalance(input.account_id, -Math.abs(txAmount));
-      if (input.to_account_id) await adjustBalance(input.to_account_id, Math.abs(txAmount));
+      accountBalanceAfter = await adjustBalance(input.account_id, -Math.abs(txAmount));
+      if (input.to_account_id) toAccountBalanceAfter = await adjustBalance(input.to_account_id, Math.abs(txAmount));
       break;
     }
     case "balance_update": {
@@ -100,6 +112,7 @@ export async function createTransaction(input: CreateTxInput) {
         .from("accounts")
         .update({ balance: newBalance, updated_at: new Date().toISOString() })
         .eq("id", input.account_id);
+      accountBalanceAfter = newBalance;
       break;
     }
   }
@@ -135,7 +148,7 @@ export async function createTransaction(input: CreateTxInput) {
     payload: { id: tx.id, type: tx.type, amount: tx.amount, currency: tx.currency, account_id: tx.account_id, to_account_id: tx.to_account_id, description: tx.description },
   });
 
-  return tx;
+  return { ...tx, accountBalanceAfter, toAccountBalanceAfter };
 }
 
 export interface UpdateTxInput {

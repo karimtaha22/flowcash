@@ -7,7 +7,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
   const body = await req.json();
-  const allowed = ["title", "reason", "currency", "due_date", "status", "person_id", "original_amount", "remaining_amount"];
+  const allowed = ["title", "reason", "currency", "due_date", "debt_date", "status", "person_id", "original_amount", "remaining_amount"];
   const update: Record<string, any> = {};
   for (const k of allowed) if (k in body) update[k] = body[k];
   if ("original_amount" in update) update.original_amount = Number(update.original_amount) || 0;

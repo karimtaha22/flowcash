@@ -4,7 +4,7 @@ import Card from "@/components/Card";
 import { fmt } from "@/lib/format";
 import { toEGP, fromEGP, type FxRates } from "@/lib/fx";
 import { gregorianToHijri, formatHijri, formatHijriFromDate } from "@/lib/hijri";
-import { Moon, HeartHandshake, Save, Send, ChevronDown, Sparkles, BellOff, Coins, CalendarDays, CalendarCheck } from "lucide-react";
+import { Moon, HeartHandshake, Save, Send, ChevronDown, Sparkles, BellOff, Coins, CalendarDays, CalendarCheck, Scale } from "lucide-react";
 import Link from "next/link";
 
 const num = (s: string) => parseFloat(s) || 0;
@@ -13,12 +13,12 @@ const todayISO = () => new Date().toISOString().slice(0, 10);
 // country -> commonly-traded local gold karat, used both to label the live
 // price box and as the basis for the nisab/gold-value calculation. Egypt
 // (21k) is the default since that's the market the reference design used.
-const COUNTRY_KARAT: { code: string; label: string; karat: number }[] = [
-  { code: "EG", label: "مصر", karat: 21 },
-  { code: "SA", label: "السعودية", karat: 24 },
-  { code: "AE", label: "الإمارات", karat: 22 },
-  { code: "QA", label: "قطر", karat: 21 },
-  { code: "LY", label: "ليبيا", karat: 21 },
+const COUNTRY_KARAT: { code: string; label: string; karat: number; currency: string }[] = [
+  { code: "EG", label: "مصر", karat: 21, currency: "EGP" },
+  { code: "SA", label: "السعودية", karat: 24, currency: "SAR" },
+  { code: "AE", label: "الإمارات", karat: 22, currency: "AED" },
+  { code: "QA", label: "قطر", karat: 21, currency: "QAR" },
+  { code: "LY", label: "ليبيا", karat: 21, currency: "LYD" },
 ];
 
 const FAQ = [
@@ -28,7 +28,7 @@ const FAQ = [
   },
   {
     q: "إزاي بيتحسب النصاب؟",
-    a: "الحاسبة هنا بتحسبه بقيمة ٨٥ جرام من الذهب بنفس العيار اللي اخترته فوق (سعر السوق اللحظي)، وده المرجع الأكثر استخدامًا في مصر ومعظم الدول العربية.",
+    a: "الحاسبة هنا بتحسبه بقيمة ٨٥ جرام من الذهب الخالص (عيار ٢٤) بالسعر اللحظي — وده الأساس الشرعي المعتمد، بغض النظر عن عيار دهبك الفعلي. لو دهبك عيار أقل زي ١٨ أو ٢١، استخدم حاسبة تحويل العيار فوق عشان تعرف وزنه المعادل بعيار ٢٤ الأول.",
   },
   {
     q: "الديون بتأثر إزاي على الزكاة؟",
@@ -57,6 +57,19 @@ export default function ZakatCharityPanel() {
   const [goldPriceError, setGoldPriceError] = useState("");
   const [country, setCountry] = useState("EG");
   const karat = COUNTRY_KARAT.find((c) => c.code === country)?.karat || 21;
+  const countryCurrency = COUNTRY_KARAT.find((c) => c.code === country)?.currency || "EGP";
+
+  // manual fallback price — for when the internet is down, or the user simply
+  // trusts a price they've heard today more than the automatic fetch.
+  const [manualGoldPrice, setManualGoldPrice] = useState("");
+  const [showManualPrice, setShowManualPrice] = useState(false);
+
+  // "حاسبة تحويل العيار" — zakat is always calculated on a pure (24k)
+  // basis, so this helper converts jewelry at any other karat (18, 21...)
+  // into its 24k-equivalent weight before it goes into the calculator below.
+  const [karatGrams, setKaratGrams] = useState("");
+  const [karatValue, setKaratValue] = useState("21");
+  const karatResult = (num(karatGrams) * num(karatValue)) / 24;
 
   // zakat calculator inputs — all local, nothing persisted
   const [cash, setCash] = useState("");
@@ -117,11 +130,27 @@ export default function ZakatCharityPanel() {
     return fromEGP(toEGP(usdAmount, "USD", rates), baseCurrency, rates);
   };
 
-  // price per gram at the SELECTED karat, in the user's base currency —
-  // this single number now drives both the gold-value input and the nisab,
-  // so there's no more 21-vs-24 mismatch between what's shown and what's used.
-  const goldPricePerGramBase = goldUsdPerGram24k !== null ? toBase(goldUsdPerGram24k) * (karat / 24) : 0;
-  const goldPricePerOzBase = goldUsdPerGram24k !== null ? toBase(goldUsdPerGram24k) * 31.1034768 : 0;
+  const manualPriceNum = num(manualGoldPrice);
+
+  // pure (24k) gold price in EGP — used for the dual-currency display box,
+  // and as the basis for every EGP/country-currency conversion below. Manual
+  // entry (when there's no internet, or the user trusts their own number)
+  // always wins over the fetched price.
+  const goldPricePerGram24kEGP =
+    manualPriceNum > 0 ? manualPriceNum : goldUsdPerGram24k !== null && rates ? toEGP(goldUsdPerGram24k, "USD", rates) : 0;
+  const goldPricePerGram24kCountry =
+    goldPricePerGram24kEGP > 0 && rates ? fromEGP(goldPricePerGram24kEGP, countryCurrency, rates) : null;
+  // reference-only: what the selected country's commonly-traded karat is
+  // worth, for local familiarity — NOT used in the actual zakat math anymore.
+  const localKaratPriceEGP = goldPricePerGram24kEGP * (karat / 24);
+
+  // pure (24k) gold price in the user's base currency — this is what actually
+  // drives the gold-value input and the nisab below, so zakat is always
+  // calculated on the pure-gold standard regardless of the selected country.
+  const goldPricePerGramBase =
+    manualPriceNum > 0 ? (rates ? fromEGP(manualPriceNum, baseCurrency, rates) : baseCurrency === "EGP" ? manualPriceNum : 0)
+      : goldUsdPerGram24k !== null ? toBase(goldUsdPerGram24k) : 0;
+  const goldPricePerOzBase = goldUsdPerGram24k !== null ? toBase(goldUsdPerGram24k) * 31.1034768 : manualPriceNum > 0 ? goldPricePerGramBase * 31.1034768 : 0;
 
   const changeCountry = (code: string) => {
     setCountry(code);
@@ -139,6 +168,11 @@ export default function ZakatCharityPanel() {
     const zakatDue = meetsNisab ? totalZakatable * 0.025 : 0;
     return { goldValue, totalAssets, totalZakatable, nisabValue, meetsNisab, zakatDue };
   }, [cash, goldGrams, investments, realEstate, tradeGoods, debtsOwedToMe, debtsIOwe, goldPricePerGramBase]);
+
+  // "زكاتك المستحقة" shown in EGP and in the selected country's currency,
+  // regardless of what the user's app base currency happens to be set to.
+  const zakatDueEGP = rates ? toEGP(calc.zakatDue, baseCurrency, rates) : null;
+  const zakatDueCountry = rates && zakatDueEGP !== null ? fromEGP(zakatDueEGP, countryCurrency, rates) : null;
 
   const saveCharity = async () => {
     setSavingCharity(true);
@@ -215,24 +249,83 @@ export default function ZakatCharityPanel() {
       {/* live gold price + country/karat selector — drives both the gold
           value input and the nisab basis below, so they're always consistent. */}
       <div className="rounded-2xl p-4 space-y-2 bg-white dark:bg-neutral-900 border border-emerald-200 dark:border-emerald-900">
-        <p className="text-sm font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-2"><Coins size={17} /> سعر الذهب الآن</p>
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-2xl font-bold text-neutral-900 dark:text-neutral-100">
-              {goldPricePerGramBase > 0 ? fmt(goldPricePerGramBase, baseCurrency) : "..."}
-              <span className="text-xs font-normal text-neutral-500"> / جرام عيار {karat}</span>
-            </p>
-            {goldPricePerOzBase > 0 && <p className="text-[11px] text-neutral-500">{fmt(goldPricePerOzBase, baseCurrency)} / أوقية</p>}
-          </div>
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-sm font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-2"><Coins size={17} /> سعر الذهب الآن (خالص عيار 24)</p>
           <select
             value={country}
             onChange={(e) => changeCountry(e.target.value)}
-            className="rounded-lg border border-emerald-200 dark:border-emerald-900 bg-transparent px-2 py-2 text-sm shrink-0"
+            className="rounded-lg border border-emerald-200 dark:border-emerald-900 bg-transparent px-2 py-1.5 text-xs shrink-0"
           >
-            {COUNTRY_KARAT.map((c) => <option key={c.code} value={c.code}>{c.label} (عيار {c.karat})</option>)}
+            {COUNTRY_KARAT.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}
           </select>
         </div>
+
+        <div>
+          <p className="text-2xl font-bold text-neutral-900 dark:text-neutral-100">
+            {goldPricePerGram24kEGP > 0 ? fmt(goldPricePerGram24kEGP, "EGP") : "..."}
+            <span className="text-xs font-normal text-neutral-500"> / جرام — تقريبًا سعر اليوم</span>
+          </p>
+          {goldPricePerGram24kCountry !== null && countryCurrency !== "EGP" && (
+            <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">
+              ≈ {fmt(goldPricePerGram24kCountry, countryCurrency)} <span className="text-[11px] font-normal text-neutral-500">— تقريبًا سعر اليوم</span>
+            </p>
+          )}
+          {goldPricePerOzBase > 0 && <p className="text-[11px] text-neutral-500">{fmt(goldPricePerOzBase, baseCurrency)} / أوقية ({baseCurrency})</p>}
+          {goldPricePerGram24kEGP > 0 && (
+            <p className="text-[11px] text-neutral-500 mt-1">سعر عيار {karat} المتداول في {COUNTRY_KARAT.find((c) => c.code === country)?.label} (تقريبًا): {fmt(localKaratPriceEGP, "EGP")} / جرام</p>
+          )}
+        </div>
+
         {goldPriceError && <p className="text-[11px] text-amber-700 dark:text-amber-400">{goldPriceError}</p>}
+
+        <button type="button" onClick={() => setShowManualPrice((s) => !s)} className="text-[11px] text-emerald-700 dark:text-emerald-400 underline">
+          {showManualPrice ? "إخفاء إدخال السعر اليدوي" : "النت عندك مقطوع أو حابب تدخل سعرك الخاص؟ دوس هنا"}
+        </button>
+        {showManualPrice && (
+          <div className="space-y-1 pt-1">
+            <label className="text-[10px] text-neutral-600 dark:text-neutral-300">
+              سعر جرام الذهب الخالص (عيار 24) بالجنيه المصري — استخدمه في حالة تعذر جلب السعر تلقائيًا، أو لو واثق في السعر اللي هتكتبه أكتر
+            </label>
+            <input
+              type="number"
+              value={manualGoldPrice}
+              onChange={(e) => setManualGoldPrice(e.target.value)}
+              placeholder="مثال: 4250"
+              className="w-full rounded-lg border border-emerald-200 dark:border-emerald-900 bg-transparent px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100"
+            />
+          </div>
+        )}
+      </div>
+
+      {/* karat converter — zakat is always figured on pure (24k) gold, so this
+          helps convert jewelry at any other karat into its 24k-equivalent weight. */}
+      <div className="rounded-2xl p-4 space-y-2 bg-white dark:bg-neutral-900 border border-emerald-200 dark:border-emerald-900">
+        <p className="text-sm font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-2"><Scale size={17} /> حاسبة تحويل العيار</p>
+        <p className="text-[11px] leading-relaxed text-neutral-600 dark:text-neutral-300">
+          الزكاة بتُحسب على أساس الذهب الخالص (عيار 24). لو دهبك عيار أقل (زي 18 أو 21)، استخدم الحاسبة دي عشان تعرف وزنه المعادل بعيار 24 قبل ما تحطه في خانة "الذهب بالجرام" تحت.
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="text-[10px] text-neutral-600 dark:text-neutral-300">عدد الجرامات</label>
+            <input type="number" value={karatGrams} onChange={(e) => setKaratGrams(e.target.value)} className="w-full rounded-lg border border-emerald-200 dark:border-emerald-900 bg-transparent px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100" />
+          </div>
+          <div>
+            <label className="text-[10px] text-neutral-600 dark:text-neutral-300">العيار</label>
+            <input type="number" value={karatValue} onChange={(e) => setKaratValue(e.target.value)} placeholder="مثال: 18" className="w-full rounded-lg border border-emerald-200 dark:border-emerald-900 bg-transparent px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100" />
+          </div>
+        </div>
+        <div className="flex items-center justify-between bg-emerald-50 dark:bg-emerald-950/40 rounded-lg px-3 py-2">
+          <span className="text-xs text-emerald-800 dark:text-emerald-300">المعادل بعيار 24 خالص</span>
+          <span className="text-sm font-bold text-emerald-900 dark:text-emerald-200">{karatResult > 0 ? karatResult.toFixed(3) : "0"} جم</span>
+        </div>
+        <button
+          type="button"
+          onClick={() => setGoldGrams(karatResult > 0 ? karatResult.toFixed(3) : "")}
+          disabled={karatResult <= 0}
+          className="w-full text-xs bg-emerald-600 text-white rounded-lg py-2 font-medium disabled:opacity-40"
+        >
+          استخدم الناتج في حاسبة الزكاة ↓
+        </button>
       </div>
 
       {/* summary card — total zakatable wealth, breakdown, nisab, zakat due,
@@ -249,13 +342,21 @@ export default function ZakatCharityPanel() {
           <p className="text-xs font-semibold">نصاب الزكاة الحالي (تقريبي)</p>
           <p className="text-sm font-bold">{calc.nisabValue !== null ? fmt(calc.nisabValue, baseCurrency) : "—"}</p>
           <p className="text-[11px] leading-relaxed">
-            — ما يعادل 85 جرام ذهب عيار {karat}. إذا بلغ مالك هذا المبلغ ومرّ عليه عام هجري كامل، وجبت عليك الزكاة بنسبة 2.5%.
+            — ما يعادل 85 جرام ذهب خالص (عيار 24). إذا بلغ مالك هذا المبلغ ومرّ عليه عام هجري كامل، وجبت عليك الزكاة بنسبة 2.5%.
           </p>
         </div>
 
-        <div className="bg-white rounded-xl px-3 py-2.5 flex justify-between items-center">
-          <span className="text-sm font-semibold text-emerald-900">زكاتك المستحقة (٢.٥٪)</span>
-          <span className="text-xl font-bold text-emerald-900">{fmt(calc.zakatDue, baseCurrency)}</span>
+        <div className="bg-white rounded-xl px-3 py-2.5 space-y-0.5">
+          <div className="flex justify-between items-center">
+            <span className="text-sm font-semibold text-emerald-900">زكاتك المستحقة (٢.٥٪)</span>
+            <span className="text-xl font-bold text-emerald-900">{fmt(calc.zakatDue, baseCurrency)}</span>
+          </div>
+          {zakatDueEGP !== null && baseCurrency !== "EGP" && (
+            <p className="text-[11px] text-emerald-700 text-left">≈ {fmt(zakatDueEGP, "EGP")}</p>
+          )}
+          {zakatDueCountry !== null && countryCurrency !== "EGP" && countryCurrency !== baseCurrency && (
+            <p className="text-[11px] text-emerald-700 text-left">≈ {fmt(zakatDueCountry, countryCurrency)}</p>
+          )}
         </div>
         {calc.nisabValue !== null && !calc.meetsNisab && (
           <p className="text-[11px] text-emerald-100">مالك لسه ماوصلش للنصاب — مفيش زكاة واجبة عليك حاليًا.</p>
@@ -296,7 +397,7 @@ export default function ZakatCharityPanel() {
           </div>
           <div>
             <label className="text-[10px] text-neutral-600 dark:text-neutral-300">
-              الذهب بالجرام (عيار {karat}{goldPricePerGramBase > 0 ? ` — ${fmt(goldPricePerGramBase, baseCurrency)}/جم` : ""})
+              الذهب بالجرام (عيار 24 خالص{goldPricePerGramBase > 0 ? ` — ${fmt(goldPricePerGramBase, baseCurrency)}/جم` : ""})
             </label>
             <input type="number" value={goldGrams} onChange={(e) => setGoldGrams(e.target.value)} className="w-full rounded-lg border border-emerald-200 dark:border-emerald-900 bg-transparent px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100" />
           </div>
@@ -322,7 +423,7 @@ export default function ZakatCharityPanel() {
           </div>
         </div>
         <p className="text-[11px] leading-relaxed text-neutral-600 dark:text-neutral-300">
-          الزكاة واجبة على المال إذا بلغ <b>النصاب</b> وحال عليه <b>الحول</b> (سنة هجرية كاملة). الحاسبة دي للاسترشاد العام فقط، ومش بديل عن استشارة عالم شرعي أو دار الإفتاء لحالتك بالتحديد.
+          الزكاة واجبة على المال إذا بلغ <b>النصاب</b> وحال عليه <b>الحول</b> (سنة هجرية كاملة). الحساب هنا بيتم كله على أساس الذهب الخالص (عيار 24) — لو دهبك عيار مختلف استخدم حاسبة تحويل العيار فوق. الحاسبة دي للاسترشاد العام فقط، ومش بديل عن استشارة عالم شرعي أو دار الإفتاء لحالتك بالتحديد.
         </p>
       </div>
 

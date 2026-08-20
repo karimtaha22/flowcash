@@ -3,19 +3,22 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { sendText, tgCall, MAIN_KEYBOARD, CANCEL_KEYBOARD, CANCEL_TEXT, BRAND_FOOTER } from "@/lib/telegram";
 import { getSession, setSession, clearSession, accountsKeyboard, yesNoKeyboard, parseAmount } from "@/lib/botHelpers";
 import { createTransaction } from "@/lib/transactions";
+import { confirmRecurringItem, isConfirmedForCurrentPeriod } from "@/lib/recurringConfirm";
 import { classifyExpense } from "@/lib/categories";
 import { toEGP } from "@/lib/fx";
 import { getFxRates } from "@/lib/fxRates";
 import { startOfDay, startOfWeek, startOfMonth } from "date-fns";
 
 const KEY_MAP: Record<string, string> = {
-  "💸 مصروف": "expense",
+  "💸 تسجيل مصروف": "expense",
   "🏧 سحب من حساب": "withdrawal",
   "💰 فلوس جاتلي": "income",
   "🔁 تحويل أونلاين": "transfer",
   "📊 تحديث أرصدة": "balance_update",
   "📄 كشف سريع": "quick_statement",
   "📈 كشف حساب": "account_statement",
+  "🔍 استعلام عن مصروف": "expense_query",
+  "🔔 التنبيهات": "alerts",
 };
 
 async function getAccounts(userId: string) {
@@ -135,7 +138,7 @@ async function handleCallback(userId: string, botToken: string, cbq: any) {
 
   // "دفعت" / "نزل" button on a recurring-item reminder — not part of any multi-step flow
   if (prefix === "recur_paid") {
-    return confirmRecurring(userId, botToken, chatId, value);
+    return startRecurConfirm(userId, botToken, chatId, value);
   }
 
   const session = await getSession(userId, chatId);
@@ -144,37 +147,29 @@ async function handleCallback(userId: string, botToken: string, cbq: any) {
   await continueFlow(userId, botToken, chatId, session, value, prefix);
 }
 
-async function confirmRecurring(userId: string, botToken: string, chatId: string, itemId: string) {
+// asks "تخصم من حساب؟ نعم/لا" before touching any balance — a plain "دفعت"
+// tap used to deduct silently from the item's original account; now the
+// user explicitly confirms, and can pick a different account than the one
+// the item was created with.
+async function startRecurConfirm(userId: string, botToken: string, chatId: string, itemId: string) {
   const { data: item } = await supabaseAdmin.from("recurring_items").select("*").eq("id", itemId).eq("user_id", userId).single();
   if (!item) return reply(botToken, chatId, "العنصر ده مش موجود دلوقتي.");
-  if (item.last_confirmed_month === new Date().toISOString().slice(0, 7)) {
-    return reply(botToken, chatId, "اتسجل قبل كده الشهر ده ✅");
+  if (isConfirmedForCurrentPeriod(item)) {
+    return reply(botToken, chatId, "اتسجل قبل كده في نفس المدة دي ✅");
   }
-  try {
-    await createTransaction({
-      user_id: userId,
-      type: item.kind === "income" ? "income" : "expense",
-      account_id: item.account_id,
-      amount: item.amount,
-      currency: item.currency,
-      category_id: item.category_id,
-      description: item.name,
-      source: "bot",
-    });
-    await supabaseAdmin.from("recurring_items").update({ last_confirmed_month: new Date().toISOString().slice(0, 7) }).eq("id", itemId);
-    const { data: acc } = await supabaseAdmin.from("accounts").select("name").eq("id", item.account_id).single();
-    const accName = acc?.name || "الحساب";
-    const msg = item.kind === "income"
-      ? `✅ تم الإيداع في حساب ${accName} — ${Number(item.amount).toLocaleString()} ${item.currency} (${item.name})`
-      : `✅ اتخصم من حساب ${accName} — ${Number(item.amount).toLocaleString()} ${item.currency} (${item.name})`;
-    return reply(botToken, chatId, msg);
-  } catch (e: any) {
-    return reply(botToken, chatId, `في مشكلة: ${e.message}`);
-  }
+  await setSession(userId, chatId, "recur_confirm", "ask_deduct", { itemId });
+  return replyInlineWithCancel(
+    botToken,
+    chatId,
+    `تخصم ${Number(item.amount).toLocaleString()} ${item.currency} (${item.name}) من حساب؟`,
+    yesNoKeyboard("rdeduct")
+  );
 }
 
 async function startFlow(userId: string, botToken: string, chatId: string, flow: string) {
   if (flow === "quick_statement") return quickStatement(userId, botToken, chatId);
+  if (flow === "expense_query") return expenseQuery(userId, botToken, chatId);
+  if (flow === "alerts") return alertsReport(userId, botToken, chatId);
   if (flow === "account_statement") {
     const accounts = await getAccounts(userId);
     if (!accounts.length) return reply(botToken, chatId, "لسه معملتش أي حساب. ضيفه من التطبيق الأول.");
@@ -227,8 +222,121 @@ async function quickStatement(userId: string, botToken: string, chatId: string) 
   return reply(botToken, chatId, text);
 }
 
+// "🔍 استعلام عن مصروف" — today's expenses only, with a pointer to the app
+// for anything more detailed (full history, filtering, editing...).
+async function expenseQuery(userId: string, botToken: string, chatId: string) {
+  const dayStart = startOfDay(new Date());
+  const { data: txs } = await supabaseAdmin
+    .from("transactions")
+    .select("*, categories(name,icon)")
+    .eq("user_id", userId)
+    .eq("type", "expense")
+    .gte("occurred_at", dayStart.toISOString())
+    .order("occurred_at", { ascending: false });
+
+  const list = txs || [];
+  if (!list.length) {
+    return reply(botToken, chatId, "مفيش مصاريف اتسجلت النهاردة لحد دلوقتي 👌");
+  }
+  const total = list.reduce((s, t) => s + Math.abs(Number(t.amount)), 0);
+  const lines = list
+    .slice(0, 10)
+    .map((t) => `• ${t.categories?.icon || ""} ${t.description || t.categories?.name || "مصروف"} — ${Number(t.amount).toLocaleString()} ${t.currency}`)
+    .join("\n");
+  const more = list.length > 10 ? `\n\n+${list.length - 10} حركة تانية...` : "";
+  return reply(
+    botToken,
+    chatId,
+    `🔍 مصاريف النهاردة (${list.length})\nالإجمالي: ${total.toLocaleString()} جنيه تقريبًا\n\n${lines}${more}\n\nلو عايز بيانات أكتر أو فترة تانية، افتح التطبيق 📱`
+  );
+}
+
+// "🔔 التنبيهات" — same signal as the orange alert banner on the dashboard
+// (overdue debts, over-budget categories, due recurring items), summarized as text.
+async function alertsReport(userId: string, botToken: string, chatId: string) {
+  const monthKey = new Date().toISOString().slice(0, 7);
+  const monthStart = startOfMonth(new Date()).toISOString();
+
+  const [{ data: recurring }, { data: budgets }, { data: overdueDebts }, { data: txs }] = await Promise.all([
+    supabaseAdmin.from("recurring_items").select("id,name,last_confirmed_month,is_active").eq("user_id", userId).eq("is_active", true),
+    supabaseAdmin.from("budgets").select("id,category_id,monthly_limit,alert_threshold_pct,categories(name)").eq("user_id", userId),
+    supabaseAdmin.from("debts").select("id,title,remaining_amount,currency,people(name)").eq("user_id", userId).eq("status", "overdue"),
+    supabaseAdmin.from("transactions").select("category_id,amount").eq("user_id", userId).eq("type", "expense").gte("occurred_at", monthStart),
+  ]);
+
+  const dueRecurring = (recurring || []).filter((r) => r.last_confirmed_month !== monthKey);
+
+  const spentByCategory: Record<string, number> = {};
+  for (const t of txs || []) {
+    if (!t.category_id) continue;
+    spentByCategory[t.category_id] = (spentByCategory[t.category_id] || 0) + Math.abs(Number(t.amount));
+  }
+  const overBudget = (budgets || []).filter((b) => {
+    const pct = b.monthly_limit > 0 ? ((spentByCategory[b.category_id] || 0) / Number(b.monthly_limit)) * 100 : 0;
+    return pct >= (b.alert_threshold_pct || 80);
+  });
+
+  const total = dueRecurring.length + overBudget.length + (overdueDebts || []).length;
+  if (!total) return reply(botToken, chatId, "مفيش تنبيهات دلوقتي، كله تمام ✅");
+
+  const lines: string[] = [];
+  if (dueRecurring.length) lines.push(`📅 ${dueRecurring.length} مصروف/دخل متكرر مستني تأكيد: ${dueRecurring.map((r) => r.name).join("، ")}`);
+  if (overBudget.length) lines.push(`📊 ${overBudget.length} ميزانية تخطت الحد: ${overBudget.map((b: any) => b.categories?.name || "").filter(Boolean).join("، ")}`);
+  if ((overdueDebts || []).length) {
+    lines.push(
+      `⏰ ${overdueDebts!.length} دين متأخر: ` +
+        overdueDebts!.map((d: any) => `${d.people?.name || "شخص"} (${Number(d.remaining_amount).toLocaleString()} ${d.currency})`).join("، ")
+    );
+  }
+
+  return reply(botToken, chatId, `🔔 عندك ${total} حاجة محتاجة انتباهك\n\n${lines.join("\n")}`);
+}
+
 async function continueFlow(userId: string, botToken: string, chatId: string, session: any, input: string, cbPrefix?: string) {
   const { flow, step, payload } = session;
+
+  // ===== RECURRING ITEM "دفعت" CONFIRMATION =====
+  if (flow === "recur_confirm" && step === "ask_deduct" && cbPrefix === "rdeduct") {
+    if (input === "no") {
+      const { data: item } = await supabaseAdmin.from("recurring_items").select("name,amount,currency").eq("id", payload.itemId).single();
+      try {
+        await confirmRecurringItem(userId, payload.itemId, { deduct: false });
+      } catch (e: any) {
+        await clearSession(userId, chatId);
+        return reply(botToken, chatId, `في مشكلة: ${e.message}`);
+      }
+      await clearSession(userId, chatId);
+      return reply(
+        botToken,
+        chatId,
+        `⚠️ اتسجل إن "${item?.name}" اتدفع (${Number(item?.amount || 0).toLocaleString()} ${item?.currency}) بس متسجلش في مصروفاتك ولا اتخصم من أي حساب.`
+      );
+    }
+    const accounts = await getAccounts(userId);
+    if (!accounts.length) {
+      await clearSession(userId, chatId);
+      return reply(botToken, chatId, "لسه معملتش أي حساب. ضيفه من التطبيق.");
+    }
+    await setSession(userId, chatId, "recur_confirm", "await_account", payload);
+    return replyInlineWithCancel(botToken, chatId, "اطبق الخصم من انهي حساب؟", accountsKeyboard(accounts, "racc"));
+  }
+
+  if (flow === "recur_confirm" && step === "await_account" && cbPrefix === "racc") {
+    try {
+      const { transaction, item } = await confirmRecurringItem(userId, payload.itemId, { deduct: true, account_id: input, source: "bot" });
+      await clearSession(userId, chatId);
+      const { data: acc } = await supabaseAdmin.from("accounts").select("name").eq("id", input).single();
+      const accName = acc?.name || "الحساب";
+      const msg =
+        item.kind === "income"
+          ? `✅ تم الإيداع في حساب ${accName} — ${Number(item.amount).toLocaleString()} ${item.currency} (${item.name})`
+          : `✅ اتخصم من حساب ${accName} — ${Number(item.amount).toLocaleString()} ${item.currency} (${item.name})`;
+      return reply(botToken, chatId, msg);
+    } catch (e: any) {
+      await clearSession(userId, chatId);
+      return reply(botToken, chatId, `في مشكلة: ${e.message}`);
+    }
+  }
 
   // ===== ACCOUNT STATEMENT =====
   if (flow === "account_statement" && step === "await_account" && cbPrefix === "acct") {

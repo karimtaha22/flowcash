@@ -8,6 +8,7 @@ import { toEGP, fromEGP, type FxRates } from "@/lib/fx";
 import { shrinkImage } from "@/lib/image";
 import { Camera, Loader2, AlertTriangle, CalendarDays } from "lucide-react";
 import Link from "next/link";
+import ReceiptActions from "@/components/ReceiptActions";
 
 const TYPES = [
   { key: "expense", label: "💸 مصروف" },
@@ -48,6 +49,16 @@ function AddForm() {
   const [accountsLoaded, setAccountsLoaded] = useState(false);
   const [accountsLoadError, setAccountsLoadError] = useState("");
 
+  // translucent 3-second flash after any save, showing what happened and the
+  // resulting balance — e.g. "التحويل تم من حساب كذا، المتبقي بعد التحويل كذا"
+  const [toast, setToast] = useState("");
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showToast = (text: string) => {
+    setToast(text);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(""), 3000);
+  };
+
   // date of the transaction — a calendar picker next to every entry,
   // defaulting to today unless the user picks a different date.
   const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -56,6 +67,7 @@ function AddForm() {
   // categories
   const [categories, setCategories] = useState<{ id: string; name: string; icon: string; kind: string }[]>([]);
   const [categoryId, setCategoryId] = useState("");
+  const [transferCategoryId, setTransferCategoryId] = useState("");
 
   // saved people (family / frequent recipients, managed in Settings) — used
   // to suggest names while typing a counterparty for transfers/expenses.
@@ -156,7 +168,7 @@ function AddForm() {
     setAmount(""); setDescription(""); setAccountId(""); setToAccountId(""); setCounterparty(""); setSplitDebt(false); setSplitAmount("");
     setReceiptDataUrl(null); setOcrMsg(""); setCategoryId(""); setOccurredDate(todayISO());
     setGroupSplit(false); setSplitCount("2"); setSplitPeople([{ name: "", phone: "", amount: "", edited: false }]);
-    setTransferKind("internal"); setTransferReceiptDataUrl(null);
+    setTransferKind("internal"); setTransferReceiptDataUrl(null); setTransferCategoryId("");
   };
 
   const submitSimple = async () => {
@@ -171,6 +183,7 @@ function AddForm() {
     if (type === "transfer") body.to_account_id = transferKind === "internal" ? toAccountId || undefined : undefined;
     if (type === "transfer" && transferReceiptDataUrl) body.receipt_url = transferReceiptDataUrl;
     if ((type === "expense" || type === "income") && categoryId) body.category_id = categoryId;
+    if (type === "transfer" && transferKind === "external" && transferCategoryId) body.category_id = transferCategoryId;
     if (type === "expense" && splitDebt && splitAmount && !groupSplit) {
       body.split_debt_amount = parseFloat(splitAmount);
       body.split_personal_amount = parseFloat(amount) - parseFloat(splitAmount);
@@ -188,6 +201,24 @@ function AddForm() {
       if (!res.ok) {
         setSaveError(data.error || "حصل خطأ ومتحفظتش الحركة، حاول تاني");
       } else {
+        const tx = data.transaction;
+        const fromName = accounts.find((a) => a.id === accountId)?.name;
+        const cur = currency || undefined;
+        let toastMsg = "";
+        if (type === "transfer" && accountId) {
+          toastMsg = `التحويل تم من حساب ${fromName || ""}` + (tx?.accountBalanceAfter != null ? `، المتبقي بعد التحويل ${fmt(tx.accountBalanceAfter, cur)}` : "");
+        } else if (type === "expense") {
+          toastMsg = accountId
+            ? `اتسجل المصروف من حساب ${fromName || ""}` + (tx?.accountBalanceAfter != null ? `، المتبقي ${fmt(tx.accountBalanceAfter, cur)}` : "")
+            : "اتسجل المصروف من غير خصم من أي حساب";
+        } else if (type === "income") {
+          toastMsg = accountId
+            ? `اتضاف لحساب ${fromName || ""}` + (tx?.accountBalanceAfter != null ? `، الرصيد بقى ${fmt(tx.accountBalanceAfter, cur)}` : "")
+            : "اتسجل الدخل من غير إضافة لأي حساب";
+        } else if (type === "withdrawal") {
+          toastMsg = `تم السحب من حساب ${fromName || ""}` + (tx?.accountBalanceAfter != null ? `، المتبقي ${fmt(tx.accountBalanceAfter, cur)}` : "");
+        }
+        if (toastMsg) showToast(toastMsg);
         setDone(true); reset(); loadHistory(); setTimeout(() => setDone(false), 1800);
       }
     } catch {
@@ -240,6 +271,14 @@ function AddForm() {
 
   return (
     <div className="space-y-4">
+      {toast && (
+        <div className="fixed top-3 inset-x-3 z-[60] flex justify-center pointer-events-none">
+          <div className="bg-neutral-900/80 dark:bg-neutral-800/90 text-white text-xs px-4 py-2.5 rounded-full shadow-lg backdrop-blur-sm max-w-[90%] text-center">
+            {toast}
+          </div>
+        </div>
+      )}
+
       <h1 className="text-xl font-bold">إضافة حركة</h1>
 
       <div className="flex flex-wrap gap-2">
@@ -299,8 +338,11 @@ function AddForm() {
         )}
         {ocrMsg && <p className="text-[11px] text-center text-orange-600 dark:text-orange-400">{ocrMsg}</p>}
         {receiptDataUrl && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={receiptDataUrl} alt="الإيصال" className="w-full max-h-32 object-contain rounded-lg border border-neutral-200 dark:border-neutral-800" />
+          <div className="space-y-1.5">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={receiptDataUrl} alt="الإيصال" className="w-full max-h-32 object-contain rounded-lg border border-neutral-200 dark:border-neutral-800" />
+            <ReceiptActions url={receiptDataUrl} filename="الإيصال.jpg" />
+          </div>
         )}
 
         {type === "transfer" && (
@@ -314,8 +356,11 @@ function AddForm() {
               onChange={async (e) => { const f = e.target.files?.[0]; if (f) setTransferReceiptDataUrl(await shrinkImage(f)); }}
             />
             {transferReceiptDataUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={transferReceiptDataUrl} alt="صورة التحويل" className="w-full max-h-32 object-contain rounded-lg border border-neutral-200 dark:border-neutral-800" />
+              <div className="space-y-1.5">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={transferReceiptDataUrl} alt="صورة التحويل" className="w-full max-h-32 object-contain rounded-lg border border-neutral-200 dark:border-neutral-800" />
+                <ReceiptActions url={transferReceiptDataUrl} filename="صورة-التحويل.jpg" />
+              </div>
             ) : null}
             <button
               type="button"
@@ -395,7 +440,15 @@ function AddForm() {
           </div>
         )}
         {type === "transfer" && transferKind === "external" && (
-          <input list="people-suggestions" placeholder="التحويل إلى (اسم الشخص أو الجهة)" value={counterparty} onChange={(e) => setCounterparty(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+          <>
+            <input list="people-suggestions" placeholder="التحويل إلى (اسم الشخص أو الجهة)" value={counterparty} onChange={(e) => setCounterparty(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+            <select value={transferCategoryId} onChange={(e) => setTransferCategoryId(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm">
+              <option value="">التصنيف (اختياري)</option>
+              {categories.filter((c) => c.kind === "expense").map((c) => (
+                <option key={c.id} value={c.id}>{c.icon} {c.name}</option>
+              ))}
+            </select>
+          </>
         )}
 
         <select value={accountId} onChange={(e) => setAccountId(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm">
@@ -404,10 +457,15 @@ function AddForm() {
             <option key={a.id} value={a.id}>{a.name} — {a.balance} {a.currency}</option>
           ))}
         </select>
+        {(type === "expense" || type === "income") && !accountId && (
+          <p className="text-[11px] text-amber-600 dark:text-amber-400 -mt-1.5">
+            لازم تختار حساب — من غير ما تختار، الحركة هتتسجل من غير أي خصم/إضافة فعلية لأي حساب. تقدر تحفظ على أي حال وتضيف الحساب بعدين.
+          </p>
+        )}
 
-        {type === "income" && (
+        {(type === "income" || ((type === "expense" || type === "income") && !accountId)) && (
           <select value={currency} onChange={(e) => setCurrency(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm">
-            <option value="">عملة المبلغ الوارد</option>
+            <option value="">{type === "income" ? "عملة المبلغ الوارد" : "عملة المبلغ"}</option>
             {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
         )}
@@ -505,14 +563,18 @@ function AddForm() {
 
         {(() => {
           const transferMissing = type === "transfer" && ((transferKind === "internal" && !toAccountId) || (transferKind === "external" && !counterparty.trim()));
+          // expense/income can be saved without an account (see warning above);
+          // withdrawal/transfer still need a real source account.
+          const accountRequired = type === "withdrawal" || type === "transfer";
+          const blocked = saving || !amount || (accountRequired && !accountId) || transferMissing;
           return (
             <>
-              <button disabled={saving || !amount || !accountId || transferMissing} onClick={submitSimple} className="w-full bg-orange-600 text-white rounded-lg py-2.5 text-sm font-medium disabled:opacity-40">
+              <button disabled={blocked} onClick={submitSimple} className="w-full bg-orange-600 text-white rounded-lg py-2.5 text-sm font-medium disabled:opacity-40">
                 {saving ? "جاري الحفظ..." : "حفظ الحركة"}
               </button>
-              {!saving && (!amount || !accountId || transferMissing) && accounts.length > 0 && (
+              {!saving && (!amount || (accountRequired && !accountId) || transferMissing) && accounts.length > 0 && (
                 <p className="text-[11px] text-center text-neutral-400">
-                  {!amount ? "اكتب المبلغ الأول" : !accountId ? "اختار الحساب الأول" : transferKind === "internal" ? "اختار الحساب اللي هيستقبل التحويل" : "اكتب اسم الشخص أو الجهة"} عشان تقدر تحفظ
+                  {!amount ? "اكتب المبلغ الأول" : accountRequired && !accountId ? "اختار الحساب الأول" : transferKind === "internal" ? "اختار الحساب اللي هيستقبل التحويل" : "اكتب اسم الشخص أو الجهة"} عشان تقدر تحفظ
                 </p>
               )}
             </>

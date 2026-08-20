@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
   const userId = await getSessionUserId();
   if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const body = await req.json();
-  const { person_id, direction, title, reason, amount, currency, due_date } = body;
+  const { person_id, direction, title, reason, amount, currency, due_date, debt_date } = body;
   if (!person_id || !direction || !title || !amount) {
     return NextResponse.json({ error: "بيانات ناقصة" }, { status: 400 });
   }
@@ -43,6 +43,7 @@ export async function POST(req: NextRequest) {
       remaining_amount: amount,
       currency: currency || "EGP",
       due_date: due_date || null,
+      debt_date: debt_date || new Date().toISOString().slice(0, 10),
       status: "open",
     })
     .select()

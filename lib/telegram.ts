@@ -59,10 +59,11 @@ export async function getWebhookInfo(botToken: string) {
 
 export const MAIN_KEYBOARD = {
   keyboard: [
-    [{ text: "💸 مصروف" }, { text: "🏧 سحب من حساب" }],
+    [{ text: "💸 تسجيل مصروف" }, { text: "🏧 سحب من حساب" }],
     [{ text: "💰 فلوس جاتلي" }, { text: "🔁 تحويل أونلاين" }],
     [{ text: "📊 تحديث أرصدة" }, { text: "📄 كشف سريع" }],
-    [{ text: "📈 كشف حساب" }],
+    [{ text: "📈 كشف حساب" }, { text: "🔍 استعلام عن مصروف" }],
+    [{ text: "🔔 التنبيهات" }],
   ],
   resize_keyboard: true,
 };

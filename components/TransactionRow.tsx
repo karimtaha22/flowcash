@@ -3,6 +3,7 @@ import { useRef, useState } from "react";
 import { fmt } from "@/lib/format";
 import { shrinkImage } from "@/lib/image";
 import { ArrowDownLeft, ArrowUpRight, ArrowRightLeft, Wallet, Landmark, Pencil, Trash2, Camera, Loader2 } from "lucide-react";
+import ReceiptActions from "@/components/ReceiptActions";
 
 export interface Tx {
   id: string;
@@ -209,8 +210,11 @@ export default function TransactionRow({
           <input type="datetime-local" value={form.occurred_at} onChange={(e) => setForm({ ...form, occurred_at: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
 
           {receiptUrl && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={receiptUrl} alt="الإيصال" className="w-full max-h-40 object-contain rounded-lg border border-neutral-200 dark:border-neutral-800" />
+            <div className="space-y-1.5">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={receiptUrl} alt="الإيصال" className="w-full max-h-40 object-contain rounded-lg border border-neutral-200 dark:border-neutral-800" />
+              <ReceiptActions url={receiptUrl} filename={`إيصال-${tx.description || TYPE_LABEL[tx.type]}.jpg`} />
+            </div>
           )}
           <input
             ref={fileInputRef}

@@ -212,6 +212,17 @@ export default function ExportPage() {
 
       {rows.length > 0 && (
         <>
+          {mode === "account" && familyAccounts.length > 0 && (
+            <Card className="!py-2.5 space-y-1">
+              <p className="text-[11px] text-neutral-500 font-medium">الرصيد الحالي</p>
+              {familyAccounts.map((a) => (
+                <div key={a.id} className="flex items-center justify-between text-xs">
+                  <span className="text-neutral-500">{a.name}</span>
+                  <span className="font-semibold">{fmt(Number(a.balance) || 0, a.currency)}</span>
+                </div>
+              ))}
+            </Card>
+          )}
           <div className="flex gap-2">
             <button onClick={exportCSV} className="flex-1 flex items-center justify-center gap-1 text-sm bg-neutral-800 dark:bg-neutral-700 text-white rounded-lg py-2">
               <FileSpreadsheet size={15} /> تصدير Excel
