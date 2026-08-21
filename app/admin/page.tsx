@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import Card from "@/components/Card";
 import Footer from "@/components/Footer";
 import Link from "next/link";
+import { PAGE_KEYS, PAGE_LABELS, computeLicenseStatus, type PageKey } from "@/lib/license";
 
 interface AdminUser {
   id: string;
@@ -15,7 +16,22 @@ interface AdminUser {
   parent_user_id: string | null;
   debt_reminder_hour: number | null;
   recurring_reminder_hour: number | null;
+  is_admin?: boolean | null;
+  license_code?: string | null;
+  license_type?: "trial" | "permanent" | null;
+  license_started_at?: string | null;
+  license_expires_at?: string | null;
+  license_allowed_pages?: string[] | null;
+  license_redeemed_at?: string | null;
 }
+
+const STATUS_LABEL: Record<string, string> = {
+  admin: "حساب إدارة",
+  unmanaged: "بدون ترخيص (وصول كامل)",
+  unredeemed: "كود لسه ماتفعّلش",
+  expired: "منتهي",
+  active: "شغال",
+};
 
 const HOURS = Array.from({ length: 24 }, (_, h) => h);
 const hourLabel = (h: number) => `${h.toString().padStart(2, "0")}:00`;
@@ -55,6 +71,20 @@ export default function AdminPage() {
   const [logsOpen, setLogsOpen] = useState(false);
   const [logUserFilter, setLogUserFilter] = useState("");
   const [logsExhausted, setLogsExhausted] = useState(false);
+
+  const [newLicense, setNewLicense] = useState<{ name: string; type: "trial" | "permanent"; days: string; allowed_pages: PageKey[] }>({
+    name: "",
+    type: "trial",
+    days: "14",
+    allowed_pages: [],
+  });
+  const [licenseBusy, setLicenseBusy] = useState(false);
+  const [lastIssuedCode, setLastIssuedCode] = useState<{ name: string; code: string } | null>(null);
+  const [licenseEdit, setLicenseEdit] = useState<Record<string, { type: "trial" | "permanent"; days: string; lifetime: boolean; allowed_pages: PageKey[] }>>({});
+  const [licenseEditOpen, setLicenseEditOpen] = useState<Record<string, boolean>>({});
+  const [licenseBusyId, setLicenseBusyId] = useState<Record<string, boolean>>({});
+  const [broadcastMsg, setBroadcastMsg] = useState("");
+  const [broadcastBusy, setBroadcastBusy] = useState(false);
 
   // /admin used to be reachable by anyone with no login at all — now the API
   // requires a session once a user already exists. Surface that clearly
@@ -156,6 +186,124 @@ export default function AdminPage() {
     } else setMsg("حصل خطأ في الحفظ");
   };
 
+  const togglePage = (list: PageKey[], key: PageKey): PageKey[] =>
+    list.includes(key) ? list.filter((p) => p !== key) : [...list, key];
+
+  const createLicense = async () => {
+    if (!newLicense.name.trim()) { setMsg("اكتب اسم العميل الأول"); return; }
+    if (newLicense.type === "trial" && (!newLicense.days || Number(newLicense.days) <= 0)) {
+      setMsg("اكتب عدد أيام التجربة"); return;
+    }
+    setLicenseBusy(true);
+    try {
+      const res = await fetch("/api/admin/licenses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newLicense.name.trim(),
+          type: newLicense.type,
+          days: newLicense.days ? Number(newLicense.days) : null,
+          allowed_pages: newLicense.allowed_pages,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMsg(data.error || "حصل خطأ في إصدار الكود"); return; }
+      setLastIssuedCode({ name: newLicense.name.trim(), code: data.code });
+      setMsg(`تم إصدار الكود ✅ — ${data.code}`);
+      setNewLicense({ name: "", type: "trial", days: "14", allowed_pages: [] });
+      load();
+    } finally {
+      setLicenseBusy(false);
+    }
+  };
+
+  const openLicenseEdit = (u: AdminUser) => {
+    setLicenseEditOpen((s) => ({ ...s, [u.id]: !s[u.id] }));
+    if (!licenseEdit[u.id]) {
+      const daysLeft = u.license_expires_at ? Math.max(1, Math.ceil((new Date(u.license_expires_at).getTime() - Date.now()) / 86_400_000)) : "";
+      setLicenseEdit((s) => ({
+        ...s,
+        [u.id]: {
+          type: (u.license_type as "trial" | "permanent") || "permanent",
+          days: u.license_expires_at ? String(daysLeft) : "",
+          lifetime: !u.license_expires_at,
+          allowed_pages: ((u.license_allowed_pages || []) as PageKey[]),
+        },
+      }));
+    }
+  };
+
+  const saveLicenseEdit = async (id: string) => {
+    const edit = licenseEdit[id];
+    if (!edit) return;
+    setLicenseBusyId((s) => ({ ...s, [id]: true }));
+    try {
+      const res = await fetch(`/api/admin/licenses/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: edit.type,
+          days: edit.lifetime ? null : Number(edit.days) || null,
+          allowed_pages: edit.allowed_pages,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMsg(data.error || "حصل خطأ في تعديل الترخيص"); return; }
+      setMsg("تم تعديل الترخيص ✅");
+      load();
+    } finally {
+      setLicenseBusyId((s) => ({ ...s, [id]: false }));
+    }
+  };
+
+  const convertToPermanent = (u: AdminUser) => {
+    setLicenseEdit((s) => ({
+      ...s,
+      [u.id]: {
+        type: "permanent",
+        days: "365",
+        lifetime: false,
+        allowed_pages: ((u.license_allowed_pages || []) as PageKey[]),
+      },
+    }));
+    setLicenseEditOpen((s) => ({ ...s, [u.id]: true }));
+  };
+
+  const deleteCustomer = async (u: AdminUser) => {
+    setLicenseBusyId((s) => ({ ...s, [u.id]: true }));
+    try {
+      const res = await fetch(`/api/admin/licenses/${u.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete" }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMsg(data.error || "حصل خطأ في حذف العميل"); return; }
+      setMsg(`تم إنهاء اشتراك ${u.name} — بياناته هتفضل محفوظة ٣٠ يوم قبل ما تتمسح نهائي`);
+      load();
+    } finally {
+      setLicenseBusyId((s) => ({ ...s, [u.id]: false }));
+    }
+  };
+
+  const sendBroadcast = async () => {
+    if (!broadcastMsg.trim()) { setMsg("اكتب الرسالة الأول"); return; }
+    setBroadcastBusy(true);
+    try {
+      const res = await fetch("/api/admin/broadcast", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: broadcastMsg.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMsg(data.error || "حصل خطأ في إرسال الرسالة"); return; }
+      setMsg(`تم إرسال الرسالة لكل العملاء ✅ (تليجرام: ${data.telegramSent} وصلت${data.telegramFailed ? `، ${data.telegramFailed} فشلت` : ""})`);
+      setBroadcastMsg("");
+    } finally {
+      setBroadcastBusy(false);
+    }
+  };
+
   return (
     <div className="max-w-2xl mx-auto p-4 space-y-6 pb-20">
       <div>
@@ -164,6 +312,86 @@ export default function AdminPage() {
       </div>
 
       {msg && <Card className="text-sm bg-orange-50 dark:bg-orange-950 text-orange-700 dark:text-orange-300 whitespace-pre-wrap break-all">{msg}</Card>}
+
+      <Card className="space-y-3">
+        <h2 className="font-semibold">إصدار كود ترخيص لعميل جديد (SaaS)</h2>
+        <p className="text-xs text-neutral-500">
+          العميل بياخد الكود ده وياخد ب بينه PIN من صفحة "تفعيل الحساب" (/activate). لو نسيت تحدد صفحات، الحساب بيتقفل كله للقراءة فقط لحد ما تحدد.
+        </p>
+        <input
+          placeholder="اسم العميل"
+          value={newLicense.name}
+          onChange={(e) => setNewLicense({ ...newLicense, name: e.target.value })}
+          className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm"
+        />
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setNewLicense({ ...newLicense, type: "trial" })}
+            className={`flex-1 rounded-lg py-2 text-xs border ${newLicense.type === "trial" ? "bg-orange-600 text-white border-orange-600" : "border-neutral-300 dark:border-neutral-700"}`}
+          >
+            نسخة تجريبية
+          </button>
+          <button
+            type="button"
+            onClick={() => setNewLicense({ ...newLicense, type: "permanent" })}
+            className={`flex-1 rounded-lg py-2 text-xs border ${newLicense.type === "permanent" ? "bg-orange-600 text-white border-orange-600" : "border-neutral-300 dark:border-neutral-700"}`}
+          >
+            عميل دائم
+          </button>
+        </div>
+        <div>
+          <label className="text-[10px] text-neutral-400">
+            {newLicense.type === "trial" ? "مدة التجربة (بالأيام)" : "مدة الاشتراك (بالأيام) — سيبها فاضية لمدى الحياة"}
+          </label>
+          <input
+            type="number"
+            min={1}
+            placeholder={newLicense.type === "trial" ? "مثال: 14" : "اسيبها فاضية = مدى الحياة"}
+            value={newLicense.days}
+            onChange={(e) => setNewLicense({ ...newLicense, days: e.target.value })}
+            className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm"
+          />
+        </div>
+        <div>
+          <p className="text-[10px] text-neutral-400 mb-1">الصفحات المفتوحة بالكامل (اللي مش متعلّم عليها بتبقى للقراءة فقط)</p>
+          <div className="grid grid-cols-2 gap-1.5">
+            {PAGE_KEYS.map((key) => (
+              <label key={key} className="flex items-center gap-1.5 text-xs">
+                <input
+                  type="checkbox"
+                  checked={newLicense.allowed_pages.includes(key)}
+                  onChange={() => setNewLicense({ ...newLicense, allowed_pages: togglePage(newLicense.allowed_pages, key) })}
+                />
+                {PAGE_LABELS[key]}
+              </label>
+            ))}
+          </div>
+        </div>
+        <button onClick={createLicense} disabled={licenseBusy} className="w-full bg-orange-600 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50">
+          {licenseBusy ? "جاري الإصدار..." : "إصدار الكود"}
+        </button>
+        {lastIssuedCode && (
+          <div className="text-sm rounded-lg p-3 bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300 text-center">
+            كود {lastIssuedCode.name}: <span className="font-bold tracking-wider">{lastIssuedCode.code}</span>
+          </div>
+        )}
+      </Card>
+
+      <Card className="space-y-3">
+        <h2 className="font-semibold">رسالة عامة لكل العملاء</h2>
+        <p className="text-xs text-neutral-500">هتتبعت كإشعار في بوت تليجرام الخاص بكل عميل، وهتظهر كبانر جوه البرنامج لحد ما كل عميل يقفلها.</p>
+        <textarea
+          placeholder="اكتب الرسالة هنا..."
+          value={broadcastMsg}
+          onChange={(e) => setBroadcastMsg(e.target.value)}
+          rows={3}
+          className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm"
+        />
+        <button onClick={sendBroadcast} disabled={broadcastBusy} className="w-full bg-neutral-800 dark:bg-neutral-700 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50">
+          {broadcastBusy ? "جاري الإرسال..." : "إرسال لكل العملاء"}
+        </button>
+      </Card>
 
       <Card className="space-y-3">
         <h2 className="font-semibold">١. إنشاء مستخدم جديد</h2>
@@ -235,6 +463,105 @@ export default function AdminPage() {
             <div className="text-xs text-neutral-400">
               معرّف المستخدم (للاستخدام الداخلي): <code>{u.id}</code>
             </div>
+
+            {!u.is_admin && (() => {
+              const status = computeLicenseStatus(u);
+              const badgeColor =
+                status.kind === "active" ? "bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300"
+                : status.kind === "expired" ? "bg-red-50 dark:bg-red-950 text-red-600 dark:text-red-400"
+                : "bg-neutral-100 dark:bg-neutral-800 text-neutral-500";
+              return (
+                <div className="border border-neutral-100 dark:border-neutral-800 rounded-lg p-2.5 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className={`text-xs rounded-full px-2 py-0.5 ${badgeColor}`}>{STATUS_LABEL[status.kind]}</span>
+                    {u.license_code && <code className="text-xs">{u.license_code}</code>}
+                  </div>
+                  {status.kind === "active" && (
+                    <p className="text-xs text-neutral-500">
+                      {status.type === "trial" ? "تجريبي" : "دائم"} — {status.expiresAt ? `باقي ${status.daysLeft} يوم` : "مدى الحياة"}
+                      {status.type === "trial" && `، الصفحات المفتوحة: ${status.allowedPages.length ? status.allowedPages.map((p) => PAGE_LABELS[p]).join("، ") : "كلها للقراءة فقط"}`}
+                    </p>
+                  )}
+                  {status.kind === "expired" && <p className="text-xs text-neutral-500">بياناته هتفضل محفوظة ٣٠ يوم من تاريخ الانتهاء قبل ما تتمسح نهائي.</p>}
+
+                  {(status.kind === "active" || status.kind === "expired" || status.kind === "unredeemed") && (
+                    <div className="flex gap-2 flex-wrap">
+                      {status.kind === "active" && status.type === "trial" && (
+                        <button type="button" onClick={() => convertToPermanent(u)} className="text-xs border border-orange-300 dark:border-orange-800 text-orange-600 dark:text-orange-400 rounded-lg px-2.5 py-1">
+                          تحويل لعميل دائم
+                        </button>
+                      )}
+                      <button type="button" onClick={() => openLicenseEdit(u)} className="text-xs border border-neutral-300 dark:border-neutral-700 rounded-lg px-2.5 py-1">
+                        {licenseEditOpen[u.id] ? "إخفاء التعديل" : "تجديد / تعديل الصلاحيات"}
+                      </button>
+                      <button type="button" disabled={licenseBusyId[u.id]} onClick={() => deleteCustomer(u)} className="text-xs border border-red-300 dark:border-red-900 text-red-600 dark:text-red-400 rounded-lg px-2.5 py-1 disabled:opacity-50">
+                        حذف العميل
+                      </button>
+                    </div>
+                  )}
+
+                  {licenseEditOpen[u.id] && licenseEdit[u.id] && (
+                    <div className="space-y-2 pt-2 border-t border-neutral-100 dark:border-neutral-800">
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setLicenseEdit((s) => ({ ...s, [u.id]: { ...s[u.id], type: "trial" } }))}
+                          className={`flex-1 rounded-lg py-1.5 text-xs border ${licenseEdit[u.id].type === "trial" ? "bg-orange-600 text-white border-orange-600" : "border-neutral-300 dark:border-neutral-700"}`}
+                        >
+                          تجريبي
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setLicenseEdit((s) => ({ ...s, [u.id]: { ...s[u.id], type: "permanent" } }))}
+                          className={`flex-1 rounded-lg py-1.5 text-xs border ${licenseEdit[u.id].type === "permanent" ? "bg-orange-600 text-white border-orange-600" : "border-neutral-300 dark:border-neutral-700"}`}
+                        >
+                          دائم
+                        </button>
+                      </div>
+                      <label className="flex items-center gap-2 text-xs">
+                        <input
+                          type="checkbox"
+                          checked={licenseEdit[u.id].lifetime}
+                          onChange={(e) => setLicenseEdit((s) => ({ ...s, [u.id]: { ...s[u.id], lifetime: e.target.checked } }))}
+                        />
+                        مدى الحياة (بدون تاريخ انتهاء)
+                      </label>
+                      {!licenseEdit[u.id].lifetime && (
+                        <input
+                          type="number"
+                          min={1}
+                          placeholder="عدد الأيام من دلوقتي"
+                          value={licenseEdit[u.id].days}
+                          onChange={(e) => setLicenseEdit((s) => ({ ...s, [u.id]: { ...s[u.id], days: e.target.value } }))}
+                          className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm"
+                        />
+                      )}
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {PAGE_KEYS.map((key) => (
+                          <label key={key} className="flex items-center gap-1.5 text-xs">
+                            <input
+                              type="checkbox"
+                              checked={licenseEdit[u.id].allowed_pages.includes(key)}
+                              onChange={() => setLicenseEdit((s) => ({ ...s, [u.id]: { ...s[u.id], allowed_pages: togglePage(s[u.id].allowed_pages, key) } }))}
+                            />
+                            {PAGE_LABELS[key]}
+                          </label>
+                        ))}
+                      </div>
+                      <button
+                        type="button"
+                        disabled={licenseBusyId[u.id]}
+                        onClick={() => saveLicenseEdit(u.id)}
+                        className="w-full bg-orange-600 text-white rounded-lg py-1.5 text-xs disabled:opacity-50"
+                      >
+                        {licenseBusyId[u.id] ? "جاري الحفظ..." : "حفظ الترخيص"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
             <input
               placeholder="توكن بوت تليجرام"
               defaultValue={""}

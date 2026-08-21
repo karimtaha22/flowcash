@@ -15,6 +15,14 @@
     {
       "path": "/api/cron/zakat-reminder",
       "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/cron/license-expiry-reminder",
+      "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/cron/purge-expired-customers",
+      "schedule": "0 3 * * *"
     }
   ]
 }

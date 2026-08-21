@@ -12,7 +12,11 @@ interface U {
 }
 
 export default function LoginPage() {
+  const [hasUsers, setHasUsers] = useState<boolean | null>(null);
+  const [nameQuery, setNameQuery] = useState("");
   const [users, setUsers] = useState<U[]>([]);
+  const [searched, setSearched] = useState(false);
+  const [searching, setSearching] = useState(false);
   const [selected, setSelected] = useState<U | null>(null);
   const [pin, setPin] = useState("");
   const [error, setError] = useState("");
@@ -21,11 +25,33 @@ export default function LoginPage() {
   const router = useRouter();
 
   useEffect(() => {
-    fetch("/api/auth/users")
+    // Only checks whether ANY account exists yet (for the first-run "go set
+    // up /admin" message) — never lists customer names to an unauthenticated
+    // visitor. The visitor types their own name below instead.
+    fetch("/api/auth/exists")
       .then((r) => r.json())
-      .then((d) => setUsers(d.users || []));
+      .then((d) => setHasUsers(!!d.hasUsers));
     setBioSupported(typeof window !== "undefined" && !!window.PublicKeyCredential);
   }, []);
+
+  const searchByName = async () => {
+    if (nameQuery.trim().length < 2) { setError("اكتب اسمك (حرفين على الأقل)"); return; }
+    setSearching(true);
+    setError("");
+    try {
+      const res = await fetch("/api/auth/lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: nameQuery.trim() }),
+      });
+      const data = await res.json();
+      setSearched(true);
+      if (!res.ok) { setError(data.error || "حصل خطأ"); setUsers([]); return; }
+      setUsers(data.users || []);
+    } finally {
+      setSearching(false);
+    }
+  };
 
   const submitBiometric = async () => {
     if (!selected) return;
@@ -90,7 +116,7 @@ export default function LoginPage() {
 
       {!selected ? (
         <div className="w-full max-w-xs space-y-2">
-          {users.length === 0 && (
+          {hasUsers === false && (
             <p className="text-center text-sm text-neutral-500">
               لسه مفيش مستخدمين. روح صفحة{" "}
               <a href="/admin" className="text-orange-600 underline">
@@ -99,19 +125,44 @@ export default function LoginPage() {
               وضيف نفسك.
             </p>
           )}
-          {users.map((u) => (
-            <button
-              key={u.id}
-              onClick={() => setSelected(u)}
-              className="w-full flex items-center gap-3 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-4 py-3 shadow-sm hover:border-orange-400 transition"
-            >
-              <div className="w-9 h-9 rounded-full bg-orange-100 dark:bg-orange-900 flex items-center justify-center text-orange-700 dark:text-orange-300 font-bold">
-                {u.name[0]}
+          {hasUsers !== false && (
+            <>
+              <div className="flex gap-2">
+                <input
+                  autoFocus
+                  placeholder="اكتب اسمك"
+                  value={nameQuery}
+                  onChange={(e) => { setNameQuery(e.target.value); setSearched(false); }}
+                  onKeyDown={(e) => { if (e.key === "Enter" && !searching) searchByName(); }}
+                  className="flex-1 rounded-xl border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+                <button
+                  onClick={searchByName}
+                  disabled={searching}
+                  className="bg-orange-600 disabled:opacity-40 text-white rounded-xl px-4 text-sm font-medium"
+                >
+                  {searching ? "..." : "دخول"}
+                </button>
               </div>
-              <span className="font-medium">{u.name}</span>
-              {u.is_family && <span className="ms-auto text-xs text-neutral-400">عائلة</span>}
-            </button>
-          ))}
+              {error && <p className="text-sm text-red-500 text-center">{error}</p>}
+              {searched && users.length === 0 && !error && (
+                <p className="text-center text-sm text-neutral-500">مفيش حساب بالاسم ده. تأكد من الاسم أو تواصل مع فريق الدعم.</p>
+              )}
+              {users.map((u) => (
+                <button
+                  key={u.id}
+                  onClick={() => setSelected(u)}
+                  className="w-full flex items-center gap-3 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-4 py-3 shadow-sm hover:border-orange-400 transition"
+                >
+                  <div className="w-9 h-9 rounded-full bg-orange-100 dark:bg-orange-900 flex items-center justify-center text-orange-700 dark:text-orange-300 font-bold">
+                    {u.name[0]}
+                  </div>
+                  <span className="font-medium">{u.name}</span>
+                  {u.is_family && <span className="ms-auto text-xs text-neutral-400">عائلة</span>}
+                </button>
+              ))}
+            </>
+          )}
         </div>
       ) : (
         <div className="w-full max-w-xs flex flex-col items-center gap-4">

@@ -1,0 +1,42 @@
+name: Security scan
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+  schedule:
+    # weekly sweep of the FULL history, in case something old was missed
+    - cron: "0 3 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    name: Scan for leaked secrets (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history — gitleaks needs it to check old commits, not just the latest diff
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # optional: set GITLEAKS_LICENSE in repo secrets only if you use
+          # gitleaks Pro features — the open-source scan works without it.
+
+  dependency-audit:
+    name: npm audit (known vulnerable dependencies)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npm audit --audit-level=high
+        continue-on-error: true # report, don't hard-fail the build over transitive advisories
