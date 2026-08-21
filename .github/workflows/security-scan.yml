@@ -23,7 +23,7 @@ jobs:
           fetch-depth: 0 # full history — gitleaks needs it to check old commits, not just the latest diff
 
       - name: Run gitleaks
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # optional: set GITLEAKS_LICENSE in repo secrets only if you use
