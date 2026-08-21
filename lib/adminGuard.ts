@@ -8,14 +8,21 @@ import { getSessionUserId } from "./session";
 // signup, before any user exists yet ("لسه مفيش مستخدمين" bootstrap flow).
 // Once at least one user exists, admin access requires a logged-in session.
 //
-// SECURITY: fails CLOSED (treats it as "not bootstrap", i.e. requires a
-// real admin session) whenever the count query errors — e.g. Supabase is
-// briefly unreachable — rather than defaulting an ignored/undefined count
-// to 0. Ignoring the `error` here used to mean any Supabase hiccup silently
-// re-opened the bootstrap window to the entire internet, which is a far
-// worse failure mode than the app briefly refusing a legitimate first-run
-// setup during an outage.
+// SECURITY: this is gated behind an explicit opt-in env var
+// (ALLOW_ADMIN_BOOTSTRAP=true), not just "does the count query say 0 rows".
+// Relying on a live row count alone means ANY situation where that count
+// comes back wrong — a transient Supabase error (handled below), a stale
+// cache, a misconfigured env var pointing at the wrong project, literally
+// any bug in this exact query — silently reopens full unauthenticated admin
+// access to the whole internet. Once a real admin account exists (which it
+// does — this is a live product with paying customers), there is no
+// legitimate reason for that window to ever reopen on its own. To bootstrap
+// a genuinely brand-new deployment from scratch, set ALLOW_ADMIN_BOOTSTRAP=
+// true in Vercel temporarily, create the first admin account, then remove
+// it — the var defaults to unset/off, which is what production should run
+// with permanently once setup is done.
 export async function isBootstrap(): Promise<boolean> {
+  if (process.env.ALLOW_ADMIN_BOOTSTRAP !== "true") return false;
   const { count, error } = await supabaseAdmin.from("app_users").select("id", { count: "exact", head: true });
   if (error) return false;
   return (count ?? 0) === 0;

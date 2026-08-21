@@ -37,6 +37,7 @@ export default function SettingsPage() {
   const [peopleOpen, setPeopleOpen] = useState(false);
   const [hijriCorrection, setHijriCorrection] = useState(0);
   const [savingHijri, setSavingHijri] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     fetch("/api/me").then((r) => r.json()).then((d) => {
@@ -47,6 +48,7 @@ export default function SettingsPage() {
         setAutoLogoutOn(mins > 0);
         if (mins > 0) setAutoLogoutMinutes(String(mins));
         setHijriCorrection(Number(d.user.hijri_correction_days) || 0);
+        setIsAdmin(!!d.user.is_admin);
       }
     });
     setBioSupported(typeof window !== "undefined" && !!window.PublicKeyCredential);
@@ -286,12 +288,14 @@ export default function SettingsPage() {
         </p>
       </Card>
 
-      <a href="/admin">
-        <Card className="flex items-center gap-2 text-sm">
-          <ShieldCheck size={18} className="text-orange-600" />
-          إعدادات المستخدمين وربط البوت / الشيت (Admin)
-        </Card>
-      </a>
+      {isAdmin && (
+        <a href="/admin">
+          <Card className="flex items-center gap-2 text-sm">
+            <ShieldCheck size={18} className="text-orange-600" />
+            إعدادات المستخدمين وربط البوت / الشيت (Admin)
+          </Card>
+        </a>
+      )}
 
       <button onClick={logout} className="w-full flex items-center justify-center gap-2 text-sm text-red-500 border border-red-200 dark:border-red-900 rounded-xl py-3">
         <LogOut size={16} /> تسجيل خروج

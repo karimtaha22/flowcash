@@ -252,12 +252,12 @@ function AccountsInner() {
             <p className="font-medium text-sm truncate">{a.name}</p>
             {a.account_number && <p className="text-xs text-neutral-400 truncate">{a.account_number}</p>}
           </div>
-          <div className="text-left shrink-0">
+          <div className={`text-left shrink-0 ${converted !== null && a.include_in_net_worth !== false ? "border-l-2 border-orange-400 dark:border-orange-600 pl-2" : ""}`}>
             <p className="font-bold text-sm">{fmt(Number(a.balance), a.currency)}</p>
             {converted !== null && (
-              <p className="text-[10px] text-neutral-400">
+              <p className={`text-[10px] ${a.include_in_net_worth === false ? "text-neutral-400" : "text-orange-600 dark:text-orange-400 font-medium"}`}>
                 ≈ {fmt(converted, baseCurrency)}
-                {a.include_in_net_worth === false && " (مش محسوبة في صافي الثروة)"}
+                {a.include_in_net_worth === false ? " (مش محسوبة في صافي الثروة)" : " ✓ متحسوبة في الإجمالي"}
               </p>
             )}
           </div>
