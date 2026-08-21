@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { DEFAULT_CATEGORIES } from "@/lib/categories";
-import { requireAdminAuthOrBootstrap } from "@/lib/adminGuard";
+import { requireAdminAuthOrBootstrap, isBootstrap } from "@/lib/adminGuard";
 
 export async function GET() {
   const guard = await requireAdminAuthOrBootstrap();
@@ -27,6 +27,15 @@ export async function POST(req: NextRequest) {
   if (!name || !pin || pin.length < 4) {
     return NextResponse.json({ error: "الاسم و PIN (٤ أرقام على الأقل) مطلوبين" }, { status: 400 });
   }
+  // If we're inside the genuine bootstrap window (ALLOW_ADMIN_BOOTSTRAP=true
+  // AND zero accounts exist yet — see lib/adminGuard.ts), this request only
+  // got past requireAdminAuthOrBootstrap() because no admin exists at all.
+  // The very first account created in that window IS the admin — otherwise
+  // there'd be no way to ever reach /admin again once bootstrap closes, with
+  // no admin account and no way to create one. Re-checked right before the
+  // insert (not just trusted from the guard above) since this request body
+  // could in principle create several accounts in a fast sequence.
+  const bootstrapping = await isBootstrap();
   const pin_hash = await bcrypt.hash(pin, 10);
   const { data: user, error } = await supabaseAdmin
     .from("app_users")
@@ -36,6 +45,7 @@ export async function POST(req: NextRequest) {
       base_currency: base_currency || "EGP",
       is_family: !!is_family,
       parent_user_id: parent_user_id || null,
+      is_admin: bootstrapping,
     })
     .select()
     .single();

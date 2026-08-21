@@ -185,10 +185,23 @@ function AccountsInner() {
     load();
   };
 
+  // Per-currency card: each currency's own raw total, PLUS — folded into the
+  // base-currency card specifically — the converted equivalent of every
+  // other-currency account whose "احسب... ضمن صافي الثروة" switch is ON.
+  // This is what makes the switch actually move the number shown here:
+  // before this, the grid just summed each account's own currency and
+  // never touched the base-currency figure at all, so toggling the switch
+  // visibly changed nothing on this page (only the Dashboard's separate net
+  // worth figure moved).
   const totalByCurrency = accounts.reduce((acc: Record<string, number>, a) => {
     acc[a.currency] = (acc[a.currency] || 0) + Number(a.balance);
+    if (a.currency !== baseCurrency && a.include_in_net_worth !== false) {
+      const converted = toBaseCurrency(Number(a.balance), a.currency);
+      if (converted !== null) acc[baseCurrency] = (acc[baseCurrency] || 0) + converted;
+    }
     return acc;
   }, {});
+  const hasIncludedForeignAccounts = accounts.some((a) => a.currency !== baseCurrency && a.include_in_net_worth !== false);
 
   const renderEditPanel = (a: Account) => {
     const e = editing[a.id] || {};
@@ -324,6 +337,9 @@ function AccountsInner() {
           <Card key={cur} className="text-center bg-neutral-100 dark:bg-neutral-800/50 border-none">
             <p className="text-xs text-neutral-500">إجمالي ({cur})</p>
             <p className="text-lg font-bold mt-1">{total.toLocaleString()}</p>
+            {cur === baseCurrency && hasIncludedForeignAccounts && (
+              <p className="text-[10px] text-orange-600 dark:text-orange-400 mt-1">شامل الحسابات بعملات تانية المفعّل ليها السويتش تحت</p>
+            )}
           </Card>
         ))}
       </div>
