@@ -21,13 +21,25 @@ export async function POST(req: NextRequest) {
 
   const { data, error } = await supabaseAdmin
     .from("app_users")
-    .select("id,name,is_family,webauthn_credential")
+    .select("id,name,is_family,webauthn_credential,license_type,license_redeemed_at")
     .ilike("name", `%${name}%`)
     .order("created_at", { ascending: true })
     .limit(5);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  const users = (data || []).map((u) => ({ id: u.id, name: u.name, is_family: u.is_family, has_webauthn: !!u.webauthn_credential }));
+  // A customer who was issued a license code but never redeemed it yet has
+  // no pin_hash — they belong on /activate (code + choose-your-own-PIN), not
+  // here entering a "PIN" that doesn't exist. Without this flag, /login sent
+  // them straight to a numeric-only PIN box, where they'd try typing their
+  // (letters-included) activation code and every letter would silently get
+  // stripped — the exact bug reported live.
+  const users = (data || []).map((u) => ({
+    id: u.id,
+    name: u.name,
+    is_family: u.is_family,
+    has_webauthn: !!u.webauthn_credential,
+    needs_activation: !!u.license_type && !u.license_redeemed_at,
+  }));
   await recordLoginAttempt(ip, null, users.length > 0);
   return NextResponse.json({ users });
 }

@@ -32,6 +32,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   const update: Record<string, any> = {};
+  if (typeof body.email === "string") {
+    const trimmedEmail = body.email.trim();
+    if (trimmedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      return NextResponse.json({ error: "الإيميل مش صحيح" }, { status: 400 });
+    }
+    update.email = trimmedEmail || null;
+  }
   if (body.type && ["trial", "permanent"].includes(body.type)) update.license_type = body.type;
   if (Array.isArray(body.allowed_pages)) {
     update.license_allowed_pages = body.allowed_pages.filter((p: string) => (PAGE_KEYS as readonly string[]).includes(p));

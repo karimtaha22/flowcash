@@ -50,6 +50,10 @@ const FAQ = [
 // next year" tracker, and a charity reminder setup — all persisted to
 // app_users except the calculator inputs themselves, which are session-only.
 export default function ZakatCharityPanel() {
+  // Two real sub-tabs (زكاة المال / صدقات) instead of one long scrolling
+  // page with both sections stacked — the user specifically asked for this
+  // split, with زكاة المال as the default/first tab.
+  const [subTab, setSubTab] = useState<"zakat" | "charity">("zakat");
   const [baseCurrency, setBaseCurrency] = useState("EGP");
   const [telegramConnected, setTelegramConnected] = useState(false);
   const [rates, setRates] = useState<FxRates | null>(null);
@@ -261,6 +265,29 @@ export default function ZakatCharityPanel() {
 
   return (
     <div className="space-y-3">
+      <div className="flex gap-2 rounded-xl border border-emerald-200 dark:border-emerald-900 p-1 bg-white dark:bg-neutral-900">
+        <button
+          type="button"
+          onClick={() => setSubTab("zakat")}
+          className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-semibold transition ${
+            subTab === "zakat" ? "bg-emerald-600 text-white" : "text-emerald-700 dark:text-emerald-400"
+          }`}
+        >
+          <Moon size={15} /> زكاة المال
+        </button>
+        <button
+          type="button"
+          onClick={() => setSubTab("charity")}
+          className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-semibold transition ${
+            subTab === "charity" ? "bg-emerald-600 text-white" : "text-emerald-700 dark:text-emerald-400"
+          }`}
+        >
+          <HeartHandshake size={15} /> صدقات
+        </button>
+      </div>
+
+      {subTab === "zakat" && (
+      <>
       {/* live gold price + country/karat selector — drives both the gold
           value input and the nisab basis below, so they're always consistent. */}
       <div className="rounded-2xl p-4 space-y-2 bg-white dark:bg-neutral-900 border border-emerald-200 dark:border-emerald-900">
@@ -471,6 +498,10 @@ export default function ZakatCharityPanel() {
         ))}
       </div>
 
+      </>
+      )}
+
+      {subTab === "charity" && (
       <Card className="space-y-3 !bg-emerald-50 dark:!bg-emerald-950/40 !border-emerald-200 dark:!border-emerald-900">
         <p className="text-sm font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-2"><HeartHandshake size={17} /> صدقات</p>
         <div className="grid grid-cols-2 gap-2">
@@ -517,8 +548,9 @@ export default function ZakatCharityPanel() {
           <p className="text-xs text-neutral-600 dark:text-neutral-300 leading-relaxed">"وَمَا أَنفَقْتُم مِّن شَيْءٍ فَهُوَ يُخْلِفُهُ وَهُوَ خَيْرُ الرَّازِقِينَ" — {"{"}سبأ:٣٩{"}"}</p>
         </div>
       </Card>
+      )}
 
-      {showSaveZakat && (
+      {subTab === "zakat" && showSaveZakat && (
         <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50" onClick={() => setShowSaveZakat(false)}>
           <div className="bg-white dark:bg-neutral-900 rounded-t-2xl sm:rounded-2xl w-full max-w-sm p-4 space-y-3" onClick={(e) => e.stopPropagation()}>
             <p className="font-semibold text-sm flex items-center gap-1.5"><CalendarDays size={16} className="text-emerald-600" /> حدد تاريخ إخراج الزكاة</p>
@@ -542,7 +574,7 @@ export default function ZakatCharityPanel() {
         </div>
       )}
 
-      {!showSaveZakat && zakatSaveMsg && (
+      {subTab === "zakat" && !showSaveZakat && zakatSaveMsg && (
         <Card className="text-xs text-center !bg-emerald-50 dark:!bg-emerald-950/40 text-emerald-800 dark:text-emerald-300">{zakatSaveMsg}</Card>
       )}
     </div>

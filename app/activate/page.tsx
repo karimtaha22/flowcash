@@ -75,6 +75,10 @@ export default function ActivatePage() {
         {loading ? "جاري التفعيل..." : "فعّل حسابك"}
       </button>
 
+      <a href="/forgot-code" className="text-xs text-neutral-400 underline text-center">
+        نسيت كود التفعيل؟
+      </a>
+
       <Footer />
     </div>
   );

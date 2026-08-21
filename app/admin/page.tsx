@@ -17,6 +17,7 @@ interface AdminUser {
   debt_reminder_hour: number | null;
   recurring_reminder_hour: number | null;
   is_admin?: boolean | null;
+  email?: string | null;
   license_code?: string | null;
   license_type?: "trial" | "permanent" | null;
   license_started_at?: string | null;
@@ -72,15 +73,16 @@ export default function AdminPage() {
   const [logUserFilter, setLogUserFilter] = useState("");
   const [logsExhausted, setLogsExhausted] = useState(false);
 
-  const [newLicense, setNewLicense] = useState<{ name: string; type: "trial" | "permanent"; days: string; allowed_pages: PageKey[] }>({
+  const [newLicense, setNewLicense] = useState<{ name: string; email: string; type: "trial" | "permanent"; days: string; allowed_pages: PageKey[] }>({
     name: "",
+    email: "",
     type: "trial",
     days: "14",
     allowed_pages: [],
   });
   const [licenseBusy, setLicenseBusy] = useState(false);
   const [lastIssuedCode, setLastIssuedCode] = useState<{ name: string; code: string } | null>(null);
-  const [licenseEdit, setLicenseEdit] = useState<Record<string, { type: "trial" | "permanent"; days: string; lifetime: boolean; allowed_pages: PageKey[] }>>({});
+  const [licenseEdit, setLicenseEdit] = useState<Record<string, { type: "trial" | "permanent"; days: string; lifetime: boolean; allowed_pages: PageKey[]; email: string }>>({});
   const [licenseEditOpen, setLicenseEditOpen] = useState<Record<string, boolean>>({});
   const [licenseBusyId, setLicenseBusyId] = useState<Record<string, boolean>>({});
   const [broadcastMsg, setBroadcastMsg] = useState("");
@@ -216,6 +218,7 @@ export default function AdminPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: newLicense.name.trim(),
+          email: newLicense.email.trim(),
           type: newLicense.type,
           days: newLicense.days ? Number(newLicense.days) : null,
           allowed_pages: newLicense.allowed_pages,
@@ -225,7 +228,7 @@ export default function AdminPage() {
       if (!res.ok) { setMsg(data.error || "حصل خطأ في إصدار الكود"); return; }
       setLastIssuedCode({ name: newLicense.name.trim(), code: data.code });
       setMsg(`تم إصدار الكود ✅ — ${data.code}`);
-      setNewLicense({ name: "", type: "trial", days: "14", allowed_pages: [] });
+      setNewLicense({ name: "", email: "", type: "trial", days: "14", allowed_pages: [] });
       load();
     } finally {
       setLicenseBusy(false);
@@ -243,6 +246,7 @@ export default function AdminPage() {
           days: u.license_expires_at ? String(daysLeft) : "",
           lifetime: !u.license_expires_at,
           allowed_pages: ((u.license_allowed_pages || []) as PageKey[]),
+          email: u.email || "",
         },
       }));
     }
@@ -260,6 +264,7 @@ export default function AdminPage() {
           type: edit.type,
           days: edit.lifetime ? null : Number(edit.days) || null,
           allowed_pages: edit.allowed_pages,
+          email: edit.email,
         }),
       });
       const data = await res.json();
@@ -279,6 +284,7 @@ export default function AdminPage() {
         days: "365",
         lifetime: false,
         allowed_pages: ((u.license_allowed_pages || []) as PageKey[]),
+        email: u.email || "",
       },
     }));
     setLicenseEditOpen((s) => ({ ...s, [u.id]: true }));
@@ -339,6 +345,18 @@ export default function AdminPage() {
           onChange={(e) => setNewLicense({ ...newLicense, name: e.target.value })}
           className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm"
         />
+        <div>
+          <input
+            type="email"
+            placeholder="إيميل العميل (اختياري — لو نسي كود التفعيل هيتبعتله عليه)"
+            value={newLicense.email}
+            onChange={(e) => setNewLicense({ ...newLicense, email: e.target.value })}
+            className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm"
+          />
+          <p className="text-[10px] text-neutral-400 mt-1">
+            لو سبته فاضي، مش هيقدر يسترجع الكود لوحده لو نسيه — هيحتاج يتواصل معاك.
+          </p>
+        </div>
         <div className="flex gap-2">
           <button
             type="button"
@@ -520,6 +538,15 @@ export default function AdminPage() {
 
                   {licenseEditOpen[u.id] && licenseEdit[u.id] && (
                     <div className="space-y-2 pt-2 border-t border-neutral-100 dark:border-neutral-800">
+                      <div>
+                        <input
+                          type="email"
+                          placeholder="إيميل العميل (لاسترجاع كود التفعيل)"
+                          value={licenseEdit[u.id].email}
+                          onChange={(e) => setLicenseEdit((s) => ({ ...s, [u.id]: { ...s[u.id], email: e.target.value } }))}
+                          className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm"
+                        />
+                      </div>
                       <div className="flex gap-2">
                         <button
                           type="button"

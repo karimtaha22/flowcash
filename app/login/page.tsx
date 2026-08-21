@@ -9,6 +9,7 @@ interface U {
   name: string;
   is_family: boolean;
   has_webauthn?: boolean;
+  needs_activation?: boolean;
 }
 
 export default function LoginPage() {
@@ -148,19 +149,35 @@ export default function LoginPage() {
               {searched && users.length === 0 && !error && (
                 <p className="text-center text-sm text-neutral-500">مفيش حساب بالاسم ده. تأكد من الاسم أو تواصل مع فريق الدعم.</p>
               )}
-              {users.map((u) => (
-                <button
-                  key={u.id}
-                  onClick={() => setSelected(u)}
-                  className="w-full flex items-center gap-3 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-4 py-3 shadow-sm hover:border-orange-400 transition"
-                >
-                  <div className="w-9 h-9 rounded-full bg-orange-100 dark:bg-orange-900 flex items-center justify-center text-orange-700 dark:text-orange-300 font-bold">
-                    {u.name[0]}
-                  </div>
-                  <span className="font-medium">{u.name}</span>
-                  {u.is_family && <span className="ms-auto text-xs text-neutral-400">عائلة</span>}
-                </button>
-              ))}
+              {users.map((u) =>
+                u.needs_activation ? (
+                  <a
+                    key={u.id}
+                    href="/activate"
+                    className="w-full flex items-center gap-3 rounded-xl border border-orange-300 dark:border-orange-800 bg-orange-50 dark:bg-orange-950 px-4 py-3 shadow-sm hover:border-orange-400 transition"
+                  >
+                    <div className="w-9 h-9 rounded-full bg-orange-100 dark:bg-orange-900 flex items-center justify-center text-orange-700 dark:text-orange-300 font-bold">
+                      {u.name[0]}
+                    </div>
+                    <div className="flex-1">
+                      <span className="font-medium block">{u.name}</span>
+                      <span className="text-xs text-orange-600 dark:text-orange-400">لسه محتاج تفعيل — اضغط هنا تدخل كود التفعيل</span>
+                    </div>
+                  </a>
+                ) : (
+                  <button
+                    key={u.id}
+                    onClick={() => setSelected(u)}
+                    className="w-full flex items-center gap-3 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-4 py-3 shadow-sm hover:border-orange-400 transition"
+                  >
+                    <div className="w-9 h-9 rounded-full bg-orange-100 dark:bg-orange-900 flex items-center justify-center text-orange-700 dark:text-orange-300 font-bold">
+                      {u.name[0]}
+                    </div>
+                    <span className="font-medium">{u.name}</span>
+                    {u.is_family && <span className="ms-auto text-xs text-neutral-400">عائلة</span>}
+                  </button>
+                )
+              )}
             </>
           )}
         </div>

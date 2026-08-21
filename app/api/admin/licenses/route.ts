@@ -13,9 +13,15 @@ export async function POST(req: NextRequest) {
   if (guard) return guard;
 
   const body = await req.json();
-  const { name, type, days, allowed_pages } = body;
+  const { name, type, days, allowed_pages, email } = body;
   if (!name || !type || !["trial", "permanent"].includes(type)) {
     return NextResponse.json({ error: "الاسم ونوع الترخيص مطلوبين" }, { status: 400 });
+  }
+  // Optional — only used later for "forgot activation code" email recovery
+  // (see /api/license/forgot-code). Login itself never needs it.
+  const trimmedEmail = String(email || "").trim();
+  if (trimmedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+    return NextResponse.json({ error: "الإيميل مش صحيح" }, { status: 400 });
   }
   if (type === "trial" && (!days || days <= 0)) {
     return NextResponse.json({ error: "عدد أيام التجربة مطلوب" }, { status: 400 });
@@ -38,6 +44,7 @@ export async function POST(req: NextRequest) {
     .from("app_users")
     .insert({
       name,
+      email: trimmedEmail || null,
       license_code: code,
       license_type: type,
       license_started_at: now.toISOString(),

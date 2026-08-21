@@ -23,6 +23,12 @@ function CurrencyConverter({ rates, baseCurrency }: { rates: Record<string, numb
   const [amount, setAmount] = useState("100");
   const [from, setFrom] = useState("EGP");
   const [to, setTo] = useState("USD");
+  // Mouse hover already pauses the ticker via the .animate-marquee:hover CSS
+  // rule — but touch devices have no hover, so a finger near/on the ticker
+  // couldn't stop it to actually read a number. pointerdown/up/cancel/leave
+  // cover both mouse and touch in one handler set (a mouse click also fires
+  // these, which is harmless — hover already covers that case).
+  const [tickerPaused, setTickerPaused] = useState(false);
 
   useEffect(() => {
     setFrom(baseCurrency);
@@ -59,8 +65,14 @@ function CurrencyConverter({ rates, baseCurrency }: { rates: Record<string, numb
     <Card>
       <p className="text-sm font-semibold mb-1">أسعار العملات لحظيًا</p>
       {tickerEntries.length > 0 && (
-        <div className="overflow-hidden mb-3 -mx-1">
-          <div className="flex w-max animate-marquee">
+        <div
+          className="overflow-hidden mb-3 -mx-1"
+          onPointerDown={() => setTickerPaused(true)}
+          onPointerUp={() => setTickerPaused(false)}
+          onPointerCancel={() => setTickerPaused(false)}
+          onPointerLeave={() => setTickerPaused(false)}
+        >
+          <div className={`flex w-max animate-marquee${tickerPaused ? " marquee-paused" : ""}`}>
             {[...tickerEntries, ...tickerEntries].map((t, i) => (
               <span key={i} className="shrink-0 text-[11px] text-neutral-500 px-3 border-l border-neutral-200 dark:border-neutral-800 whitespace-nowrap">
                 1 {t.code} = {t.value.toLocaleString("ar-EG", { maximumFractionDigits: 3 })} {baseCurrency}

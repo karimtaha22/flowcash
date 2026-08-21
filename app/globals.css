@@ -28,3 +28,11 @@ html {
 .animate-marquee {
   animation: marquee-rtl 22s linear infinite;
 }
+/* Desktop: mouse hovering the ticker pauses it so the numbers can actually
+   be read. Mobile has no hover concept, so app/(protected)/dashboard/page.tsx
+   also toggles this same class via pointerdown/pointerup — a tap-and-hold
+   pauses it there instead. */
+.animate-marquee:hover,
+.animate-marquee.marquee-paused {
+  animation-play-state: paused;
+}

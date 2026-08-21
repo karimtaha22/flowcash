@@ -256,7 +256,15 @@ function PeopleInner() {
         <p style="font-size:10px;color:#9ca3af;text-align:center;margin-top:16px;">تم الإنشاء بواسطة FlowCash — ${new Date().toLocaleDateString("ar-EG")}</p>
       `;
       document.body.appendChild(node);
-      const html2canvas = (await import("html2canvas")).default;
+      // html2canvas (plain) throws "Attempting to parse an unsupported color
+      // function 'lab'/'oklch'" the moment it walks up to <body>/<html> and
+      // hits a Tailwind v4 utility color — Tailwind v4 generates its palette
+      // with oklch(), and Chrome's getComputedStyle serializes some of those
+      // as lab(), which the original html2canvas's color parser has never
+      // supported (open upstream issue, unresolved). html2canvas-pro is a
+      // maintained fork with the exact same API that adds lab/lch/oklab/
+      // oklch support — a straight swap, no other code here changes.
+      const html2canvas = (await import("html2canvas-pro")).default;
       const canvas = await html2canvas(node, { scale: 2, backgroundColor: "#ffffff" });
       document.body.removeChild(node);
 
