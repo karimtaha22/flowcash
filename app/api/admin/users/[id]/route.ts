@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import bcrypt from "bcryptjs";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { setWebhook } from "@/lib/telegram";
 import { requireAdminAuth } from "@/lib/adminGuard";
@@ -23,6 +24,21 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   ];
   const update: Record<string, any> = {};
   for (const k of allowed) if (k in body) update[k] = body[k];
+  // name/pin are handled separately from the generic allowlist above: both
+  // are sent as empty strings from the admin UI's "leave blank to keep
+  // unchanged" fields, so an empty value here means "don't touch it", not
+  // "clear it".
+  if (typeof body.name === "string" && body.name.trim().length > 0) {
+    update.name = body.name.trim();
+  }
+  // PIN change — a separate field on purpose (never sent/stored as plain
+  // text): only touches pin_hash when the admin actually typed a new one.
+  if (typeof body.pin === "string" && body.pin.length > 0) {
+    if (body.pin.length < 4) {
+      return NextResponse.json({ error: "الـ PIN لازم يكون ٤ أرقام على الأقل" }, { status: 400 });
+    }
+    update.pin_hash = await bcrypt.hash(body.pin, 10);
+  }
   update.updated_at = new Date().toISOString();
 
   const { data, error } = await supabaseAdmin

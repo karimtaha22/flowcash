@@ -86,18 +86,33 @@ export default function AdminPage() {
   const [broadcastMsg, setBroadcastMsg] = useState("");
   const [broadcastBusy, setBroadcastBusy] = useState(false);
 
-  // /admin used to be reachable by anyone with no login at all — now the API
-  // requires a session once a user already exists. Surface that clearly
-  // instead of silently showing an empty/broken-looking panel.
+  // /admin is also gated server-side now (see app/admin/layout.tsx) — this
+  // client-side check is defense-in-depth, not the only line of defense.
+  // Deliberately FAILS CLOSED: `locked` starts true and only clears on an
+  // explicit successful (200 + real data) response. A 401, a network error,
+  // a timeout, anything other than a clean success — all leave the page
+  // showing the login-required screen instead of an open (if empty-looking)
+  // admin panel.
   const load = () =>
-    fetch("/api/admin/users").then((r) => {
-      if (r.status === 401) { setLocked(true); setCheckedAccess(true); return { users: [] }; }
-      setCheckedAccess(true);
-      return r.json();
-    }).then((d) => setUsers(d.users || []));
+    fetch("/api/admin/users")
+      .then((r) => {
+        if (!r.ok) { setLocked(true); setCheckedAccess(true); return null; }
+        return r.json();
+      })
+      .then((d) => {
+        if (!d) return;
+        setUsers(d.users || []);
+        setLocked(false);
+        setCheckedAccess(true);
+      })
+      .catch(() => { setLocked(true); setCheckedAccess(true); });
   useEffect(() => { load(); }, []);
 
-  if (checkedAccess && locked) {
+  if (!checkedAccess) {
+    return <div className="max-w-md mx-auto p-4 pt-16 text-center text-sm text-neutral-400">جاري التحقق...</div>;
+  }
+
+  if (locked) {
     return (
       <div className="max-w-md mx-auto p-4 pt-16 text-center space-y-4">
         <p className="text-lg font-semibold">لازم تسجل دخول الأول</p>
@@ -395,6 +410,9 @@ export default function AdminPage() {
 
       <Card className="space-y-3">
         <h2 className="font-semibold">١. إنشاء مستخدم جديد</h2>
+        <p className="text-xs text-neutral-500">
+          ده لحساب مش خاضع لنظام الترخيص خالص — وصول كامل دايمًا، من غير كود، من غير تاريخ انتهاء (زي حساب الإدارة بتاعك، أو فرد من عيلتك). لعميل بتبيعله البرنامج، استخدم "إصدار كود ترخيص" فوق بدل الكارت ده.
+        </p>
         <input placeholder="الاسم" value={newUser.name} onChange={(e) => setNewUser({ ...newUser, name: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
         <input placeholder="PIN (٤ أرقام على الأقل)" type="password" inputMode="numeric" value={newUser.pin} onChange={(e) => setNewUser({ ...newUser, pin: e.target.value.replace(/\D/g, "") })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
         <label className="flex items-center gap-2 text-xs">
@@ -561,6 +579,24 @@ export default function AdminPage() {
                 </div>
               );
             })()}
+
+            <div className="border-t border-neutral-100 dark:border-neutral-800 pt-2 space-y-2">
+              <p className="text-xs font-medium text-neutral-500">تغيير الاسم أو رمز الدخول (PIN) — سيبها فاضية لو مش عايز تغيّرها</p>
+              <input
+                placeholder="اسم جديد"
+                defaultValue={""}
+                onChange={(e) => setEditing({ ...editing, [u.id]: { ...editing[u.id], name: e.target.value } })}
+                className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm"
+              />
+              <input
+                placeholder="PIN جديد (٤ أرقام على الأقل)"
+                type="password"
+                inputMode="numeric"
+                defaultValue={""}
+                onChange={(e) => setEditing({ ...editing, [u.id]: { ...editing[u.id], pin: e.target.value.replace(/\D/g, "") } })}
+                className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm"
+              />
+            </div>
 
             <input
               placeholder="توكن بوت تليجرام"

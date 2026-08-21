@@ -7,8 +7,17 @@ import { getSessionUserId } from "./session";
 // existing ones. The only legitimate anonymous case is the very first-ever
 // signup, before any user exists yet ("لسه مفيش مستخدمين" bootstrap flow).
 // Once at least one user exists, admin access requires a logged-in session.
-export async function isBootstrap() {
-  const { count } = await supabaseAdmin.from("app_users").select("id", { count: "exact", head: true });
+//
+// SECURITY: fails CLOSED (treats it as "not bootstrap", i.e. requires a
+// real admin session) whenever the count query errors — e.g. Supabase is
+// briefly unreachable — rather than defaulting an ignored/undefined count
+// to 0. Ignoring the `error` here used to mean any Supabase hiccup silently
+// re-opened the bootstrap window to the entire internet, which is a far
+// worse failure mode than the app briefly refusing a legitimate first-run
+// setup during an outage.
+export async function isBootstrap(): Promise<boolean> {
+  const { count, error } = await supabaseAdmin.from("app_users").select("id", { count: "exact", head: true });
+  if (error) return false;
   return (count ?? 0) === 0;
 }
 
@@ -17,11 +26,13 @@ export async function isBootstrap() {
 // once the app has paying customers, could open /admin and see, edit, or
 // delete every other customer's account. It now also requires is_admin=true
 // on that user's row (set once, on your own account, by the licensing
-// migration — see lib/license.ts).
-async function isSessionAdmin(): Promise<boolean> {
+// migration — see lib/license.ts). Exported so app/admin/layout.tsx can
+// reuse this exact check server-side instead of duplicating the query.
+export async function isSessionAdmin(): Promise<boolean> {
   const userId = await getSessionUserId();
   if (!userId) return false;
-  const { data } = await supabaseAdmin.from("app_users").select("is_admin").eq("id", userId).single();
+  const { data, error } = await supabaseAdmin.from("app_users").select("is_admin").eq("id", userId).single();
+  if (error) return false;
   return !!data?.is_admin;
 }
 
