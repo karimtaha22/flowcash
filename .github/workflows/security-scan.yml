@@ -18,7 +18,7 @@ jobs:
     name: Scan for leaked secrets (gitleaks)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # full history — gitleaks needs it to check old commits, not just the latest diff
 
@@ -33,7 +33,7 @@ jobs:
     name: npm audit (known vulnerable dependencies)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 20
