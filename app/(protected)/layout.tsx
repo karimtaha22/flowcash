@@ -6,6 +6,7 @@ import Footer from "@/components/Footer";
 import AppBadge from "@/components/AppBadge";
 import AutoLogout from "@/components/AutoLogout";
 import LicenseBanner from "@/components/LicenseBanner";
+import NotificationsBell from "@/components/NotificationsBell";
 
 export default async function ProtectedLayout({ children }: { children: React.ReactNode }) {
   const userId = await getSessionUserId();
@@ -24,6 +25,7 @@ export default async function ProtectedLayout({ children }: { children: React.Re
       <BottomNav />
       <AppBadge />
       <AutoLogout />
+      <NotificationsBell />
     </div>
   );
 }
