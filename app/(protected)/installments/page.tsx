@@ -4,10 +4,11 @@ import { useSearchParams } from "next/navigation";
 import Card from "@/components/Card";
 import { fmt } from "@/lib/format";
 import { shrinkImage } from "@/lib/image";
+import { shareFile } from "@/lib/shareFile";
 import InstallmentCalculatorModal from "@/components/InstallmentCalculator";
 import {
   Plus, Trash2, Pencil, CreditCard, Users, CheckCircle2, Camera, ShieldCheck, ShieldAlert,
-  Star, ArrowLeftRight, Calculator, ChevronDown, ChevronUp, X,
+  Star, ArrowLeftRight, Calculator, ChevronDown, ChevronUp, X, Scale, FileDown, Image as ImageIcon,
 } from "lucide-react";
 
 // ===================== types =====================
@@ -21,7 +22,7 @@ interface InstallmentPlan {
   installment_payments: InstallmentPayment[];
 }
 interface Gam3eyaParticipant {
-  id: string; name: string; phone: string | null; account_number: string | null;
+  id: string; name: string; phone: string | null; account_number: string | null; address: string | null;
   id_photo_front: string | null; id_photo_back: string | null; selfie_photo: string | null;
   verified: boolean; verification_note: string | null; payout_order: number; rating: number | null;
 }
@@ -63,8 +64,14 @@ function InstallmentsPageInner() {
     setTimeout(() => setMsg(""), isError ? 4500 : 2500);
   };
 
-  const loadAll = async () => {
-    setLoading(true);
+  // silent=true (كل استدعاء بعد أول تحميل) بيمنع إعادة تحميل الصفحة كلها —
+  // كانت أي عملية (تسجيل دفعة، تبديل دور، إضافة فرد...) بترجع loading=true
+  // فتختفي الصفحة بالكامل ويظهر "جاري التحميل..." لحظة، وده بيقفل أي كارت
+  // متفتح (زي كارت الجمعية) وبيحس المستخدم إنه "خرج" من الصفحة. دلوقتي أول
+  // تحميل بس هو اللي بيوريه سبينر؛ أي reload() بعد كده بيحصل في الخلفية
+  // والبيانات بتتحدث في مكانها من غير ما حاجة تختفي.
+  const loadAll = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const [p, g] = await Promise.all([
         fetch("/api/installments").then((r) => r.json()),
@@ -73,9 +80,10 @@ function InstallmentsPageInner() {
       setPlans(p.plans || []);
       setGam3eyat(g.gam3eyas || []);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
+  const reload = () => loadAll(true);
   useEffect(() => { loadAll(); }, []);
 
   return (
@@ -105,8 +113,8 @@ function InstallmentsPageInner() {
 
       {loading && <p className="text-center text-sm text-neutral-400 py-6">جاري التحميل...</p>}
 
-      {!loading && tab === "installments" && <InstallmentsTab plans={plans} reload={loadAll} showMsg={showMsg} />}
-      {!loading && tab === "gam3eya" && <Gam3eyaTab gam3eyat={gam3eyat} plans={plans} reload={loadAll} showMsg={showMsg} />}
+      {!loading && tab === "installments" && <InstallmentsTab plans={plans} reload={reload} showMsg={showMsg} />}
+      {!loading && tab === "gam3eya" && <Gam3eyaTab gam3eyat={gam3eyat} reload={reload} showMsg={showMsg} />}
     </div>
   );
 }
@@ -119,7 +127,10 @@ function InstallmentsTab({ plans, reload, showMsg }: { plans: InstallmentPlan[];
   const [confirmDelete, setConfirmDelete] = useState<InstallmentPlan | null>(null);
   const [escalation, setEscalation] = useState<InstallmentPlan | null>(null);
   const [showCalculator, setShowCalculator] = useState(false);
+  const [showBudgetReview, setShowBudgetReview] = useState(false);
+  const [calculatorPlan, setCalculatorPlan] = useState<InstallmentPlan | null>(null); // set = "تعديل متقدم" على خطة موجودة، فاضي = إنشاء قسط جديد
   const [editPayment, setEditPayment] = useState<{ plan: InstallmentPlan; payment: InstallmentPayment } | null>(null);
+  const [editPlan, setEditPlan] = useState<InstallmentPlan | null>(null);
   const [busy, setBusy] = useState(false);
 
   const active = plans.filter((p) => p.status === "active");
@@ -150,6 +161,43 @@ function InstallmentsTab({ plans, reload, showMsg }: { plans: InstallmentPlan[];
       reload();
     } catch {
       showMsg("مفيش اتصال بالإنترنت، حاول تاني", true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const savePlanEdit = async (plan: InstallmentPlan, updates: { item_name?: string; company_name?: string | null; original_price?: number | null }) => {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/installments/${plan.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { showMsg(data.error || "حصل خطأ ومتحفظش التعديل", true); return; }
+      showMsg("✅ اتحفظ التعديل");
+      setEditPlan(null);
+      reload();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const applyAdvancedEdit = async (plan: InstallmentPlan, v: { monthly_amount: number; months_count: number }) => {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/installments/${plan.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ regenerate: { monthly_amount: v.monthly_amount, months_count: v.months_count } }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { showMsg(data.error || "حصل خطأ وماتحدثش الجدول", true); return; }
+      showMsg("✅ اتحدث جدول الأقساط الباقية");
+      setShowCalculator(false);
+      setCalculatorPlan(null);
+      reload();
     } finally {
       setBusy(false);
     }
@@ -240,7 +288,10 @@ function InstallmentsTab({ plans, reload, showMsg }: { plans: InstallmentPlan[];
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm font-semibold text-neutral-600 dark:text-neutral-300">كل الأقساط</p>
         <div className="flex gap-2">
-          <button onClick={() => setShowCalculator(true)} className="flex items-center gap-1 text-xs border border-orange-300 dark:border-orange-800 text-orange-600 dark:text-orange-400 rounded-full px-3 py-1.5">
+          <button onClick={() => setShowBudgetReview(true)} className="flex items-center gap-1 text-xs border border-orange-300 dark:border-orange-800 text-orange-600 dark:text-orange-400 rounded-full px-3 py-1.5">
+            <Scale size={14} /> راجع ميزانيتك
+          </button>
+          <button onClick={() => { setCalculatorPlan(null); setShowCalculator(true); }} className="flex items-center gap-1 text-xs border border-orange-300 dark:border-orange-800 text-orange-600 dark:text-orange-400 rounded-full px-3 py-1.5">
             <Calculator size={14} /> حاسبة
           </button>
           <button onClick={() => setShowForm((s) => !s)} className="flex items-center gap-1 text-xs bg-orange-600 text-white rounded-full px-3 py-1.5">
@@ -321,6 +372,7 @@ function InstallmentsTab({ plans, reload, showMsg }: { plans: InstallmentPlan[];
                   {overduePending.length >= 2 && (
                     <button onClick={(e) => { e.stopPropagation(); setEscalation(plan); }} className="text-[10px] bg-red-600 text-white rounded-full px-2 py-1">قسطين متأخرين</button>
                   )}
+                  <button onClick={(e) => { e.stopPropagation(); setEditPlan(plan); }} className="text-neutral-400 hover:text-orange-600 p-1"><Pencil size={14} /></button>
                   <button onClick={(e) => { e.stopPropagation(); setConfirmDelete(plan); }} className="text-neutral-400 hover:text-red-600 p-1"><Trash2 size={14} /></button>
                   {isOpen ? <ChevronUp size={16} className="text-neutral-400" /> : <ChevronDown size={16} className="text-neutral-400" />}
                 </div>
@@ -385,14 +437,11 @@ function InstallmentsTab({ plans, reload, showMsg }: { plans: InstallmentPlan[];
       )}
 
       {confirmDelete && (
-        <Modal onClose={() => setConfirmDelete(null)}>
-          <p className="font-semibold text-sm">تأكيد الحذف</p>
-          <p className="text-xs text-neutral-500">هتحذف "{confirmDelete.item_name}" وكل جدول أقساطه. الإجراء ده مش قابل للتراجع.</p>
-          <div className="flex gap-2">
-            <button onClick={() => setConfirmDelete(null)} className="flex-1 rounded-lg border border-neutral-300 dark:border-neutral-700 py-2 text-sm">إلغاء</button>
-            <button onClick={() => deletePlan(confirmDelete)} className="flex-1 bg-red-600 text-white rounded-lg py-2 text-sm font-medium">حذف نهائي</button>
-          </div>
-        </Modal>
+        <DeleteConfirmModal
+          description={`هتحذف "${confirmDelete.item_name}" وكل جدول أقساطه. الإجراء ده مش قابل للتراجع.`}
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={() => deletePlan(confirmDelete)}
+        />
       )}
 
       {editPayment && (
@@ -405,10 +454,39 @@ function InstallmentsTab({ plans, reload, showMsg }: { plans: InstallmentPlan[];
         />
       )}
 
+      {showBudgetReview && <SimulatorModal onClose={() => setShowBudgetReview(false)} kind="installment" />}
+
+      {editPlan && (
+        <PlanEditModal
+          plan={editPlan}
+          busy={busy}
+          onClose={() => setEditPlan(null)}
+          onSave={(updates) => savePlanEdit(editPlan, updates)}
+          onAdvancedEdit={() => { setEditPlan(null); setCalculatorPlan(editPlan); setShowCalculator(true); }}
+        />
+      )}
+
       {showCalculator && (
         <InstallmentCalculatorModal
-          onClose={() => setShowCalculator(false)}
+          onClose={() => { setShowCalculator(false); setCalculatorPlan(null); }}
+          applyLabel={calculatorPlan ? "حدّث جدول الأقساط الباقية بالقيم دي" : undefined}
+          initial={
+            calculatorPlan
+              ? {
+                  itemName: calculatorPlan.item_name,
+                  itemPrice: calculatorPlan.original_price || calculatorPlan.total_amount,
+                  downPayment: 0,
+                  periodValue: Math.max(1, calculatorPlan.months_count - calculatorPlan.installment_payments.filter((p) => p.status === "paid").length),
+                  periodType: "months",
+                  currency: calculatorPlan.currency,
+                }
+              : undefined
+          }
           onApply={(v) => {
+            if (calculatorPlan) {
+              applyAdvancedEdit(calculatorPlan, { monthly_amount: v.monthly_amount, months_count: v.months_count });
+              return;
+            }
             setForm({
               item_name: v.item_name,
               company_name: "",
@@ -424,6 +502,50 @@ function InstallmentsTab({ plans, reload, showMsg }: { plans: InstallmentPlan[];
         />
       )}
     </div>
+  );
+}
+
+function PlanEditModal({
+  plan, busy, onClose, onSave, onAdvancedEdit,
+}: {
+  plan: InstallmentPlan; busy: boolean; onClose: () => void;
+  onSave: (updates: { item_name: string; company_name: string | null; original_price: number | null }) => void;
+  onAdvancedEdit: () => void;
+}) {
+  const [itemName, setItemName] = useState(plan.item_name);
+  const [companyName, setCompanyName] = useState(plan.company_name || "");
+  const [originalPrice, setOriginalPrice] = useState(plan.original_price ? String(plan.original_price) : "");
+
+  return (
+    <Modal onClose={onClose}>
+      <p className="font-semibold text-sm">تعديل بيانات القسط</p>
+      <p className="text-[11px] text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950 rounded-lg p-2">
+        ⚠️ التعديل هيغيّر بيانات القسط المسجلة عندك.
+      </p>
+      <div>
+        <label className="text-[10px] text-neutral-400">اسم السلعة</label>
+        <input value={itemName} onChange={(e) => setItemName(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+      </div>
+      <div>
+        <label className="text-[10px] text-neutral-400">اسم الشركة (اختياري)</label>
+        <input value={companyName} onChange={(e) => setCompanyName(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+      </div>
+      <div>
+        <label className="text-[10px] text-neutral-400">السعر الأصلي (اختياري — لحساب الفايدة)</label>
+        <input type="number" value={originalPrice} onChange={(e) => setOriginalPrice(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+      </div>
+      <button
+        disabled={busy || !itemName.trim()}
+        onClick={() => onSave({ item_name: itemName, company_name: companyName || null, original_price: originalPrice ? parseFloat(originalPrice) : null })}
+        className="w-full bg-orange-600 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-60"
+      >
+        حفظ
+      </button>
+      <button onClick={onAdvancedEdit} className="w-full flex items-center justify-center gap-1 rounded-lg border border-orange-300 dark:border-orange-800 text-orange-600 dark:text-orange-400 py-2 text-sm font-medium">
+        <Calculator size={14} /> تعديل متقدم (المبلغ الشهري وعدد الشهور عن طريق الحاسبة)
+      </button>
+      <p className="text-[10px] text-neutral-400 text-center">التعديل المتقدم بيغيّر بس الأقساط اللي لسه ما اتدفعتش — الأقساط المدفوعة فعلاً متتأثرش.</p>
+    </Modal>
   );
 }
 
@@ -477,6 +599,36 @@ function Modal({ children, onClose }: { children: React.ReactNode; onClose: () =
   );
 }
 
+const DELETE_CONFIRM_WORD = "idea";
+
+// حماية إضافية قبل أي حذف نهائي (قسط أو جمعية) — لازم تكتب "idea" (بأي حروف
+// كابيتال أو سمول) في المربع قبل ما زرار "حذف نهائي" يشتغل، عشان يبقى في
+// خطوة واعية قبل إجراء مش قابل للتراجع.
+function DeleteConfirmModal({ description, onCancel, onConfirm }: { description: string; onCancel: () => void; onConfirm: () => void }) {
+  const [word, setWord] = useState("");
+  const canDelete = word.trim().toLowerCase() === DELETE_CONFIRM_WORD;
+
+  return (
+    <Modal onClose={onCancel}>
+      <p className="font-semibold text-sm">تأكيد الحذف</p>
+      <p className="text-xs text-neutral-500">{description}</p>
+      <div>
+        <label className="text-[10px] text-neutral-400">اكتب كلمة idea في المربع علشان يتم الحذف</label>
+        <input
+          value={word}
+          onChange={(e) => setWord(e.target.value)}
+          placeholder="idea"
+          className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm"
+        />
+      </div>
+      <div className="flex gap-2">
+        <button onClick={onCancel} className="flex-1 rounded-lg border border-neutral-300 dark:border-neutral-700 py-2 text-sm">إلغاء</button>
+        <button disabled={!canDelete} onClick={onConfirm} className="flex-1 bg-red-600 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-40">حذف نهائي</button>
+      </div>
+    </Modal>
+  );
+}
+
 function StarPicker({ value, onChange, readOnly = false }: { value: number | null; onChange?: (v: number) => void; readOnly?: boolean }) {
   return (
     <div className="flex items-center gap-0.5">
@@ -496,12 +648,12 @@ function StarPicker({ value, onChange, readOnly = false }: { value: number | nul
 }
 
 // ===================== جمعيات =====================
-type NewParticipant = { name: string; phone: string; account_number: string };
+type NewParticipant = { name: string; phone: string; account_number: string; address: string; id_photo_front: string };
 
 function Gam3eyaTab({
-  gam3eyat, plans, reload, showMsg,
+  gam3eyat, reload, showMsg,
 }: {
-  gam3eyat: Gam3eya[]; plans: InstallmentPlan[]; reload: () => void; showMsg: (t: string, e?: boolean) => void;
+  gam3eyat: Gam3eya[]; reload: () => void; showMsg: (t: string, e?: boolean) => void;
 }) {
   const [showForm, setShowForm] = useState(false);
   const [formType, setFormType] = useState<"subscribed" | "organizing">("subscribed");
@@ -515,7 +667,10 @@ function Gam3eyaTab({
 
   const [subForm, setSubForm] = useState({ name: "", monthly_amount: "", currency: "EGP", months_count: "", my_payout_month: "", start_date: todayISO() });
   const [orgForm, setOrgForm] = useState({ name: "", monthly_amount: "", currency: "EGP", start_date: todayISO() });
-  const [orgParticipants, setOrgParticipants] = useState<NewParticipant[]>([{ name: "", phone: "", account_number: "" }, { name: "", phone: "", account_number: "" }]);
+  const [orgParticipants, setOrgParticipants] = useState<NewParticipant[]>([
+    { name: "", phone: "", account_number: "", address: "", id_photo_front: "" },
+    { name: "", phone: "", account_number: "", address: "", id_photo_front: "" },
+  ]);
 
   const active = gam3eyat.filter((g) => g.status === "active");
 
@@ -566,7 +721,10 @@ function Gam3eyaTab({
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { showMsg(data.error || "حصل خطأ ومتحفظش", true); return; }
       setOrgForm({ name: "", monthly_amount: "", currency: "EGP", start_date: todayISO() });
-      setOrgParticipants([{ name: "", phone: "", account_number: "" }, { name: "", phone: "", account_number: "" }]);
+      setOrgParticipants([
+        { name: "", phone: "", account_number: "", address: "", id_photo_front: "" },
+        { name: "", phone: "", account_number: "", address: "", id_photo_front: "" },
+      ]);
       setShowForm(false);
       reload();
     } finally {
@@ -602,18 +760,35 @@ function Gam3eyaTab({
     reload();
   };
 
-  const pickForSwap = async (g: Gam3eya, participantId: string) => {
+  // تبديل الأدوار بقى بخطوتين: اختيار شخصين (إما بالدوس عليهم زي القديم، أو
+  // بدروب داون جديد جوه الكارت) ثم تأكيد صريح "هيتم نقل فلان مكان فلان" قبل
+  // ما التبديل الفعلي يحصل — كان بيتنفذ على طول من غير تأكيد قبل كده.
+  const [swapConfirm, setSwapConfirm] = useState<{ g: Gam3eya; a: string; b: string } | null>(null);
+
+  const requestSwap = (g: Gam3eya, a: string, b: string) => {
+    if (!a || !b || a === b) return;
+    setSwapConfirm({ g, a, b });
+  };
+
+  const pickForSwap = (g: Gam3eya, participantId: string) => {
     if (!swapFirst) { setSwapFirst(participantId); return; }
     if (swapFirst === participantId) { setSwapFirst(null); return; }
+    requestSwap(g, swapFirst, participantId);
+  };
+
+  const confirmSwap = async () => {
+    if (!swapConfirm) return;
+    const { g, a, b } = swapConfirm;
     setBusy(true);
     try {
       const res = await fetch(`/api/gam3eya/${g.id}/participants/swap`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ participant_a: swapFirst, participant_b: participantId }),
+        body: JSON.stringify({ participant_a: a, participant_b: b }),
       });
       if (!res.ok) { showMsg("حصل خطأ في التبديل", true); return; }
       showMsg("✅ اتبدل الدور");
+      setSwapConfirm(null);
       setSwapFirst(null);
       setSwapMode(null);
       reload();
@@ -682,18 +857,33 @@ function Gam3eyaTab({
                 <input type="date" value={orgForm.start_date} onChange={(e) => setOrgForm({ ...orgForm, start_date: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
               </div>
               <p className="text-[11px] text-neutral-400">عدد الشهور = عدد الأفراد أوتوماتيك (كل شهر واحد يقبض).</p>
-              <div className="space-y-1.5">
-                {orgParticipants.map((p, i) => (
-                  <div key={i} className="flex gap-1.5 items-center">
-                    <span className="text-[10px] text-neutral-400 w-4 shrink-0">{i + 1}</span>
-                    <input placeholder="الاسم" value={p.name} onChange={(e) => setOrgParticipants(orgParticipants.map((x, xi) => (xi === i ? { ...x, name: e.target.value } : x)))} className="flex-1 min-w-0 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 text-xs" />
-                    <input placeholder="رقم الموبايل" value={p.phone} onChange={(e) => setOrgParticipants(orgParticipants.map((x, xi) => (xi === i ? { ...x, phone: e.target.value } : x)))} className="w-28 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 text-xs" />
-                    <button onClick={() => setOrgParticipants(orgParticipants.filter((_, xi) => xi !== i))} className="text-neutral-400 hover:text-red-600 p-1 shrink-0"><X size={13} /></button>
-                  </div>
-                ))}
+              <div className="space-y-2">
+                {orgParticipants.map((p, i) => {
+                  const update = (patch: Partial<NewParticipant>) => setOrgParticipants(orgParticipants.map((x, xi) => (xi === i ? { ...x, ...patch } : x)));
+                  return (
+                    <div key={i} className="rounded-lg border border-dashed border-neutral-300 dark:border-neutral-700 p-2 space-y-1.5">
+                      <div className="flex gap-1.5 items-center">
+                        <span className="text-[10px] text-neutral-400 w-4 shrink-0">{i + 1}</span>
+                        <input placeholder="الاسم" value={p.name} onChange={(e) => update({ name: e.target.value })} className="flex-1 min-w-0 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 text-xs" />
+                        <button onClick={() => setOrgParticipants(orgParticipants.filter((_, xi) => xi !== i))} className="text-neutral-400 hover:text-red-600 p-1 shrink-0"><X size={13} /></button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <input placeholder="رقم الموبايل" value={p.phone} onChange={(e) => update({ phone: e.target.value })} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 text-xs" />
+                        <input placeholder="حساب بنك أو انستجرام" value={p.account_number} onChange={(e) => update({ account_number: e.target.value })} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 text-xs" />
+                      </div>
+                      <input placeholder="العنوان (اختياري)" value={p.address} onChange={(e) => update({ address: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 text-xs" />
+                      <label className="flex items-center gap-1.5 text-[10px] text-neutral-400 cursor-pointer">
+                        <Camera size={12} /> {p.id_photo_front ? "✅ اتصورت صورة البطاقة" : "ارفع صورة البطاقة (اختياري)"}
+                        <input
+                          type="file" accept="image/*" capture="environment" className="hidden"
+                          onChange={async (e) => { const f = e.target.files?.[0]; if (f) update({ id_photo_front: await shrinkImage(f) }); }}
+                        />
+                      </label>
+                    </div>
+                  );
+                })}
               </div>
-              <button onClick={() => setOrgParticipants([...orgParticipants, { name: "", phone: "", account_number: "" }])} className="text-xs text-orange-600 dark:text-orange-400 font-medium">+ إضافة فرد</button>
-              <p className="text-[11px] text-neutral-400">تقدر تضيف رقم حساب/محفظة وصورة بطاقة كل فرد بعد ما تحفظ الجمعية، من كارت الجمعية نفسها.</p>
+              <button onClick={() => setOrgParticipants([...orgParticipants, { name: "", phone: "", account_number: "", address: "", id_photo_front: "" }])} className="text-xs text-orange-600 dark:text-orange-400 font-medium">+ إضافة فرد</button>
               <button disabled={busy} onClick={submitOrganizing} className="w-full bg-orange-600 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-60">حفظ الجمعية</button>
             </div>
           )}
@@ -715,6 +905,7 @@ function Gam3eyaTab({
             swapFirst={swapFirst}
             onToggleSwapMode={() => { setSwapMode(swapMode === g.id ? null : g.id); setSwapFirst(null); }}
             onPickSwap={(pid) => pickForSwap(g, pid)}
+            onRequestSwap={(a, b) => requestSwap(g, a, b)}
             onOpenVerify={(pid) => setVerifyPanel({ gam3eyaId: g.id, participantId: pid })}
             onAddedParticipant={reload}
             showMsg={showMsg}
@@ -724,12 +915,22 @@ function Gam3eyaTab({
       </div>
 
       {confirmDelete && (
-        <Modal onClose={() => setConfirmDelete(null)}>
-          <p className="font-semibold text-sm">تأكيد الحذف</p>
-          <p className="text-xs text-neutral-500">هتحذف جمعية "{confirmDelete.name || (confirmDelete.type === "subscribed" ? "بدون اسم" : "بدون اسم")}" وكل بياناتها. الإجراء ده مش قابل للتراجع.</p>
+        <DeleteConfirmModal
+          description={`هتحذف جمعية "${confirmDelete.name || "بدون اسم"}" وكل بياناتها. الإجراء ده مش قابل للتراجع.`}
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={() => deleteGam3eya(confirmDelete)}
+        />
+      )}
+
+      {swapConfirm && (
+        <Modal onClose={() => setSwapConfirm(null)}>
+          <p className="font-semibold text-sm">تأكيد تبديل الأدوار</p>
+          <p className="text-xs text-neutral-500">
+            هيتم نقل "{swapConfirm.g.gam3eya_participants.find((p) => p.id === swapConfirm.a)?.name}" مكان "{swapConfirm.g.gam3eya_participants.find((p) => p.id === swapConfirm.b)?.name}" في ترتيب القبض.
+          </p>
           <div className="flex gap-2">
-            <button onClick={() => setConfirmDelete(null)} className="flex-1 rounded-lg border border-neutral-300 dark:border-neutral-700 py-2 text-sm">إلغاء</button>
-            <button onClick={() => deleteGam3eya(confirmDelete)} className="flex-1 bg-red-600 text-white rounded-lg py-2 text-sm font-medium">حذف نهائي</button>
+            <button onClick={() => setSwapConfirm(null)} className="flex-1 rounded-lg border border-neutral-300 dark:border-neutral-700 py-2 text-sm">إلغاء</button>
+            <button disabled={busy} onClick={confirmSwap} className="flex-1 bg-orange-600 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-60">تأكيد التبديل</button>
           </div>
         </Modal>
       )}
@@ -745,28 +946,37 @@ function Gam3eyaTab({
       )}
 
       {showSimulator && (
-        <SimulatorModal onClose={() => setShowSimulator(false)} plans={plans} gam3eyat={gam3eyat} />
+        <SimulatorModal onClose={() => setShowSimulator(false)} kind="gam3eya" />
       )}
     </div>
   );
 }
 
 function Gam3eyaCard({
-  g, isOpen, onToggle, onDelete, onMarkPaid, onRate, busy, swapMode, swapFirst, onToggleSwapMode, onPickSwap, onOpenVerify, onAddedParticipant, showMsg,
+  g, isOpen, onToggle, onDelete, onMarkPaid, onRate, busy, swapMode, swapFirst, onToggleSwapMode, onPickSwap, onRequestSwap, onOpenVerify, onAddedParticipant, showMsg,
 }: {
   g: Gam3eya; isOpen: boolean; onToggle: () => void; onDelete: () => void; onMarkPaid: (paymentId: string) => void;
   onRate: (participantId: string, rating: number) => void; busy: boolean;
   swapMode: boolean; swapFirst: string | null; onToggleSwapMode: () => void; onPickSwap: (pid: string) => void;
+  onRequestSwap: (a: string, b: string) => void;
   onOpenVerify: (pid: string) => void; onAddedParticipant: () => void; showMsg: (t: string, e?: boolean) => void;
 }) {
   const today = todayISO();
   const [addingParticipant, setAddingParticipant] = useState(false);
-  const [newParticipant, setNewParticipant] = useState({ name: "", phone: "", account_number: "" });
+  const [newParticipant, setNewParticipant] = useState({ name: "", phone: "", account_number: "", address: "", id_photo_front: "" });
   const [addBusy, setAddBusy] = useState(false);
-  const [editingParticipant, setEditingParticipant] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState({ phone: "", account_number: "" });
+  const [detailParticipant, setDetailParticipant] = useState<Gam3eyaParticipant | null>(null);
+  const [swapA, setSwapA] = useState("");
+  const [swapB, setSwapB] = useState("");
   const [phoneHistory, setPhoneHistory] = useState<{ gam3eyat_count: number; average_rating: number | null; ever_verified: boolean } | null>(null);
   const [phoneHistoryBusy, setPhoneHistoryBusy] = useState(false);
+  const [showExport, setShowExport] = useState(false);
+  const [exportIncludePhotos, setExportIncludePhotos] = useState(false);
+  const [exportIncludeAddress, setExportIncludeAddress] = useState(false);
+  const [exportIncludePhone, setExportIncludePhone] = useState(false);
+  const [exportIncludeReceipts, setExportIncludeReceipts] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
 
   const checkPhoneHistory = async (phone: string) => {
     if (!phone.trim()) return;
@@ -792,7 +1002,7 @@ function Gam3eyaCard({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { showMsg(data.error || "حصل خطأ ومتضافش الفرد", true); return; }
-      setNewParticipant({ name: "", phone: "", account_number: "" });
+      setNewParticipant({ name: "", phone: "", account_number: "", address: "", id_photo_front: "" });
       setAddingParticipant(false);
       onAddedParticipant();
     } finally {
@@ -800,25 +1010,18 @@ function Gam3eyaCard({
     }
   };
 
-  const startEditParticipant = (p: Gam3eyaParticipant) => {
-    setEditingParticipant(editingParticipant === p.id ? null : p.id);
-    setEditDraft({ phone: p.phone || "", account_number: p.account_number || "" });
-  };
-
-  const saveEditParticipant = async (pid: string) => {
-    await fetch(`/api/gam3eya/${g.id}/participants/${pid}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(editDraft),
-    });
-    setEditingParticipant(null);
-    onAddedParticipant();
-  };
+  // اجمالي الجمعية من بره = قيمة الدفعة الكاملة اللي بتتقبض كل شهر (المبلغ
+  // الشهري × عدد الأفراد)، مش مجموع اللي هيتدفع طول المدة. تاريخ النهاية
+  // بيتحسب من آخر تاريخ استحقاق في جدول الدفعات نفسه (مش بحساب منفصل) عشان
+  // يفضل متسق مع أي إعادة جدولة أو تعديل حصل.
+  const totalPot = g.monthly_amount * g.participants_count;
+  const endDate = g.gam3eya_payments.reduce((max, p) => (p.due_date > max ? p.due_date : max), g.start_date);
 
   if (g.type === "subscribed") {
     const paidCount = g.gam3eya_payments.filter((p) => p.status === "paid").length;
     const nextPending = g.gam3eya_payments.find((p) => p.status === "pending");
     const overdue = g.gam3eya_payments.filter((p) => p.status === "pending" && p.due_date < today).length;
+    const payoutRow = g.gam3eya_payments.find((p) => p.month_index === g.my_payout_month);
     return (
       <Card className="!p-3 space-y-2">
         <div className="flex items-center justify-between cursor-pointer" onClick={onToggle}>
@@ -835,6 +1038,14 @@ function Gam3eyaCard({
             {isOpen ? <ChevronUp size={16} className="text-neutral-400" /> : <ChevronDown size={16} className="text-neutral-400" />}
           </div>
         </div>
+
+        <div className="grid grid-cols-4 gap-1 rounded-lg bg-neutral-50 dark:bg-neutral-800/50 p-2 text-center">
+          <div><p className="text-[9px] text-neutral-400">إجمالي الجمعية</p><p className="text-[11px] font-semibold">{fmt(totalPot, g.currency)}</p></div>
+          <div><p className="text-[9px] text-neutral-400">تاريخ البداية</p><p className="text-[11px] font-semibold">{g.start_date}</p></div>
+          <div><p className="text-[9px] text-neutral-400">تاريخ النهاية</p><p className="text-[11px] font-semibold">{endDate}</p></div>
+          <div><p className="text-[9px] text-neutral-400">هتقبض إنت</p><p className="text-[11px] font-semibold">{payoutRow?.due_date || "—"}</p></div>
+        </div>
+
         {isOpen && (
           <div className="border-t border-neutral-100 dark:border-neutral-800 pt-2 space-y-1.5">
             {g.gam3eya_payments.map((p) => {
@@ -864,6 +1075,109 @@ function Gam3eyaCard({
   const paymentsThisMonth = g.gam3eya_payments.filter((p) => p.month_index === currentMonth);
   const paidThisMonth = paymentsThisMonth.filter((p) => p.status === "paid").length;
 
+  // تصدير الجمعية — تقرير مصور (PNG) أو PDF. زي تصدير الديون بالظبط: كارت
+  // مخفي برة الشاشة بـ innerHTML عادي (مش JSX) عشان html2canvas-pro يقدر
+  // يرسمه، بعدين يتحول لصورة أو يتحط جوه PDF بنفس المقاس. المحتوى الأساسي
+  // (عدد الأفراد، مين قبض ومين لسه، تاريخ البداية والنهاية، اجمالي كل قبضة،
+  // مين دفع الشهر ده ومين لأ، تقييم كل واحد بالنجوم، وعلامة حمرا حوالين أي
+  // حد لسه متأخر) بيظهر دايمًا؛ صور البطاقات/العنوان/التليفون/صور
+  // التحويلات بس لو اتفعّلوا من الـ checkboxes قبل التصدير.
+  const generateGam3eyaExport = async (format: "image" | "pdf") => {
+    setExporting(true);
+    setExportError("");
+    try {
+      const node = document.createElement("div");
+      node.style.position = "fixed";
+      node.style.left = "-9999px";
+      node.style.top = "0";
+      node.style.width = "420px";
+      node.style.background = "#ffffff";
+      node.style.padding = "24px";
+      node.style.fontFamily = "Cairo, sans-serif";
+      node.style.direction = "rtl";
+      node.style.color = "#111827";
+
+      const rowsHtml = sortedParticipants
+        .map((p) => {
+          const myPayment = g.gam3eya_payments.find((x) => x.participant_id === p.id && x.month_index === currentMonth);
+          const overdueForP = g.gam3eya_payments.some((x) => x.participant_id === p.id && x.status === "pending" && x.due_date < today);
+          const collected = p.payout_order < currentMonth || (p.payout_order === currentMonth && g.status === "completed");
+          const paidLabel = myPayment ? (myPayment.status === "paid" ? '<span style="color:#059669;font-weight:700;">دفع ✓</span>' : '<span style="color:#dc2626;font-weight:700;">لسه ✗</span>') : "";
+          const stars = "★".repeat(p.rating || 0) + "☆".repeat(5 - (p.rating || 0));
+          return `
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f3f4f6;${overdueForP ? "background:#fef2f2;" : ""}">
+              <div style="display:flex;align-items:center;gap:6px;min-width:0;">
+                ${overdueForP ? '<span style="width:7px;height:7px;border-radius:50%;background:#dc2626;flex-shrink:0;"></span>' : ""}
+                <span style="font-size:12px;font-weight:600;color:${overdueForP ? "#dc2626" : "#111827"};">#${p.payout_order} ${p.name}</span>
+                <span style="font-size:11px;color:#f59e0b;">${stars}</span>
+              </div>
+              <div style="font-size:11px;text-align:left;flex-shrink:0;">
+                <div>${collected ? '<span style="color:#059669;">قبض ✓</span>' : '<span style="color:#9ca3af;">لسه ما قبضش</span>'}</div>
+                <div>${paidLabel}</div>
+              </div>
+            </div>
+            ${
+              exportIncludeAddress || exportIncludePhone
+                ? `<div style="font-size:10px;color:#6b7280;padding:2px 0 6px;">${exportIncludePhone && p.phone ? `📱 ${p.phone}` : ""}${exportIncludePhone && exportIncludeAddress && p.phone && p.address ? " · " : ""}${exportIncludeAddress && p.address ? `📍 ${p.address}` : ""}</div>`
+                : ""
+            }
+            ${exportIncludePhotos && p.id_photo_front ? `<img src="${p.id_photo_front}" style="width:100%;max-height:140px;object-fit:cover;border-radius:8px;margin-bottom:8px;" />` : ""}
+          `;
+        })
+        .join("");
+
+      const receipts = exportIncludeReceipts ? g.gam3eya_payments.filter((p) => p.receipt_url) : [];
+      const receiptsHtml = receipts.length
+        ? `<div style="border-top:1px solid #e5e7eb;margin-top:10px;padding-top:10px;">
+             <p style="font-size:12px;font-weight:700;margin:0 0 6px;">صور التحويلات المرفوعة</p>
+             ${receipts.map((p) => `<img src="${p.receipt_url}" style="width:100%;max-height:160px;object-fit:cover;border-radius:8px;margin-bottom:6px;" />`).join("")}
+           </div>`
+        : "";
+
+      node.innerHTML = `
+        <div style="text-align:center;margin-bottom:16px;">
+          <p style="font-size:12px;color:#ea580c;font-weight:700;">FlowCash</p>
+        </div>
+        <h2 style="font-size:16px;margin:0 0 4px;">${g.name || "جمعية"}</h2>
+        <div style="border-top:1px solid #e5e7eb;padding-top:10px;font-size:12px;line-height:2;">
+          <div style="display:flex;justify-content:space-between;"><span>عدد الأفراد</span><b>${g.participants_count}</b></div>
+          <div style="display:flex;justify-content:space-between;"><span>تاريخ البداية</span><b>${g.start_date}</b></div>
+          <div style="display:flex;justify-content:space-between;"><span>تاريخ النهاية</span><b>${endDate}</b></div>
+          <div style="display:flex;justify-content:space-between;"><span>إجمالي كل قبضة</span><b>${fmt(totalPot, g.currency)}</b></div>
+        </div>
+        <div style="border-top:1px solid #e5e7eb;margin-top:10px;padding-top:6px;">
+          ${rowsHtml}
+        </div>
+        ${receiptsHtml}
+        <p style="font-size:10px;color:#9ca3af;text-align:center;margin-top:16px;">تم الإنشاء بواسطة FlowCash — ${new Date().toLocaleDateString("ar-EG")}</p>
+      `;
+      document.body.appendChild(node);
+      const html2canvas = (await import("html2canvas-pro")).default;
+      const canvas = await html2canvas(node, { scale: 2, backgroundColor: "#ffffff" });
+      document.body.removeChild(node);
+
+      const filenameBase = `جمعية-${(g.name || "بدون اسم").trim()}`.replace(/[\\/:*?"<>|]/g, "").slice(0, 60);
+      if (format === "image") {
+        const dataUrl = canvas.toDataURL("image/png");
+        await shareFile(dataUrl, `${filenameBase}.png`);
+      } else {
+        const { jsPDF } = await import("jspdf");
+        const w = canvas.width / 2;
+        const h = canvas.height / 2;
+        const pdf = new jsPDF({ unit: "px", format: [w, h] });
+        pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, w, h);
+        const pdfDataUrl = pdf.output("dataurlstring");
+        await shareFile(pdfDataUrl, `${filenameBase}.pdf`, "application/pdf");
+      }
+      setShowExport(false);
+    } catch (err) {
+      const detail = err instanceof Error && err.message ? ` (${err.message})` : "";
+      setExportError(`حصل خطأ في التصدير، حاول تاني${detail}`);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <Card className="!p-3 space-y-2">
       <div className="flex items-center justify-between cursor-pointer" onClick={onToggle}>
@@ -885,6 +1199,13 @@ function Gam3eyaCard({
         </div>
       </div>
 
+      <div className="grid grid-cols-4 gap-1 rounded-lg bg-neutral-50 dark:bg-neutral-800/50 p-2 text-center">
+        <div><p className="text-[9px] text-neutral-400">إجمالي الجمعية</p><p className="text-[11px] font-semibold">{fmt(totalPot, g.currency)}</p></div>
+        <div><p className="text-[9px] text-neutral-400">تاريخ البداية</p><p className="text-[11px] font-semibold">{g.start_date}</p></div>
+        <div><p className="text-[9px] text-neutral-400">تاريخ النهاية</p><p className="text-[11px] font-semibold">{endDate}</p></div>
+        <div><p className="text-[9px] text-neutral-400">بيقبض الشهر ده</p><p className="text-[11px] font-semibold truncate">{collector?.name || "—"}</p></div>
+      </div>
+
       {isOpen && (
         <div className="border-t border-neutral-100 dark:border-neutral-800 pt-2 space-y-2">
           <div className="flex items-center justify-between">
@@ -894,18 +1215,52 @@ function Gam3eyaCard({
                 <Plus size={11} /> فرد
               </button>
               <button onClick={onToggleSwapMode} className={`flex items-center gap-1 text-[10px] rounded-full px-2 py-1 ${swapMode ? "bg-orange-600 text-white" : "border border-neutral-300 dark:border-neutral-700 text-neutral-500"}`}>
-                <ArrowLeftRight size={11} /> {swapMode ? "دوس على شخصين للتبديل" : "بدّل الأدوار"}
+                <ArrowLeftRight size={11} /> {swapMode ? "قفل التبديل" : "بدّل الأدوار"}
+              </button>
+              <button onClick={() => setShowExport(true)} className="flex items-center gap-1 text-[10px] rounded-full px-2 py-1 border border-neutral-300 dark:border-neutral-700 text-neutral-500">
+                <FileDown size={11} /> تصدير
               </button>
             </div>
           </div>
+
+          {swapMode && (
+            <div className="rounded-lg border border-dashed border-orange-300 dark:border-orange-800 p-2 space-y-2">
+              <p className="text-[10px] text-neutral-400">دوس على شخصين من القايمة تحت للتبديل، أو اختارهم من هنا:</p>
+              <div className="grid grid-cols-2 gap-1.5">
+                <select value={swapA} onChange={(e) => setSwapA(e.target.value)} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 text-xs">
+                  <option value="">الشخص الأول</option>
+                  {sortedParticipants.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+                <select value={swapB} onChange={(e) => setSwapB(e.target.value)} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 text-xs">
+                  <option value="">الشخص التاني</option>
+                  {sortedParticipants.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </div>
+              <button
+                disabled={!swapA || !swapB || swapA === swapB}
+                onClick={() => onRequestSwap(swapA, swapB)}
+                className="w-full bg-orange-600 text-white rounded-lg py-1.5 text-xs font-medium disabled:opacity-40"
+              >
+                بدّل
+              </button>
+            </div>
+          )}
 
           {addingParticipant && (
             <div className="rounded-lg border border-dashed border-neutral-300 dark:border-neutral-700 p-2 space-y-1.5">
               <input placeholder="اسم الفرد الجديد" value={newParticipant.name} onChange={(e) => setNewParticipant({ ...newParticipant, name: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 text-xs" />
               <div className="grid grid-cols-2 gap-1.5">
                 <input placeholder="رقم الموبايل" value={newParticipant.phone} onBlur={(e) => checkPhoneHistory(e.target.value)} onChange={(e) => { setNewParticipant({ ...newParticipant, phone: e.target.value }); setPhoneHistory(null); }} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 text-xs" />
-                <input placeholder="رقم حساب/محفظة" value={newParticipant.account_number} onChange={(e) => setNewParticipant({ ...newParticipant, account_number: e.target.value })} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 text-xs" />
+                <input placeholder="حساب بنك أو انستجرام" value={newParticipant.account_number} onChange={(e) => setNewParticipant({ ...newParticipant, account_number: e.target.value })} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 text-xs" />
               </div>
+              <input placeholder="العنوان (اختياري)" value={newParticipant.address} onChange={(e) => setNewParticipant({ ...newParticipant, address: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 text-xs" />
+              <label className="flex items-center gap-1.5 text-[10px] text-neutral-400 cursor-pointer">
+                <Camera size={12} /> {newParticipant.id_photo_front ? "✅ اتصورت صورة البطاقة" : "ارفع صورة البطاقة (اختياري)"}
+                <input
+                  type="file" accept="image/*" capture="environment" className="hidden"
+                  onChange={async (e) => { const f = e.target.files?.[0]; if (f) setNewParticipant({ ...newParticipant, id_photo_front: await shrinkImage(f) }); }}
+                />
+              </label>
               {phoneHistoryBusy && <p className="text-[10px] text-neutral-400">جاري البحث عن تاريخه...</p>}
               {phoneHistory && (
                 phoneHistory.gam3eyat_count > 0 ? (
@@ -925,16 +1280,17 @@ function Gam3eyaCard({
             const myPayment = g.gam3eya_payments.find((x) => x.participant_id === p.id && x.month_index === currentMonth);
             const isCollectorNow = p.payout_order === currentMonth;
             const selected = swapFirst === p.id;
+            const overdueForP = g.gam3eya_payments.some((x) => x.participant_id === p.id && x.status === "pending" && x.due_date < today);
             return (
               <div key={p.id} className={`rounded-lg px-2.5 py-2 text-xs space-y-1.5 ${isCollectorNow ? "bg-emerald-50 dark:bg-emerald-950" : "bg-neutral-50 dark:bg-neutral-800/50"} ${selected ? "ring-2 ring-orange-500" : ""}`}>
                 <div className="flex items-center justify-between gap-2">
                   <button
-                    disabled={!swapMode}
-                    onClick={() => swapMode && onPickSwap(p.id)}
-                    className="flex items-center gap-1.5 flex-1 min-w-0 text-right disabled:cursor-default"
+                    onClick={() => (swapMode ? onPickSwap(p.id) : setDetailParticipant(p))}
+                    className="flex items-center gap-1.5 flex-1 min-w-0 text-right"
                   >
                     <span className="text-neutral-400 shrink-0">#{p.payout_order}</span>
-                    <span className="font-medium truncate">{p.name}</span>
+                    <span className={`font-medium truncate ${overdueForP ? "text-red-500" : ""}`}>{p.name}</span>
+                    {overdueForP && <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" title="متأخر عن السداد" />}
                     {isCollectorNow && <span className="text-[10px] shrink-0">🎁 بيقبض الشهر ده</span>}
                     {p.verified ? <ShieldCheck size={13} className="text-emerald-600 shrink-0" /> : <ShieldAlert size={13} className="text-neutral-300 dark:text-neutral-600 shrink-0" />}
                   </button>
@@ -949,24 +1305,9 @@ function Gam3eyaCard({
                 {!swapMode && (
                   <div className="flex items-center justify-between">
                     <StarPicker value={p.rating} onChange={(v) => onRate(p.id, v)} />
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => onOpenVerify(p.id)} className="text-[10px] text-orange-600 dark:text-orange-400 flex items-center gap-1">
-                        <Camera size={11} /> {p.verified ? "توثيق تاني" : "توثيق (اختياري)"}
-                      </button>
-                      <button onClick={() => startEditParticipant(p)} className="text-neutral-400 hover:text-orange-600"><Pencil size={12} /></button>
-                    </div>
-                  </div>
-                )}
-                {!swapMode && !editingParticipant && (p.phone || p.account_number) && (
-                  <p className="text-[10px] text-neutral-400">{p.phone && `📱 ${p.phone}`}{p.phone && p.account_number ? " · " : ""}{p.account_number && `💳 ${p.account_number}`}</p>
-                )}
-                {!swapMode && editingParticipant === p.id && (
-                  <div className="space-y-1.5 pt-1 border-t border-neutral-200 dark:border-neutral-700">
-                    <div className="grid grid-cols-2 gap-1.5">
-                      <input placeholder="رقم الموبايل" value={editDraft.phone} onChange={(e) => setEditDraft({ ...editDraft, phone: e.target.value })} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 text-xs" />
-                      <input placeholder="رقم حساب/محفظة" value={editDraft.account_number} onChange={(e) => setEditDraft({ ...editDraft, account_number: e.target.value })} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 text-xs" />
-                    </div>
-                    <button onClick={() => saveEditParticipant(p.id)} className="w-full bg-orange-600 text-white rounded-lg py-1.5 text-xs font-medium">حفظ</button>
+                    <button onClick={() => setDetailParticipant(p)} className="text-[10px] text-orange-600 dark:text-orange-400 flex items-center gap-1">
+                      <Pencil size={11} /> عرض وتعديل
+                    </button>
                   </div>
                 )}
               </div>
@@ -974,7 +1315,137 @@ function Gam3eyaCard({
           })}
         </div>
       )}
+
+      {detailParticipant && (
+        <ParticipantDetailModal
+          gam3eyaId={g.id}
+          participant={detailParticipant}
+          busy={busy}
+          onClose={() => setDetailParticipant(null)}
+          onOpenVerify={() => { setDetailParticipant(null); onOpenVerify(detailParticipant.id); }}
+          onSaved={() => { setDetailParticipant(null); onAddedParticipant(); }}
+          showMsg={showMsg}
+        />
+      )}
+
+      {showExport && (
+        <Modal onClose={() => !exporting && setShowExport(false)}>
+          <p className="font-semibold text-sm">تصدير الجمعية</p>
+          <p className="text-[11px] text-neutral-400">
+            بيتصدّر دايمًا: عدد الأفراد، مين قبض ومين لسه، تاريخ البداية والنهاية، إجمالي كل قبضة، ومين دفع الشهر ده ومين لأ (مع التقييم بالنجوم وعلامة حمرا للمتأخرين).
+          </p>
+          <div className="space-y-1.5">
+            <label className="flex items-center gap-2 text-xs text-neutral-600 dark:text-neutral-300">
+              <input type="checkbox" checked={exportIncludePhotos} onChange={(e) => setExportIncludePhotos(e.target.checked)} /> إرفاق صور البطاقات
+            </label>
+            <label className="flex items-center gap-2 text-xs text-neutral-600 dark:text-neutral-300">
+              <input type="checkbox" checked={exportIncludeAddress} onChange={(e) => setExportIncludeAddress(e.target.checked)} /> إرفاق العنوان
+            </label>
+            <label className="flex items-center gap-2 text-xs text-neutral-600 dark:text-neutral-300">
+              <input type="checkbox" checked={exportIncludePhone} onChange={(e) => setExportIncludePhone(e.target.checked)} /> إرفاق رقم التليفون
+            </label>
+            <label className="flex items-center gap-2 text-xs text-neutral-600 dark:text-neutral-300">
+              <input type="checkbox" checked={exportIncludeReceipts} onChange={(e) => setExportIncludeReceipts(e.target.checked)} /> إرفاق صور التحويلات المرفوعة
+            </label>
+          </div>
+          <div className="flex gap-2">
+            <button disabled={exporting} onClick={() => generateGam3eyaExport("image")} className="flex-1 flex items-center justify-center gap-1.5 text-sm bg-neutral-800 dark:bg-neutral-700 text-white rounded-lg py-2 disabled:opacity-60">
+              <ImageIcon size={14} /> صورة
+            </button>
+            <button disabled={exporting} onClick={() => generateGam3eyaExport("pdf")} className="flex-1 flex items-center justify-center gap-1.5 text-sm bg-orange-600 text-white rounded-lg py-2 disabled:opacity-60">
+              <FileDown size={14} /> PDF
+            </button>
+          </div>
+          {exporting && <p className="text-[11px] text-center text-neutral-400">جاري التجهيز...</p>}
+          {exportError && <p className="text-xs text-red-500 text-center">{exportError}</p>}
+          <button onClick={() => { setShowExport(false); setExportError(""); }} disabled={exporting} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 py-2 text-sm disabled:opacity-60">إلغاء</button>
+        </Modal>
+      )}
     </Card>
+  );
+}
+
+// "عرض وتعديل" الفرد — بتفتح لما تدوس على أي فرد في الجمعية (لو مش في وضع
+// التبديل). بتوري كل بياناته (بما فيها صورة البطاقة لو موجودة) وتسمح
+// بتعديلها كلها من نفس المكان، بدل الفورم الصغير القديم اللي كان بيعدل بس
+// رقم الموبايل وحساب البنك.
+function ParticipantDetailModal({
+  gam3eyaId, participant, busy, onClose, onSaved, onOpenVerify, showMsg,
+}: {
+  gam3eyaId: string; participant: Gam3eyaParticipant; busy: boolean; onClose: () => void;
+  onSaved: () => void; onOpenVerify: () => void; showMsg: (t: string, e?: boolean) => void;
+}) {
+  const [name, setName] = useState(participant.name);
+  const [phone, setPhone] = useState(participant.phone || "");
+  const [accountNumber, setAccountNumber] = useState(participant.account_number || "");
+  const [address, setAddress] = useState(participant.address || "");
+  const [idPhoto, setIdPhoto] = useState(participant.id_photo_front || "");
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    if (!name.trim()) { showMsg("اسم الفرد لازم يتملى", true); return; }
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/gam3eya/${gam3eyaId}/participants/${participant.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, phone: phone || null, account_number: accountNumber || null, address: address || null, id_photo_front: idPhoto || null }),
+      });
+      if (!res.ok) { showMsg("حصل خطأ ومتحفظش التعديل", true); return; }
+      showMsg("✅ اتحفظ التعديل");
+      onSaved();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal onClose={onClose}>
+      <div className="flex items-center justify-between">
+        <p className="font-semibold text-sm">عرض وتعديل الفرد</p>
+        {participant.verified ? (
+          <span className="text-[10px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1"><ShieldCheck size={12} /> موثّق</span>
+        ) : (
+          <span className="text-[10px] text-neutral-400 flex items-center gap-1"><ShieldAlert size={12} /> غير موثّق</span>
+        )}
+      </div>
+
+      {idPhoto && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={idPhoto} alt="صورة البطاقة" className="w-full max-h-40 object-cover rounded-lg border border-neutral-200 dark:border-neutral-800" />
+      )}
+      <label className="flex items-center gap-1.5 text-[11px] text-orange-600 dark:text-orange-400 cursor-pointer">
+        <Camera size={13} /> {idPhoto ? "تغيير صورة البطاقة" : "رفع صورة البطاقة"}
+        <input
+          type="file" accept="image/*" capture="environment" className="hidden"
+          onChange={async (e) => { const f = e.target.files?.[0]; if (f) setIdPhoto(await shrinkImage(f)); }}
+        />
+      </label>
+
+      <div>
+        <label className="text-[10px] text-neutral-400">الاسم</label>
+        <input value={name} onChange={(e) => setName(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="text-[10px] text-neutral-400">رقم الموبايل</label>
+          <input value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label className="text-[10px] text-neutral-400">حساب بنك أو انستجرام</label>
+          <input value={accountNumber} onChange={(e) => setAccountNumber(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+        </div>
+      </div>
+      <div>
+        <label className="text-[10px] text-neutral-400">العنوان</label>
+        <input value={address} onChange={(e) => setAddress(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+      </div>
+
+      <button disabled={saving || busy} onClick={save} className="w-full bg-orange-600 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-60">حفظ التعديل</button>
+      <button onClick={onOpenVerify} className="w-full flex items-center justify-center gap-1 rounded-lg border border-neutral-300 dark:border-neutral-700 py-2 text-sm">
+        <ShieldCheck size={14} /> {participant.verified ? "توثيق تاني" : "توثيق (اختياري)"}
+      </button>
+    </Modal>
   );
 }
 
@@ -1047,38 +1518,80 @@ function VerifyParticipantModal({
   );
 }
 
-function SimulatorModal({ onClose, plans, gam3eyat }: { onClose: () => void; plans: InstallmentPlan[]; gam3eyat: Gam3eya[] }) {
+interface BudgetSnapshot {
+  baseCurrency: string; monthlyFixedExpenses: number; monthlyRecurringIncome: number; estimatedMonthlyIncome: number;
+  activeInstallmentsMonthly: number; activeGam3eyaMonthly: number; outstandingDebts: number;
+}
+
+// محاكاة عامة — بتتفتح من "محاكاة" في تبويب الجمعيات (لجمعية جديدة) أو من
+// "راجع أقساطك مع ميزانيتك" في تبويب الأقساط (لقسط جديد). بتجيب التزاماتك
+// الحقيقية المسجلة في البرنامج (مصاريف ثابتة متكررة + أقساط شغالة + جمعيات
+// مشترك فيها + ديون متبقية) ودخلك التقديري من حركات الدخل الفعلية بدل ما
+// تدخلهم بإيدك، وتوريك الموقف مع المبلغ الجديد.
+function SimulatorModal({ onClose, kind = "gam3eya" }: { onClose: () => void; kind?: "gam3eya" | "installment" }) {
   const [amount, setAmount] = useState("");
   const [income, setIncome] = useState("");
+  const [snapshot, setSnapshot] = useState<BudgetSnapshot | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const currentCommitment = useMemo(() => {
-    const installmentsSum = plans.filter((p) => p.status === "active").reduce((s, p) => s + Number(p.monthly_amount), 0);
-    const subscribedSum = gam3eyat.filter((g) => g.status === "active" && g.type === "subscribed").reduce((s, g) => s + Number(g.monthly_amount), 0);
-    return installmentsSum + subscribedSum;
-  }, [plans, gam3eyat]);
+  useEffect(() => {
+    fetch("/api/budget-snapshot")
+      .then((r) => r.json())
+      .then((d: BudgetSnapshot) => {
+        setSnapshot(d);
+        const suggestedIncome = d.estimatedMonthlyIncome || d.monthlyRecurringIncome;
+        if (suggestedIncome > 0) setIncome(String(suggestedIncome));
+      })
+      .finally(() => setLoading(false));
+  }, []);
 
+  const currency = snapshot?.baseCurrency || "EGP";
+  const currentCommitment = snapshot ? snapshot.monthlyFixedExpenses + snapshot.activeInstallmentsMonthly + snapshot.activeGam3eyaMonthly : 0;
   const newAmount = parseFloat(amount) || 0;
   const newTotal = currentCommitment + newAmount;
   const incomeNum = income ? parseFloat(income) : null;
   const remaining = incomeNum !== null ? incomeNum - newTotal : null;
+  const newAmountLabel = kind === "installment" ? "القسط الشهري الجديد" : "المبلغ الشهري للجمعية الجديدة";
 
   return (
     <Modal onClose={onClose}>
-      <p className="font-semibold text-sm">محاكاة جمعية جديدة</p>
-      <p className="text-[11px] text-neutral-400">قبل ما تدخل جمعية جديدة، شوف هل ميزانيتك هتستحملها مع الأقساط والجمعيات التانية اللي عليك.</p>
-      <input type="number" placeholder="المبلغ الشهري للجمعية الجديدة" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
-      <input type="number" placeholder="دخلك الشهري (اختياري، عشان نديك تقييم أدق)" value={income} onChange={(e) => setIncome(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+      <p className="font-semibold text-sm">{kind === "installment" ? "راجع القسط مع ميزانيتك" : "محاكاة جمعية جديدة"}</p>
+      <p className="text-[11px] text-neutral-400">
+        {kind === "installment" ? "قبل ما تدخل في قسط جديد" : "قبل ما تدخل جمعية جديدة"}، شوف هل ميزانيتك هتستحمله مع كل التزاماتك الحالية المسجلة في البرنامج.
+      </p>
 
-      <div className="rounded-lg bg-neutral-50 dark:bg-neutral-800/50 p-2.5 text-xs space-y-1">
-        <p>التزاماتك الشهرية الحالية (أقساط + جمعيات مشترك فيها): {fmt(currentCommitment, "EGP")}</p>
-        <p>+ الجمعية الجديدة: {fmt(newAmount, "EGP")}</p>
-        <p className="font-medium">= الإجمالي الشهري: {fmt(newTotal, "EGP")}</p>
-      </div>
+      {loading && <p className="text-center text-xs text-neutral-400 py-4">جاري جلب بياناتك...</p>}
 
-      {remaining !== null && (
-        <div className={`rounded-lg p-2.5 text-xs font-medium ${remaining >= 0 ? "bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300" : "bg-red-50 dark:bg-red-950 text-red-600 dark:text-red-400"}`}>
-          {remaining >= 0 ? `✅ هيفضلك حوالي ${fmt(remaining, "EGP")} من دخلك بعد كل الالتزامات` : `⚠️ الالتزامات هتتخطى دخلك بـ ${fmt(Math.abs(remaining), "EGP")}`}
-        </div>
+      {!loading && (
+        <>
+          <input type="number" placeholder={newAmountLabel} value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+          <div>
+            <input type="number" placeholder="دخلك الشهري" value={income} onChange={(e) => setIncome(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+            {snapshot && (snapshot.estimatedMonthlyIncome > 0 || snapshot.monthlyRecurringIncome > 0) && (
+              <p className="text-[10px] text-neutral-400 mt-0.5">مقدّر تلقائيًا من حركات الدخل عندك آخر ٣ شهور — عدّله لو مش دقيق.</p>
+            )}
+          </div>
+
+          <div className="rounded-lg bg-neutral-50 dark:bg-neutral-800/50 p-2.5 text-xs space-y-1">
+            <p>مصاريف ثابتة متكررة: {fmt(snapshot?.monthlyFixedExpenses || 0, currency)}</p>
+            <p>أقساط شغالة: {fmt(snapshot?.activeInstallmentsMonthly || 0, currency)}</p>
+            <p>جمعيات مشترك فيها: {fmt(snapshot?.activeGam3eyaMonthly || 0, currency)}</p>
+            <p className="pt-1 border-t border-neutral-200 dark:border-neutral-700">= التزاماتك الشهرية الحالية: {fmt(currentCommitment, currency)}</p>
+            <p>+ {newAmountLabel}: {fmt(newAmount, currency)}</p>
+            <p className="font-medium">= الإجمالي الشهري بعد كده: {fmt(newTotal, currency)}</p>
+            {snapshot && snapshot.outstandingDebts > 0 && (
+              <p className="text-amber-600 dark:text-amber-400 pt-1 border-t border-neutral-200 dark:border-neutral-700">
+                ⚠️ عندك كمان ديون متبقية بإجمالي {fmt(snapshot.outstandingDebts, currency)} (مش محسوبة في الإجمالي فوق لأنها مش التزام شهري ثابت).
+              </p>
+            )}
+          </div>
+
+          {remaining !== null && (
+            <div className={`rounded-lg p-2.5 text-xs font-medium ${remaining >= 0 ? "bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300" : "bg-red-50 dark:bg-red-950 text-red-600 dark:text-red-400"}`}>
+              {remaining >= 0 ? `✅ هيفضلك حوالي ${fmt(remaining, currency)} من دخلك بعد كل الالتزامات` : `⚠️ الالتزامات هتتخطى دخلك بـ ${fmt(Math.abs(remaining), currency)}`}
+            </div>
+          )}
+        </>
       )}
 
       <button onClick={onClose} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 py-2 text-sm">قفل</button>

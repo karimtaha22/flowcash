@@ -137,19 +137,23 @@ const boxCls = "p-3 rounded-xl border border-neutral-200 dark:border-neutral-800
 export default function InstallmentCalculatorModal({
   onClose,
   onApply,
+  applyLabel,
+  initial,
 }: {
   onClose: () => void;
   onApply?: (v: { item_name: string; monthly_amount: number; months_count: number; currency: string }) => void;
+  applyLabel?: string;
+  initial?: { itemName?: string; itemPrice?: number; downPayment?: number; periodValue?: number; periodType?: PeriodType; currency?: string };
 }) {
   const [tab, setTab] = useState<Tab>("singlePlan");
   const [showSchedule, setShowSchedule] = useState(false);
-  const [currency, setCurrency] = useState("EGP");
+  const [currency, setCurrency] = useState(initial?.currency || "EGP");
 
-  const [itemName, setItemName] = useState("سلعة / منتج");
-  const [itemPrice, setItemPrice] = useState("100000");
-  const [downPayment, setDownPayment] = useState("15000");
-  const [periodValue, setPeriodValue] = useState("24");
-  const [periodType, setPeriodType] = useState<PeriodType>("months");
+  const [itemName, setItemName] = useState(initial?.itemName || "سلعة / منتج");
+  const [itemPrice, setItemPrice] = useState(String(initial?.itemPrice ?? 100000));
+  const [downPayment, setDownPayment] = useState(String(initial?.downPayment ?? 15000));
+  const [periodValue, setPeriodValue] = useState(String(initial?.periodValue ?? 24));
+  const [periodType, setPeriodType] = useState<PeriodType>(initial?.periodType ?? "months");
   const [annualRate, setAnnualRate] = useState("0");
   const [interestType, setInterestType] = useState<InterestType>("flat");
 
@@ -322,11 +326,11 @@ export default function InstallmentCalculatorModal({
             <div className="space-y-4">
               {planA.error && <p className="text-xs font-medium text-red-600 bg-red-50 dark:bg-red-950 rounded-lg p-2.5">⚠️ {planA.error}</p>}
 
-              <div className="grid grid-cols-3 gap-2">
-                <div className="col-span-3 sm:col-span-1">
-                  <label className={labelCls}>اسم السلعة</label>
-                  <input value={itemName} onChange={(e) => setItemName(e.target.value)} className={inputCls} />
-                </div>
+              <div>
+                <label className={labelCls}>اسم السلعة</label>
+                <input value={itemName} onChange={(e) => setItemName(e.target.value)} className={inputCls} />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className={labelCls}>سعر السلعة كاش</label>
                   <input type="number" value={itemPrice} onChange={(e) => setItemPrice(e.target.value)} className={inputCls} />
@@ -337,17 +341,17 @@ export default function InstallmentCalculatorModal({
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-2">
-                <div>
-                  <label className={labelCls}>فترة التقسيط</label>
-                  <div className="flex gap-1">
-                    <input type="number" value={periodValue} onChange={(e) => setPeriodValue(e.target.value)} className={inputCls} />
-                    <select value={periodType} onChange={(e) => setPeriodType(e.target.value as PeriodType)} className={inputCls + " w-20 shrink-0"}>
-                      <option value="years">سنوات</option>
-                      <option value="months">شهور</option>
-                    </select>
-                  </div>
+              <div>
+                <label className={labelCls}>فترة التقسيط</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <input type="number" value={periodValue} onChange={(e) => setPeriodValue(e.target.value)} className={inputCls} />
+                  <select value={periodType} onChange={(e) => setPeriodType(e.target.value as PeriodType)} className={inputCls}>
+                    <option value="years">سنوات</option>
+                    <option value="months">شهور</option>
+                  </select>
                 </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div>
                   <label className={labelCls}>نظام الفائدة</label>
                   <select value={interestType} onChange={(e) => setInterestType(e.target.value as InterestType)} className={inputCls}>
@@ -479,7 +483,7 @@ export default function InstallmentCalculatorModal({
                   onClick={() => { onApply({ item_name: itemName, monthly_amount: planA.monthly, months_count: planA.totalMonths, currency }); onClose(); }}
                   className="w-full bg-orange-600 text-white rounded-lg py-2.5 text-sm font-medium"
                 >
-                  استخدم القيم دي في تسجيل قسط جديد
+                  {applyLabel || "استخدم القيم دي في تسجيل قسط جديد"}
                 </button>
               )}
 

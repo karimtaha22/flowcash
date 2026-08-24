@@ -123,7 +123,10 @@ function CurrencyConverter({ rates, baseCurrency }: { rates: Record<string, numb
 
 export default function Dashboard() {
   const [data, setData] = useState<any>(null);
-  const [alerts, setAlerts] = useState<{ count: number; items: { label: string; href: string }[] } | null>(null);
+  const [alerts, setAlerts] = useState<{
+    count: number; items: { label: string; href: string }[];
+    dueRecurring: number; overBudget: number; overdueCount: number; overdueInstallmentsCount: number; overdueGam3eyaCount: number;
+  } | null>(null);
   const [hijriCorrection, setHijriCorrection] = useState(0);
   const [baseCurrency, setBaseCurrency] = useState("EGP");
 
@@ -183,7 +186,16 @@ export default function Dashboard() {
             <div className="w-9 h-9 rounded-full bg-orange-500 text-white flex items-center justify-center shrink-0">
               <AlertTriangle size={16} />
             </div>
-            <p className="text-sm font-medium text-orange-700 dark:text-orange-300">في {alerts.count} حاجة محتاجة انتباهك</p>
+            <p className="text-sm font-medium text-orange-700 dark:text-orange-300">
+              متأخرات{" "}
+              {[
+                alerts.overdueInstallmentsCount > 0 && "في أقساط",
+                alerts.overdueCount > 0 && "في دين",
+                alerts.dueRecurring > 0 && "في مصروف متكرر",
+                alerts.overdueGam3eyaCount > 0 && "في جمعية",
+                alerts.overBudget > 0 && "في ميزانية",
+              ].filter(Boolean).join(" ")}
+            </p>
           </div>
           <div className="space-y-1 pr-1">
             {alerts.items.slice(0, 4).map((it, i) => (
