@@ -4,6 +4,7 @@ import { useSearchParams } from "next/navigation";
 import Card from "@/components/Card";
 import { fmt } from "@/lib/format";
 import { shrinkImage } from "@/lib/image";
+import InstallmentCalculatorModal from "@/components/InstallmentCalculator";
 import {
   Plus, Trash2, Pencil, CreditCard, Users, CheckCircle2, Camera, ShieldCheck, ShieldAlert,
   Star, ArrowLeftRight, Calculator, ChevronDown, ChevronUp, X,
@@ -113,10 +114,12 @@ function InstallmentsPageInner() {
 // ===================== أقساط =====================
 function InstallmentsTab({ plans, reload, showMsg }: { plans: InstallmentPlan[]; reload: () => void; showMsg: (t: string, e?: boolean) => void }) {
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ item_name: "", company_name: "", original_price: "", total_amount: "", months_count: "", start_date: todayISO(), currency: "EGP" });
+  const [form, setForm] = useState({ item_name: "", company_name: "", original_price: "", monthly_amount: "", months_count: "", start_date: todayISO(), currency: "EGP" });
   const [expanded, setExpanded] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<InstallmentPlan | null>(null);
   const [escalation, setEscalation] = useState<InstallmentPlan | null>(null);
+  const [showCalculator, setShowCalculator] = useState(false);
+  const [editPayment, setEditPayment] = useState<{ plan: InstallmentPlan; payment: InstallmentPayment } | null>(null);
   const [busy, setBusy] = useState(false);
 
   const active = plans.filter((p) => p.status === "active");
@@ -124,7 +127,7 @@ function InstallmentsTab({ plans, reload, showMsg }: { plans: InstallmentPlan[];
   const totalRemaining = active.reduce((s, p) => s + p.installment_payments.filter((x) => x.status === "pending").reduce((s2, x) => s2 + Number(x.amount), 0), 0);
 
   const submit = async () => {
-    if (!form.item_name || !form.total_amount || !form.months_count) { showMsg("اسم السلعة والمبلغ الإجمالي وعدد الشهور لازم يتملوا", true); return; }
+    if (!form.item_name || !form.monthly_amount || !form.months_count) { showMsg("اسم السلعة ومبلغ القسط وعدد الشهور لازم يتملوا", true); return; }
     setBusy(true);
     try {
       const res = await fetch("/api/installments", {
@@ -134,7 +137,7 @@ function InstallmentsTab({ plans, reload, showMsg }: { plans: InstallmentPlan[];
           item_name: form.item_name,
           company_name: form.company_name || null,
           original_price: form.original_price ? parseFloat(form.original_price) : null,
-          total_amount: parseFloat(form.total_amount),
+          monthly_amount: parseFloat(form.monthly_amount),
           months_count: parseInt(form.months_count),
           start_date: form.start_date,
           currency: form.currency,
@@ -142,11 +145,29 @@ function InstallmentsTab({ plans, reload, showMsg }: { plans: InstallmentPlan[];
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { showMsg(data.error || "حصل خطأ ومتحفظش، حاول تاني", true); return; }
-      setForm({ item_name: "", company_name: "", original_price: "", total_amount: "", months_count: "", start_date: todayISO(), currency: "EGP" });
+      setForm({ item_name: "", company_name: "", original_price: "", monthly_amount: "", months_count: "", start_date: todayISO(), currency: "EGP" });
       setShowForm(false);
       reload();
     } catch {
       showMsg("مفيش اتصال بالإنترنت، حاول تاني", true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const savePaymentEdit = async (plan: InstallmentPlan, payment: InstallmentPayment, updates: { amount?: number; due_date?: string; status?: "pending" | "paid" }) => {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/installments/${plan.id}/payments/${payment.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { showMsg(data.error || "حصل خطأ ومتحفظش التعديل", true); return; }
+      showMsg("✅ اتحفظ التعديل");
+      setEditPayment(null);
+      reload();
     } finally {
       setBusy(false);
     }
@@ -216,11 +237,16 @@ function InstallmentsTab({ plans, reload, showMsg }: { plans: InstallmentPlan[];
         </div>
       </Card>
 
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <p className="text-sm font-semibold text-neutral-600 dark:text-neutral-300">كل الأقساط</p>
-        <button onClick={() => setShowForm((s) => !s)} className="flex items-center gap-1 text-xs bg-orange-600 text-white rounded-full px-3 py-1.5">
-          <Plus size={14} /> قسط جديد
-        </button>
+        <div className="flex gap-2">
+          <button onClick={() => setShowCalculator(true)} className="flex items-center gap-1 text-xs border border-orange-300 dark:border-orange-800 text-orange-600 dark:text-orange-400 rounded-full px-3 py-1.5">
+            <Calculator size={14} /> حاسبة
+          </button>
+          <button onClick={() => setShowForm((s) => !s)} className="flex items-center gap-1 text-xs bg-orange-600 text-white rounded-full px-3 py-1.5">
+            <Plus size={14} /> قسط جديد
+          </button>
+        </div>
       </div>
 
       {showForm && (
@@ -231,23 +257,34 @@ function InstallmentsTab({ plans, reload, showMsg }: { plans: InstallmentPlan[];
             <input type="number" placeholder="السعر الأصلي (اختياري — لحساب الفايدة)" value={form.original_price} onChange={(e) => setForm({ ...form, original_price: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
           </div>
           <div className="grid grid-cols-2 gap-2">
-            <input type="number" placeholder="المبلغ الإجمالي بالقسط" value={form.total_amount} onChange={(e) => setForm({ ...form, total_amount: e.target.value })} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
-            <select value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm">
-              <option value="EGP">جنيه</option><option value="USD">دولار</option><option value="SAR">ريال</option>
-            </select>
+            <div>
+              <label className="text-[10px] text-neutral-400">عدد الشهور</label>
+              <input type="number" placeholder="عدد الشهور" value={form.months_count} onChange={(e) => setForm({ ...form, months_count: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="text-[10px] text-neutral-400">تاريخ بداية القسط</label>
+              <input type="date" value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+            </div>
           </div>
-          <input type="number" placeholder="عدد الشهور" value={form.months_count} onChange={(e) => setForm({ ...form, months_count: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
-          <div>
-            <label className="text-[10px] text-neutral-400">تاريخ أول قسط</label>
-            <input type="date" value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[10px] text-neutral-400">مبلغ القسط الشهري</label>
+              <input type="number" placeholder="مبلغ القسط الشهري" value={form.monthly_amount} onChange={(e) => setForm({ ...form, monthly_amount: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="text-[10px] text-neutral-400">العملة</label>
+              <select value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm">
+                <option value="EGP">جنيه</option><option value="USD">دولار</option><option value="SAR">ريال</option>
+              </select>
+            </div>
           </div>
-          {form.total_amount && form.months_count && (
-            <p className="text-[11px] text-neutral-400">
-              كل قسط تقريبًا: {fmt(parseFloat(form.total_amount) / (parseInt(form.months_count) || 1), form.currency)}
+          {form.monthly_amount && form.months_count && (
+            <div className="rounded-lg bg-orange-50 dark:bg-orange-950 border border-orange-200 dark:border-orange-900 p-2.5 text-[11px] text-orange-700 dark:text-orange-300 space-y-0.5">
+              <p>إجمالي العملية: {fmt(parseFloat(form.monthly_amount) * (parseInt(form.months_count) || 0), form.currency)}</p>
               {form.original_price && parseFloat(form.original_price) > 0 && (
-                <> · الفايدة: {fmt(parseFloat(form.total_amount) - parseFloat(form.original_price), form.currency)} ({Math.round(((parseFloat(form.total_amount) - parseFloat(form.original_price)) / parseFloat(form.original_price)) * 100)}%)</>
+                <p>الفايدة: {fmt(parseFloat(form.monthly_amount) * (parseInt(form.months_count) || 0) - parseFloat(form.original_price), form.currency)} ({Math.round(((parseFloat(form.monthly_amount) * (parseInt(form.months_count) || 0) - parseFloat(form.original_price)) / parseFloat(form.original_price)) * 100)}%)</p>
               )}
-            </p>
+            </div>
           )}
           <button disabled={busy} onClick={submit} className="w-full bg-orange-600 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-60">حفظ</button>
         </Card>
@@ -258,6 +295,9 @@ function InstallmentsTab({ plans, reload, showMsg }: { plans: InstallmentPlan[];
           const overduePending = plan.installment_payments.filter((x) => x.status === "pending" && x.due_date < todayISO());
           const nextPending = plan.installment_payments.find((x) => x.status === "pending");
           const paidCount = plan.installment_payments.filter((x) => x.status === "paid").length;
+          const paidSum = plan.installment_payments.filter((x) => x.status === "paid").reduce((s, x) => s + Number(x.amount), 0);
+          const totalSum = plan.installment_payments.reduce((s, x) => s + Number(x.amount), 0);
+          const remainingSum = totalSum - paidSum;
           const isOpen = expanded === plan.id;
           const interestPct = plan.original_price && plan.original_price > 0 ? Math.round(((plan.total_amount - plan.original_price) / plan.original_price) * 100) : null;
 
@@ -273,7 +313,7 @@ function InstallmentsTab({ plans, reload, showMsg }: { plans: InstallmentPlan[];
                   </p>
                   {nextPending && (
                     <p className={`text-[11px] mt-0.5 ${overduePending.length > 0 ? "text-red-500 font-medium" : "text-neutral-400"}`}>
-                      {overduePending.length > 0 ? `⚠️ متأخر من ${nextPending.due_date}` : `القسط الجاي: ${nextPending.due_date}`}
+                      {overduePending.length > 0 ? `⚠️ متأخر من ${nextPending.due_date}` : `القسط الجاي: ${fmt(Number(nextPending.amount), plan.currency)} بتاريخ ${nextPending.due_date}`}
                     </p>
                   )}
                 </div>
@@ -286,18 +326,42 @@ function InstallmentsTab({ plans, reload, showMsg }: { plans: InstallmentPlan[];
                 </div>
               </div>
 
+              <div className="grid grid-cols-4 gap-1 rounded-lg bg-neutral-50 dark:bg-neutral-800/50 p-2 text-center">
+                <div>
+                  <p className="text-[9px] text-neutral-400">إجمالي العملية</p>
+                  <p className="text-[11px] font-semibold">{fmt(totalSum, plan.currency)}</p>
+                </div>
+                <div>
+                  <p className="text-[9px] text-neutral-400">المدفوع</p>
+                  <p className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">{fmt(paidSum, plan.currency)}</p>
+                </div>
+                <div>
+                  <p className="text-[9px] text-neutral-400">الباقي</p>
+                  <p className="text-[11px] font-semibold text-orange-600 dark:text-orange-400">{fmt(remainingSum, plan.currency)}</p>
+                </div>
+                <div>
+                  <p className="text-[9px] text-neutral-400">القسط القادم</p>
+                  <p className="text-[11px] font-semibold">{nextPending ? fmt(Number(nextPending.amount), plan.currency) : "—"}</p>
+                </div>
+              </div>
+
               {isOpen && (
                 <div className="border-t border-neutral-100 dark:border-neutral-800 pt-2 space-y-1.5">
                   {plan.installment_payments.map((p) => {
                     const late = p.status === "pending" && p.due_date < todayISO();
                     return (
                       <div key={p.id} className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs ${late ? "bg-red-50 dark:bg-red-950 ring-1 ring-red-300 dark:ring-red-800" : "bg-neutral-50 dark:bg-neutral-800/50"}`}>
-                        <span>قسط {p.month_index} — {p.due_date} — {fmt(Number(p.amount), plan.currency)}</span>
-                        {p.status === "paid" ? (
-                          <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1"><CheckCircle2 size={12} /> مدفوع</span>
-                        ) : (
-                          <button disabled={busy} onClick={() => markPaid(plan, p.id)} className="bg-orange-600 text-white rounded-full px-2 py-1">تم الدفع</button>
-                        )}
+                        <button onClick={() => setEditPayment({ plan, payment: p })} className="flex-1 text-right hover:underline">
+                          قسط {p.month_index} — {p.due_date} — {fmt(Number(p.amount), plan.currency)}
+                        </button>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {p.status === "paid" ? (
+                            <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1"><CheckCircle2 size={12} /> مدفوع</span>
+                          ) : (
+                            <button disabled={busy} onClick={() => markPaid(plan, p.id)} className="bg-orange-600 text-white rounded-full px-2 py-1">تم الدفع</button>
+                          )}
+                          <button onClick={() => setEditPayment({ plan, payment: p })} className="text-neutral-400 hover:text-orange-600 p-0.5"><Pencil size={12} /></button>
+                        </div>
                       </div>
                     );
                   })}
@@ -330,7 +394,76 @@ function InstallmentsTab({ plans, reload, showMsg }: { plans: InstallmentPlan[];
           </div>
         </Modal>
       )}
+
+      {editPayment && (
+        <PaymentEditModal
+          plan={editPayment.plan}
+          payment={editPayment.payment}
+          busy={busy}
+          onClose={() => setEditPayment(null)}
+          onSave={(updates) => savePaymentEdit(editPayment.plan, editPayment.payment, updates)}
+        />
+      )}
+
+      {showCalculator && (
+        <InstallmentCalculatorModal
+          onClose={() => setShowCalculator(false)}
+          onApply={(v) => {
+            setForm({
+              item_name: v.item_name,
+              company_name: "",
+              original_price: "",
+              monthly_amount: String(v.monthly_amount),
+              months_count: String(v.months_count),
+              start_date: todayISO(),
+              currency: v.currency,
+            });
+            setShowForm(true);
+            showMsg("✅ اتملى الفورم بقيم الحاسبة — راجعها واحفظ");
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+function PaymentEditModal({
+  plan, payment, busy, onClose, onSave,
+}: {
+  plan: InstallmentPlan; payment: InstallmentPayment; busy: boolean; onClose: () => void;
+  onSave: (updates: { amount?: number; due_date?: string; status?: "pending" | "paid" }) => void;
+}) {
+  const [amount, setAmount] = useState(String(payment.amount));
+  const [dueDate, setDueDate] = useState(payment.due_date);
+
+  return (
+    <Modal onClose={onClose}>
+      <p className="font-semibold text-sm">تعديل القسط رقم {payment.month_index} — {plan.item_name}</p>
+      <div>
+        <label className="text-[10px] text-neutral-400">المبلغ</label>
+        <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+      </div>
+      <div>
+        <label className="text-[10px] text-neutral-400">تاريخ الاستحقاق</label>
+        <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+      </div>
+      <button
+        disabled={busy}
+        onClick={() => onSave({ amount: parseFloat(amount), due_date: dueDate })}
+        className="w-full bg-orange-600 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-60"
+      >
+        حفظ التعديل
+      </button>
+      {payment.status === "paid" ? (
+        <button disabled={busy} onClick={() => onSave({ status: "pending" })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 py-2 text-sm disabled:opacity-60">
+          التراجع عن "تم الدفع"
+        </button>
+      ) : (
+        <button disabled={busy} onClick={() => onSave({ status: "paid" })} className="w-full rounded-lg border border-emerald-300 dark:border-emerald-800 text-emerald-600 dark:text-emerald-400 py-2 text-sm disabled:opacity-60">
+          علّمه كمدفوع
+        </button>
+      )}
+    </Modal>
   );
 }
 

@@ -123,7 +123,7 @@ function CurrencyConverter({ rates, baseCurrency }: { rates: Record<string, numb
 
 export default function Dashboard() {
   const [data, setData] = useState<any>(null);
-  const [alerts, setAlerts] = useState<{ count: number; dueRecurring: number; overBudget: number; overdueCount: number } | null>(null);
+  const [alerts, setAlerts] = useState<{ count: number; items: { label: string; href: string }[] } | null>(null);
   const [hijriCorrection, setHijriCorrection] = useState(0);
   const [baseCurrency, setBaseCurrency] = useState("EGP");
 
@@ -178,22 +178,29 @@ export default function Dashboard() {
       </Link>
 
       {alerts && alerts.count > 0 && (
-        <Link href="/planning">
-          <Card className="flex items-center gap-3 bg-orange-50 dark:bg-orange-950 border-orange-200 dark:border-orange-900">
+        <Card className="space-y-2 bg-orange-50 dark:bg-orange-950 border-orange-200 dark:border-orange-900">
+          <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-full bg-orange-500 text-white flex items-center justify-center shrink-0">
               <AlertTriangle size={16} />
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-orange-700 dark:text-orange-300">في {alerts.count} حاجة محتاجة انتباهك</p>
-              <p className="text-[11px] text-orange-600/80 dark:text-orange-400/80">
-                {alerts.dueRecurring > 0 && `${alerts.dueRecurring} مصروف/دخل متكرر · `}
-                {alerts.overBudget > 0 && `${alerts.overBudget} ميزانية تخطت الحد · `}
-                {alerts.overdueCount > 0 && `${alerts.overdueCount} دين متأخر`}
-              </p>
-            </div>
-            <ChevronLeft size={16} className="text-orange-400 shrink-0" />
-          </Card>
-        </Link>
+            <p className="text-sm font-medium text-orange-700 dark:text-orange-300">في {alerts.count} حاجة محتاجة انتباهك</p>
+          </div>
+          <div className="space-y-1 pr-1">
+            {alerts.items.slice(0, 4).map((it, i) => (
+              <Link
+                key={i}
+                href={it.href}
+                className="flex items-center justify-between gap-2 text-[12px] text-orange-700/90 dark:text-orange-300/90 hover:underline"
+              >
+                <span className="truncate">{it.label}</span>
+                <ChevronLeft size={13} className="text-orange-400 shrink-0" />
+              </Link>
+            ))}
+            {alerts.items.length > 4 && (
+              <p className="text-[11px] text-orange-600/70 dark:text-orange-400/70">+{alerts.items.length - 4} تانيين</p>
+            )}
+          </div>
+        </Card>
       )}
 
       <Card className="bg-gradient-to-l from-orange-600 to-orange-500 text-white border-none">
