@@ -28,6 +28,7 @@ const KEY_MAP: Record<string, string> = {
   "📈 كشف حساب": "account_statement",
   "🔍 استعلام عن مصروف": "expense_query",
   "🔔 التنبيهات": "alerts",
+  "🔕 كتم/تفعيل تنبيهات البوت": "toggle_mute",
 };
 
 async function getAccounts(userId: string) {
@@ -190,6 +191,7 @@ async function startFlow(userId: string, botToken: string, chatId: string, flow:
   if (flow === "quick_statement") return quickStatement(userId, botToken, chatId);
   if (flow === "expense_query") return expenseQuery(userId, botToken, chatId);
   if (flow === "alerts") return alertsReport(userId, botToken, chatId);
+  if (flow === "toggle_mute") return toggleMuteAll(userId, botToken, chatId);
   if (flow === "account_statement") {
     const accounts = await getAccounts(userId);
     if (!accounts.length) return reply(botToken, chatId, "لسه معملتش أي حساب. ضيفه من التطبيق الأول.");
@@ -244,46 +246,97 @@ async function quickStatement(userId: string, botToken: string, chatId: string) 
   return reply(botToken, chatId, text);
 }
 
-// "🔍 استعلام عن مصروف" — today's expenses only, with a pointer to the app
-// for anything more detailed (full history, filtering, editing...).
+// "🔍 استعلام عن مصروف" — today's expenses, plus (as of round 21) any
+// pending installment/gam3eya payments due today أو متأخرة — دي مش
+// "transactions" لكنها التزامات مالية فعلية، فطلب المستخدم إنها تظهر هنا
+// كمان بدل ما تفضل مقصورة على "🔔 التنبيهات".
 async function expenseQuery(userId: string, botToken: string, chatId: string) {
   const dayStart = startOfDay(new Date());
-  const { data: txs } = await supabaseAdmin
-    .from("transactions")
-    .select("*, categories(name,icon)")
-    .eq("user_id", userId)
-    .eq("type", "expense")
-    .gte("occurred_at", dayStart.toISOString())
-    .order("occurred_at", { ascending: false });
+  const todayIso = new Date().toISOString().slice(0, 10);
+
+  const [{ data: txs }, { data: installmentPlans }, { data: gam3eyat }] = await Promise.all([
+    supabaseAdmin
+      .from("transactions")
+      .select("*, categories(name,icon)")
+      .eq("user_id", userId)
+      .eq("type", "expense")
+      .gte("occurred_at", dayStart.toISOString())
+      .order("occurred_at", { ascending: false }),
+    supabaseAdmin
+      .from("installment_plans")
+      .select("item_name,currency,installment_payments(due_date,amount,status)")
+      .eq("user_id", userId)
+      .eq("status", "active"),
+    supabaseAdmin
+      .from("gam3eyas")
+      .select("name,type,currency,gam3eya_payments(due_date,amount,status,participant_id,gam3eya_participants(name))")
+      .eq("user_id", userId)
+      .eq("status", "active"),
+  ]);
 
   const list = txs || [];
-  if (!list.length) {
-    return reply(botToken, chatId, "مفيش مصاريف اتسجلت النهاردة لحد دلوقتي 👌");
-  }
-  const total = list.reduce((s, t) => s + Math.abs(Number(t.amount)), 0);
-  const lines = list
-    .slice(0, 10)
-    .map((t) => `• ${t.categories?.icon || ""} ${t.description || t.categories?.name || "مصروف"} — ${Number(t.amount).toLocaleString()} ${t.currency}`)
-    .join("\n");
-  const more = list.length > 10 ? `\n\n+${list.length - 10} حركة تانية...` : "";
-  return reply(
-    botToken,
-    chatId,
-    `🔍 مصاريف النهاردة (${list.length})\nالإجمالي: ${total.toLocaleString()} جنيه تقريبًا\n\n${lines}${more}\n\nلو عايز بيانات أكتر أو فترة تانية، افتح التطبيق 📱`
+  const dueInstallments = (installmentPlans || []).flatMap((p: any) =>
+    (p.installment_payments || [])
+      .filter((x: any) => x.status === "pending" && x.due_date <= todayIso)
+      .map((x: any) => `• قسط "${p.item_name}" — ${Number(x.amount).toLocaleString()} ${p.currency}${x.due_date < todayIso ? " (متأخر)" : ""}`)
   );
+  const dueGam3eya = (gam3eyat || []).flatMap((g: any) =>
+    (g.gam3eya_payments || [])
+      .filter((x: any) => x.status === "pending" && x.due_date <= todayIso)
+      .map((x: any) => {
+        const who = x.gam3eya_participants?.name ? ` — ${x.gam3eya_participants.name}` : "";
+        return `• جمعية "${g.name || "بدون اسم"}"${who} — ${Number(x.amount).toLocaleString()} ${g.currency}${x.due_date < todayIso ? " (متأخرة)" : ""}`;
+      })
+  );
+
+  if (!list.length && !dueInstallments.length && !dueGam3eya.length) {
+    return reply(botToken, chatId, "مفيش مصاريف اتسجلت النهاردة، ولا أقساط/جمعيات مستحقة عليك دلوقتي 👌");
+  }
+
+  const parts: string[] = [];
+  if (list.length) {
+    const total = list.reduce((s, t) => s + Math.abs(Number(t.amount)), 0);
+    const lines = list
+      .slice(0, 10)
+      .map((t) => `• ${t.categories?.icon || ""} ${t.description || t.categories?.name || "مصروف"} — ${Number(t.amount).toLocaleString()} ${t.currency}`)
+      .join("\n");
+    const more = list.length > 10 ? `\n+${list.length - 10} حركة تانية...` : "";
+    parts.push(`💸 مصاريف النهاردة (${list.length}) — الإجمالي: ${total.toLocaleString()} جنيه تقريبًا\n${lines}${more}`);
+  } else {
+    parts.push("💸 مفيش مصاريف اتسجلت النهاردة لحد دلوقتي.");
+  }
+  if (dueInstallments.length) parts.push(`📦 أقساط مستحقة (${dueInstallments.length}):\n${dueInstallments.join("\n")}`);
+  if (dueGam3eya.length) parts.push(`🤝 دفعات جمعيات مستحقة (${dueGam3eya.length}):\n${dueGam3eya.join("\n")}`);
+
+  return reply(botToken, chatId, `🔍 استعلام عن مصروف\n\n${parts.join("\n\n")}\n\nلو عايز بيانات أكتر أو فترة تانية، افتح التطبيق 📱`);
 }
 
 // "🔔 التنبيهات" — same signal as the orange alert banner on the dashboard
-// (overdue debts, over-budget categories, due recurring items), summarized as text.
+// (overdue debts, over-budget categories, due recurring items، وكمان أقساط
+// وجمعيات مستحقة من round 21 — قبل كده كانت ناقصة من هنا رغم إنها موجودة في
+// جرس التنبيهات جوه التطبيق نفسه وفي alerts-count).
 async function alertsReport(userId: string, botToken: string, chatId: string) {
   const monthKey = new Date().toISOString().slice(0, 7);
   const monthStart = startOfMonth(new Date()).toISOString();
+  const todayIso = new Date().toISOString().slice(0, 10);
 
-  const [{ data: recurring }, { data: budgets }, { data: overdueDebts }, { data: txs }] = await Promise.all([
+  const [{ data: recurring }, { data: budgets }, { data: overdueDebts }, { data: txs }, { data: overdueInstallments }, { data: overdueGam3eya }] = await Promise.all([
     supabaseAdmin.from("recurring_items").select("id,name,last_confirmed_month,is_active").eq("user_id", userId).eq("is_active", true),
     supabaseAdmin.from("budgets").select("id,category_id,monthly_limit,alert_threshold_pct,categories(name)").eq("user_id", userId),
     supabaseAdmin.from("debts").select("id,title,remaining_amount,currency,people(name)").eq("user_id", userId).eq("status", "overdue"),
     supabaseAdmin.from("transactions").select("category_id,amount").eq("user_id", userId).eq("type", "expense").gte("occurred_at", monthStart),
+    supabaseAdmin
+      .from("installment_payments")
+      .select("id,due_date,amount,installment_plans!inner(user_id,item_name,currency)")
+      .eq("installment_plans.user_id", userId)
+      .eq("status", "pending")
+      .lte("due_date", todayIso),
+    supabaseAdmin
+      .from("gam3eya_payments")
+      .select("id,due_date,amount,gam3eyas!inner(user_id,name,currency),gam3eya_participants(name)")
+      .eq("gam3eyas.user_id", userId)
+      .eq("status", "pending")
+      .lte("due_date", todayIso),
   ]);
 
   const dueRecurring = (recurring || []).filter((r) => r.last_confirmed_month !== monthKey);
@@ -298,7 +351,10 @@ async function alertsReport(userId: string, botToken: string, chatId: string) {
     return pct >= (b.alert_threshold_pct || 80);
   });
 
-  const total = dueRecurring.length + overBudget.length + (overdueDebts || []).length;
+  const installmentsList = (overdueInstallments || []) as any[];
+  const gam3eyaList = (overdueGam3eya || []) as any[];
+
+  const total = dueRecurring.length + overBudget.length + (overdueDebts || []).length + installmentsList.length + gam3eyaList.length;
   if (!total) return reply(botToken, chatId, "مفيش تنبيهات دلوقتي، كله تمام ✅");
 
   const lines: string[] = [];
@@ -310,8 +366,38 @@ async function alertsReport(userId: string, botToken: string, chatId: string) {
         overdueDebts!.map((d: any) => `${d.people?.name || "شخص"} (${Number(d.remaining_amount).toLocaleString()} ${d.currency})`).join("، ")
     );
   }
+  if (installmentsList.length) {
+    lines.push(
+      `📦 ${installmentsList.length} قسط مستحق: ` +
+        installmentsList.map((p) => `${p.installment_plans?.item_name} (${Number(p.amount).toLocaleString()} ${p.installment_plans?.currency})`).join("، ")
+    );
+  }
+  if (gam3eyaList.length) {
+    lines.push(
+      `🤝 ${gam3eyaList.length} دفعة جمعية مستحقة: ` +
+        gam3eyaList.map((p) => `${p.gam3eyas?.name || "جمعية"}${p.gam3eya_participants?.name ? ` — ${p.gam3eya_participants.name}` : ""} (${Number(p.amount).toLocaleString()} ${p.gam3eyas?.currency})`).join("، ")
+    );
+  }
 
   return reply(botToken, chatId, `🔔 عندك ${total} حاجة محتاجة انتباهك\n\n${lines.join("\n")}`);
+}
+
+// "🔕 كتم/تفعيل تنبيهات البوت" — زرار ثابت في القايمة الرئيسية (سياسة
+// تليجرام بتطلب إن أي بوت يبعت تنبيهات دورية يديك طريقة توقفها بسهولة، وإلا
+// ممكن يتقفل). بيوقف/يشغّل كل التذكيرات الاستباقية (صدقة/زكاة/ديون/متكرر/
+// أقساط/جمعيات) من هنا — الأزرار التفاعلية زي "🔍 استعلام عن مصروف" و"🔔
+// التنبيهات" بتفضل شغالة عادي لأنها بطلب المستخدم نفسه مش بوش من البوت.
+async function toggleMuteAll(userId: string, botToken: string, chatId: string) {
+  const { data: user } = await supabaseAdmin.from("app_users").select("telegram_notifications_muted").eq("id", userId).single();
+  const next = !user?.telegram_notifications_muted;
+  await supabaseAdmin.from("app_users").update({ telegram_notifications_muted: next }).eq("id", userId);
+  return reply(
+    botToken,
+    chatId,
+    next
+      ? "🔕 تم كتم كل تنبيهات البوت (الصدقة، الزكاة، الديون، المصاريف المتكررة، الأقساط، الجمعيات). تقدر تشغّلها تاني بنفس الزرار في أي وقت.\n\nملحوظة: تقدر تشوف نفس البيانات دايمًا من جرس التنبيهات جوه التطبيق."
+      : "🔔 اتفعّلت تنبيهات البوت تاني ✅"
+  );
 }
 
 async function continueFlow(userId: string, botToken: string, chatId: string, session: any, input: string, cbPrefix?: string) {

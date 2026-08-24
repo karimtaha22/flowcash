@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
 
   const { data: users, error } = await supabaseAdmin
     .from("app_users")
-    .select("id,telegram_chat_id");
+    .select("id,telegram_chat_id,telegram_notifications_muted");
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   let checked = 0;

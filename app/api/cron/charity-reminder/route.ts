@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
 
   const { data: users, error } = await supabaseAdmin
     .from("app_users")
-    .select("id,base_currency,telegram_chat_id,charity_amount,charity_frequency,charity_last_reminded_at,charity_muted_date")
+    .select("id,base_currency,telegram_chat_id,telegram_notifications_muted,charity_amount,charity_frequency,charity_last_reminded_at,charity_muted_date")
     .eq("charity_reminder_enabled", true);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

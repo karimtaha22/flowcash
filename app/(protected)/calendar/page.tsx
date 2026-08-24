@@ -5,7 +5,7 @@ import TransactionRow from "@/components/TransactionRow";
 import { fmt } from "@/lib/format";
 import { toEGP, fromEGP, type FxRates } from "@/lib/fx";
 import { startOfMonth, endOfMonth, eachDayOfInterval, format, getDay, addMonths, subMonths } from "date-fns";
-import { ChevronRight, ChevronLeft, Flame, UserRound, Clock, PieChart as PieChartIcon, HeartHandshake, CheckCircle2 } from "lucide-react";
+import { ChevronRight, ChevronLeft, Flame, UserRound, Clock, PieChart as PieChartIcon, HeartHandshake, CheckCircle2, Wallet, CreditCard, Users, TrendingUp } from "lucide-react";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 
 const COLORS = ["#f97316", "#3b82f6", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6", "#84cc16"];
@@ -25,6 +25,9 @@ export default function CalendarPage() {
   const [charityMutedDate, setCharityMutedDate] = useState<string | null>(null);
   const [charityEnabled, setCharityEnabled] = useState(false);
   const [mutingCharity, setMutingCharity] = useState(false);
+  const [snapshot, setSnapshot] = useState<any>(null);
+  const [installmentsSummary, setInstallmentsSummary] = useState<{ remainingCount: number; remainingAmount: number } | null>(null);
+  const [gam3eyaSummary, setGam3eyaSummary] = useState<{ activeCount: number } | null>(null);
 
   const loadTxs = () => {
     const from = startOfMonth(month).toISOString();
@@ -43,6 +46,21 @@ export default function CalendarPage() {
     fetch("/api/debts").then((r) => r.json()).then((d) => setDebts(d.debts || [])).catch(() => {});
     fetch("/api/accounts").then((r) => r.json()).then((d) => setAccounts(d.accounts || [])).catch(() => {});
     fetch("/api/dashboard").then((r) => r.json()).then((d) => setCategoryBreakdown(d.categoryBreakdown || [])).catch(() => {});
+    // ربط الصفحة (دلوقتي "التقارير") بالأقساط والجمعيات والمصاريف الثابتة —
+    // budget-snapshot بيرجع كل حاجة محوّلة للعملة الأساسية أصلًا (نفس اللي
+    // بتستخدمه SimulatorModal في تبويب الأقساط)، فبنعيد استخدامه هنا بدل ما
+    // نحسب من الصفر تاني.
+    fetch("/api/budget-snapshot").then((r) => r.json()).then((d) => setSnapshot(d)).catch(() => {});
+    fetch("/api/installments").then((r) => r.json()).then((d) => {
+      const active = (d.plans || []).filter((p: any) => p.status === "active");
+      const remainingCount = active.reduce((s: number, p: any) => s + p.installment_payments.filter((x: any) => x.status === "pending").length, 0);
+      const remainingAmount = active.reduce((s: number, p: any) => s + p.installment_payments.filter((x: any) => x.status === "pending").reduce((s2: number, x: any) => s2 + Number(x.amount), 0), 0);
+      setInstallmentsSummary({ remainingCount, remainingAmount });
+    }).catch(() => {});
+    fetch("/api/gam3eya").then((r) => r.json()).then((d) => {
+      const activeCount = (d.gam3eyas || []).filter((g: any) => g.status === "active").length;
+      setGam3eyaSummary({ activeCount });
+    }).catch(() => {});
   }, []);
 
   const byDay = useMemo(() => {
@@ -117,9 +135,11 @@ export default function CalendarPage() {
 
   return (
     <div className="space-y-4">
+      <h1 className="text-xl font-bold">التقارير</h1>
+
       <div className="flex items-center justify-between">
         <button onClick={() => setMonth(subMonths(month, 1))}><ChevronRight size={18} /></button>
-        <h1 className="text-sm font-bold">{format(month, "MMMM yyyy")}</h1>
+        <p className="text-sm font-bold">{format(month, "MMMM yyyy")}</p>
         <button onClick={() => setMonth(addMonths(month, 1))}><ChevronLeft size={18} /></button>
       </div>
 
@@ -154,6 +174,46 @@ export default function CalendarPage() {
         <p className="text-sm font-semibold text-neutral-600 dark:text-neutral-300">نظرة عامة</p>
 
         <div className="grid grid-cols-1 gap-3">
+          {snapshot && (
+            <Card className="space-y-2 !bg-neutral-950 !border-neutral-800 text-white">
+              <p className="text-xs font-semibold text-neutral-300 flex items-center gap-1.5"><Wallet size={14} /> كل قرش داخل وخارج — نظرة شاملة</p>
+              <div className="grid grid-cols-2 gap-2 text-[11px]">
+                <div className="bg-neutral-900 rounded-lg p-2">
+                  <p className="text-neutral-400">دخلك الشهري التقريبي</p>
+                  <p className="font-bold text-emerald-400">{fmt(snapshot.estimatedMonthlyIncome, snapshot.baseCurrency)}</p>
+                </div>
+                <div className="bg-neutral-900 rounded-lg p-2">
+                  <p className="text-neutral-400">مصاريفك الثابتة شهريًا</p>
+                  <p className="font-bold text-orange-400">{fmt(snapshot.monthlyFixedExpenses, snapshot.baseCurrency)}</p>
+                </div>
+                <div className="bg-neutral-900 rounded-lg p-2 flex items-center gap-1.5">
+                  <CreditCard size={12} className="text-neutral-400 shrink-0" />
+                  <div>
+                    <p className="text-neutral-400">أقساط شهريًا</p>
+                    <p className="font-bold">{fmt(snapshot.activeInstallmentsMonthly, snapshot.baseCurrency)}</p>
+                  </div>
+                </div>
+                <div className="bg-neutral-900 rounded-lg p-2 flex items-center gap-1.5">
+                  <Users size={12} className="text-neutral-400 shrink-0" />
+                  <div>
+                    <p className="text-neutral-400">جمعيات شهريًا</p>
+                    <p className="font-bold">{fmt(snapshot.activeGam3eyaMonthly, snapshot.baseCurrency)}</p>
+                  </div>
+                </div>
+              </div>
+              {snapshot.outstandingDebts > 0 && (
+                <p className="text-[11px] text-red-300 flex items-center gap-1"><TrendingUp size={12} /> ديون متبقية عليك: {fmt(snapshot.outstandingDebts, snapshot.baseCurrency)}</p>
+              )}
+              {(installmentsSummary || gam3eyaSummary) && (
+                <div className="border-t border-neutral-800 pt-2 flex items-center justify-between text-[11px] text-neutral-300">
+                  {installmentsSummary && <span>باقي {installmentsSummary.remainingCount} قسط — {fmt(installmentsSummary.remainingAmount, snapshot.baseCurrency)}</span>}
+                  {gam3eyaSummary && <span>{gam3eyaSummary.activeCount} جمعية شغالة</span>}
+                </div>
+              )}
+              <a href="/installments" className="block text-center text-[11px] text-orange-400 pt-1">افتح الأقساط والجمعيات ←</a>
+            </Card>
+          )}
+
           {busiestDays.length > 0 && (
             <Card className="space-y-2">
               <p className="text-xs font-semibold text-orange-700 dark:text-orange-400 flex items-center gap-1.5"><Flame size={14} /> أكتر أيام الشهر صرفًا</p>

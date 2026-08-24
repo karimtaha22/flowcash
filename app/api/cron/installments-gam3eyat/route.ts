@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: false }, { status: 401 });
   }
 
-  const { data: users, error } = await supabaseAdmin.from("app_users").select("id,telegram_chat_id");
+  const { data: users, error } = await supabaseAdmin.from("app_users").select("id,telegram_chat_id,telegram_notifications_muted");
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   let installmentsSent = 0;

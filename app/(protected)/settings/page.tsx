@@ -7,7 +7,7 @@ import PeopleManager from "@/components/PeopleManager";
 import { useTheme } from "@/lib/useTheme";
 import { useFontScale, type FontScale } from "@/lib/useFontScale";
 import { formatHijriFromDate } from "@/lib/hijri";
-import { Moon, Sun, LogOut, ShieldCheck, Plane, Fingerprint, TimerOff, Coins, Tags, Users, ChevronDown, Type, CalendarClock, Minus, Plus, Send } from "lucide-react";
+import { Moon, Sun, LogOut, ShieldCheck, Plane, Fingerprint, TimerOff, Coins, Tags, Users, ChevronDown, Type, CalendarClock, Minus, Plus, Send, BellRing } from "lucide-react";
 
 const FONT_SCALES: { key: FontScale; label: string }[] = [
   { key: "small", label: "أصغر" },
@@ -42,6 +42,11 @@ export default function SettingsPage() {
   const [telegramBusy, setTelegramBusy] = useState(false);
   const [telegramMsg, setTelegramMsg] = useState("");
   const [telegramLink, setTelegramLink] = useState("");
+  const [igEnabled, setIgEnabled] = useState(true);
+  const [igMode, setIgMode] = useState<"interval" | "daily">("interval");
+  const [igIntervalHours, setIgIntervalHours] = useState("6");
+  const [igHour, setIgHour] = useState("8");
+  const [savingIg, setSavingIg] = useState(false);
 
   useEffect(() => {
     fetch("/api/me").then((r) => r.json()).then((d) => {
@@ -54,6 +59,10 @@ export default function SettingsPage() {
         setHijriCorrection(Number(d.user.hijri_correction_days) || 0);
         setIsAdmin(!!d.user.is_admin);
         setTelegramLinked(!!d.user.telegram_chat_id);
+        setIgEnabled(d.user.ig_reminders_enabled !== false);
+        setIgMode(d.user.ig_reminder_mode === "daily" ? "daily" : "interval");
+        setIgIntervalHours(String(d.user.ig_reminder_interval_hours ?? 6));
+        setIgHour(String(d.user.ig_reminder_hour ?? 8));
       }
     });
     setBioSupported(typeof window !== "undefined" && !!window.PublicKeyCredential);
@@ -178,6 +187,36 @@ export default function SettingsPage() {
     });
   };
 
+  const saveIgSettings = async (patch: Record<string, any>) => {
+    setSavingIg(true);
+    try {
+      await fetch("/api/me", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
+    } finally {
+      setSavingIg(false);
+    }
+  };
+
+  const toggleIgEnabled = () => {
+    const next = !igEnabled;
+    setIgEnabled(next);
+    saveIgSettings({ ig_reminders_enabled: next });
+  };
+
+  const changeIgMode = (mode: "interval" | "daily") => {
+    setIgMode(mode);
+    saveIgSettings({ ig_reminder_mode: mode });
+  };
+
+  const changeIgIntervalHours = (val: string) => {
+    setIgIntervalHours(val);
+    saveIgSettings({ ig_reminder_interval_hours: parseInt(val) || 6 });
+  };
+
+  const changeIgHour = (val: string) => {
+    setIgHour(val);
+    saveIgSettings({ ig_reminder_hour: parseInt(val) || 8 });
+  };
+
   const logout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });
     router.push("/login");
@@ -235,6 +274,60 @@ export default function SettingsPage() {
           </>
         )}
         {telegramMsg && <p className="text-xs text-center text-red-500">{telegramMsg}</p>}
+      </Card>
+
+      <Card className="space-y-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-sm">
+            <BellRing size={18} />
+            تذكير الأقساط والجمعيات
+          </div>
+          <button onClick={toggleIgEnabled} className={`w-11 h-6 rounded-full transition ${igEnabled ? "bg-orange-600" : "bg-neutral-300"}`}>
+            <span className={`block w-5 h-5 bg-white rounded-full shadow transition ${igEnabled ? "translate-x-[-22px]" : "translate-x-[-2px]"}`} />
+          </button>
+        </div>
+        {igEnabled ? (
+          <>
+            <p className="text-xs text-neutral-400">
+              اختار إمتى توصلك تذكيرات الأقساط والجمعيات (بوت تليجرام + جرس التنبيهات في التطبيق) — كل قد إيه، ولا في معاد يومي ثابت.
+            </p>
+            <div className="grid grid-cols-2 gap-2 bg-neutral-100 dark:bg-neutral-800 rounded-xl p-1">
+              <button onClick={() => changeIgMode("interval")} className={`py-2 rounded-lg text-xs font-medium ${igMode === "interval" ? "bg-white dark:bg-neutral-900 shadow text-orange-600" : "text-neutral-500"}`}>
+                كل عدد ساعات
+              </button>
+              <button onClick={() => changeIgMode("daily")} className={`py-2 rounded-lg text-xs font-medium ${igMode === "daily" ? "bg-white dark:bg-neutral-900 shadow text-orange-600" : "text-neutral-500"}`}>
+                معاد يومي ثابت
+              </button>
+            </div>
+            {igMode === "interval" ? (
+              <select
+                value={igIntervalHours}
+                onChange={(e) => changeIgIntervalHours(e.target.value)}
+                disabled={savingIg}
+                className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm"
+              >
+                <option value="1">كل ساعة</option>
+                <option value="3">كل 3 ساعات</option>
+                <option value="6">كل 6 ساعات</option>
+                <option value="12">كل 12 ساعة</option>
+                <option value="24">مرة كل يوم</option>
+              </select>
+            ) : (
+              <select
+                value={igHour}
+                onChange={(e) => changeIgHour(e.target.value)}
+                disabled={savingIg}
+                className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm"
+              >
+                {Array.from({ length: 24 }, (_, h) => (
+                  <option key={h} value={h}>{String(h).padStart(2, "0")}:00</option>
+                ))}
+              </select>
+            )}
+          </>
+        ) : (
+          <p className="text-xs text-neutral-400">التذكيرات موقوفة دلوقتي — لسه هتشوف الأقساط/الجمعيات المستحقة في جرس التنبيهات جوه التطبيق، بس مش هتوصلك رسائل بوت أو دفعة استباقية.</p>
+        )}
       </Card>
 
       <Card className="space-y-2">

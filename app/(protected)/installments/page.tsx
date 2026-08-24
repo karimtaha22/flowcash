@@ -341,6 +341,44 @@ function InstallmentsTab({ plans, reload, showMsg }: { plans: InstallmentPlan[];
         </Card>
       )}
 
+      {/* بتفتح جوه نفس الصفحة (مش بوب أب فوق كل حاجة) — بالظبط زي فورم "قسط
+          جديد" فوق، عشان متحسّش إنك خرجت لصفحة تانية. */}
+      {showCalculator && (
+        <InstallmentCalculatorModal
+          onClose={() => { setShowCalculator(false); setCalculatorPlan(null); }}
+          applyLabel={calculatorPlan ? "حدّث جدول الأقساط الباقية بالقيم دي" : undefined}
+          initial={
+            calculatorPlan
+              ? {
+                  itemName: calculatorPlan.item_name,
+                  itemPrice: calculatorPlan.original_price || calculatorPlan.total_amount,
+                  downPayment: 0,
+                  periodValue: Math.max(1, calculatorPlan.months_count - calculatorPlan.installment_payments.filter((p) => p.status === "paid").length),
+                  periodType: "months",
+                  currency: calculatorPlan.currency,
+                }
+              : undefined
+          }
+          onApply={(v) => {
+            if (calculatorPlan) {
+              applyAdvancedEdit(calculatorPlan, { monthly_amount: v.monthly_amount, months_count: v.months_count });
+              return;
+            }
+            setForm({
+              item_name: v.item_name,
+              company_name: "",
+              original_price: "",
+              monthly_amount: String(v.monthly_amount),
+              months_count: String(v.months_count),
+              start_date: todayISO(),
+              currency: v.currency,
+            });
+            setShowForm(true);
+            showMsg("✅ اتملى الفورم بقيم الحاسبة — راجعها واحفظ");
+          }}
+        />
+      )}
+
       <div className="space-y-2">
         {plans.map((plan) => {
           const overduePending = plan.installment_payments.filter((x) => x.status === "pending" && x.due_date < todayISO());
@@ -463,42 +501,6 @@ function InstallmentsTab({ plans, reload, showMsg }: { plans: InstallmentPlan[];
           onClose={() => setEditPlan(null)}
           onSave={(updates) => savePlanEdit(editPlan, updates)}
           onAdvancedEdit={() => { setEditPlan(null); setCalculatorPlan(editPlan); setShowCalculator(true); }}
-        />
-      )}
-
-      {showCalculator && (
-        <InstallmentCalculatorModal
-          onClose={() => { setShowCalculator(false); setCalculatorPlan(null); }}
-          applyLabel={calculatorPlan ? "حدّث جدول الأقساط الباقية بالقيم دي" : undefined}
-          initial={
-            calculatorPlan
-              ? {
-                  itemName: calculatorPlan.item_name,
-                  itemPrice: calculatorPlan.original_price || calculatorPlan.total_amount,
-                  downPayment: 0,
-                  periodValue: Math.max(1, calculatorPlan.months_count - calculatorPlan.installment_payments.filter((p) => p.status === "paid").length),
-                  periodType: "months",
-                  currency: calculatorPlan.currency,
-                }
-              : undefined
-          }
-          onApply={(v) => {
-            if (calculatorPlan) {
-              applyAdvancedEdit(calculatorPlan, { monthly_amount: v.monthly_amount, months_count: v.months_count });
-              return;
-            }
-            setForm({
-              item_name: v.item_name,
-              company_name: "",
-              original_price: "",
-              monthly_amount: String(v.monthly_amount),
-              months_count: String(v.months_count),
-              start_date: todayISO(),
-              currency: v.currency,
-            });
-            setShowForm(true);
-            showMsg("✅ اتملى الفورم بقيم الحاسبة — راجعها واحفظ");
-          }}
         />
       )}
     </div>
@@ -975,6 +977,7 @@ function Gam3eyaCard({
   const [exportIncludeAddress, setExportIncludeAddress] = useState(false);
   const [exportIncludePhone, setExportIncludePhone] = useState(false);
   const [exportIncludeReceipts, setExportIncludeReceipts] = useState(false);
+  const [exportIncludeRating, setExportIncludeRating] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState("");
 
@@ -1103,13 +1106,13 @@ function Gam3eyaCard({
           const overdueForP = g.gam3eya_payments.some((x) => x.participant_id === p.id && x.status === "pending" && x.due_date < today);
           const collected = p.payout_order < currentMonth || (p.payout_order === currentMonth && g.status === "completed");
           const paidLabel = myPayment ? (myPayment.status === "paid" ? '<span style="color:#059669;font-weight:700;">دفع ✓</span>' : '<span style="color:#dc2626;font-weight:700;">لسه ✗</span>') : "";
-          const stars = "★".repeat(p.rating || 0) + "☆".repeat(5 - (p.rating || 0));
+          const stars = exportIncludeRating ? "★".repeat(p.rating || 0) + "☆".repeat(5 - (p.rating || 0)) : "";
           return `
             <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f3f4f6;${overdueForP ? "background:#fef2f2;" : ""}">
               <div style="display:flex;align-items:center;gap:6px;min-width:0;">
                 ${overdueForP ? '<span style="width:7px;height:7px;border-radius:50%;background:#dc2626;flex-shrink:0;"></span>' : ""}
                 <span style="font-size:12px;font-weight:600;color:${overdueForP ? "#dc2626" : "#111827"};">#${p.payout_order} ${p.name}</span>
-                <span style="font-size:11px;color:#f59e0b;">${stars}</span>
+                ${stars ? `<span style="font-size:11px;color:#f59e0b;">${stars}</span>` : ""}
               </div>
               <div style="font-size:11px;text-align:left;flex-shrink:0;">
                 <div>${collected ? '<span style="color:#059669;">قبض ✓</span>' : '<span style="color:#9ca3af;">لسه ما قبضش</span>'}</div>
@@ -1332,9 +1335,12 @@ function Gam3eyaCard({
         <Modal onClose={() => !exporting && setShowExport(false)}>
           <p className="font-semibold text-sm">تصدير الجمعية</p>
           <p className="text-[11px] text-neutral-400">
-            بيتصدّر دايمًا: عدد الأفراد، مين قبض ومين لسه، تاريخ البداية والنهاية، إجمالي كل قبضة، ومين دفع الشهر ده ومين لأ (مع التقييم بالنجوم وعلامة حمرا للمتأخرين).
+            بيتصدّر دايمًا: عدد الأفراد، مين قبض ومين لسه، تاريخ البداية والنهاية، إجمالي كل قبضة، ومين دفع الشهر ده ومين لأ (مع علامة حمرا للمتأخرين).
           </p>
           <div className="space-y-1.5">
+            <label className="flex items-center gap-2 text-xs text-neutral-600 dark:text-neutral-300">
+              <input type="checkbox" checked={exportIncludeRating} onChange={(e) => setExportIncludeRating(e.target.checked)} /> إظهار التقييم بالنجوم
+            </label>
             <label className="flex items-center gap-2 text-xs text-neutral-600 dark:text-neutral-300">
               <input type="checkbox" checked={exportIncludePhotos} onChange={(e) => setExportIncludePhotos(e.target.checked)} /> إرفاق صور البطاقات
             </label>

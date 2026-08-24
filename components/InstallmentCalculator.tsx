@@ -149,27 +149,27 @@ export default function InstallmentCalculatorModal({
   const [showSchedule, setShowSchedule] = useState(false);
   const [currency, setCurrency] = useState(initial?.currency || "EGP");
 
-  const [itemName, setItemName] = useState(initial?.itemName || "سلعة / منتج");
-  const [itemPrice, setItemPrice] = useState(String(initial?.itemPrice ?? 100000));
-  const [downPayment, setDownPayment] = useState(String(initial?.downPayment ?? 15000));
-  const [periodValue, setPeriodValue] = useState(String(initial?.periodValue ?? 24));
+  const [itemName, setItemName] = useState(initial?.itemName || "");
+  const [itemPrice, setItemPrice] = useState(initial?.itemPrice ? String(initial.itemPrice) : "");
+  const [downPayment, setDownPayment] = useState(initial?.downPayment ? String(initial.downPayment) : "");
+  const [periodValue, setPeriodValue] = useState(initial?.periodValue ? String(initial.periodValue) : "");
   const [periodType, setPeriodType] = useState<PeriodType>(initial?.periodType ?? "months");
-  const [annualRate, setAnnualRate] = useState("0");
+  const [annualRate, setAnnualRate] = useState("");
   const [interestType, setInterestType] = useState<InterestType>("flat");
 
-  const [adminFeeValue, setAdminFeeValue] = useState("0");
+  const [adminFeeValue, setAdminFeeValue] = useState("");
   const [adminFeeType, setAdminFeeType] = useState<FeeType>("percent");
   const [adminFeePayment, setAdminFeePayment] = useState<PayMode>("upfront");
 
   const [hasDeliveryPayment, setHasDeliveryPayment] = useState(false);
-  const [deliveryPaymentAmount, setDeliveryPaymentAmount] = useState("0");
+  const [deliveryPaymentAmount, setDeliveryPaymentAmount] = useState("");
 
   const [hasMaintenance, setHasMaintenance] = useState(false);
-  const [maintenanceValue, setMaintenanceValue] = useState("0");
+  const [maintenanceValue, setMaintenanceValue] = useState("");
   const [maintenancePayment, setMaintenancePayment] = useState<PayMode>("upfront");
 
   const [hasPeriodic, setHasPeriodic] = useState(false);
-  const [periodicAmount, setPeriodicAmount] = useState("0");
+  const [periodicAmount, setPeriodicAmount] = useState("");
   const [periodicFrequency, setPeriodicFrequency] = useState<Frequency>("quarterly");
   const [periodicDurationMode, setPeriodicDurationMode] = useState<DurationMode>("full");
   const [periodicDurationYears, setPeriodicDurationYears] = useState("1");
@@ -288,26 +288,25 @@ export default function InstallmentCalculatorModal({
     { key: "reverse", label: "كشف الفائدة", icon: Search },
   ];
 
+  // ملحوظة: العنصر ده بيترسم جوه نفس الصفحة (مش بوب أب/أوفرلاي فوق الشاشة
+  // كلها) — طلب المستخدم إنها متحسّش وكأنها فتحت صفحة أو نافذة منفصلة، فبقت
+  // كارت عادي بيتوسع جوه تبويب الأقساط زي أي بانل تاني في التطبيق.
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4" onClick={onClose}>
-      <div
-        className="bg-white dark:bg-neutral-900 rounded-t-2xl sm:rounded-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="sticky top-0 z-10 bg-neutral-950 text-white px-4 py-3 flex items-center justify-between rounded-t-2xl">
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="w-8 h-8 rounded-lg bg-orange-500 flex items-center justify-center shrink-0">
-              <Calculator size={15} />
-            </div>
-            <div className="min-w-0">
-              <p className="text-sm font-bold truncate">حاسبة الأقساط</p>
-              <p className="text-[10px] text-neutral-400 truncate">فايدة، مصاريف إدارية، دفعة استلام، مقارنة، وتفاوض ذكي</p>
-            </div>
+    <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 overflow-hidden">
+      <div className="bg-neutral-950 text-white px-4 py-3 flex items-center justify-between">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-8 h-8 rounded-lg bg-orange-500 flex items-center justify-center shrink-0">
+            <Calculator size={15} />
           </div>
-          <button onClick={onClose} className="text-neutral-400 hover:text-white p-1 shrink-0"><X size={18} /></button>
+          <div className="min-w-0">
+            <p className="text-sm font-bold truncate">حاسبة الأقساط</p>
+            <p className="text-[10px] text-neutral-400 truncate">فايدة، مصاريف إدارية، دفعة استلام، مقارنة، وتفاوض ذكي</p>
+          </div>
         </div>
+        <button onClick={onClose} className="text-neutral-400 hover:text-white p-1 shrink-0" aria-label="إغلاق الحاسبة"><X size={18} /></button>
+      </div>
 
-        <div className="p-4 space-y-4">
+      <div className="p-4 space-y-4">
           <div className="flex gap-1.5 overflow-x-auto pb-0.5">
             {tabs.map((t) => (
               <button
@@ -328,23 +327,23 @@ export default function InstallmentCalculatorModal({
 
               <div>
                 <label className={labelCls}>اسم السلعة</label>
-                <input value={itemName} onChange={(e) => setItemName(e.target.value)} className={inputCls} />
+                <input placeholder="مثلاً: ثلاجة، موبايل..." value={itemName} onChange={(e) => setItemName(e.target.value)} className={inputCls} />
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className={labelCls}>سعر السلعة كاش</label>
-                  <input type="number" value={itemPrice} onChange={(e) => setItemPrice(e.target.value)} className={inputCls} />
+                  <input type="number" placeholder="مثلاً 100000" value={itemPrice} onChange={(e) => setItemPrice(e.target.value)} className={inputCls} />
                 </div>
                 <div>
                   <label className={labelCls}>المقدم المدفوع</label>
-                  <input type="number" value={downPayment} onChange={(e) => setDownPayment(e.target.value)} className={inputCls} />
+                  <input type="number" placeholder="0 لو من غير مقدم" value={downPayment} onChange={(e) => setDownPayment(e.target.value)} className={inputCls} />
                 </div>
               </div>
 
               <div>
                 <label className={labelCls}>فترة التقسيط</label>
                 <div className="grid grid-cols-2 gap-2">
-                  <input type="number" value={periodValue} onChange={(e) => setPeriodValue(e.target.value)} className={inputCls} />
+                  <input type="number" placeholder="مثلاً 24" value={periodValue} onChange={(e) => setPeriodValue(e.target.value)} className={inputCls} />
                   <select value={periodType} onChange={(e) => setPeriodType(e.target.value as PeriodType)} className={inputCls}>
                     <option value="years">سنوات</option>
                     <option value="months">شهور</option>
@@ -361,7 +360,7 @@ export default function InstallmentCalculatorModal({
                 </div>
                 <div>
                   <label className={labelCls}>الفائدة السنوية (%)</label>
-                  <input type="number" step="0.1" value={annualRate} onChange={(e) => setAnnualRate(e.target.value)} className={inputCls} />
+                  <input type="number" step="0.1" placeholder="0 لو من غير فايدة" value={annualRate} onChange={(e) => setAnnualRate(e.target.value)} className={inputCls} />
                 </div>
               </div>
 
@@ -403,8 +402,8 @@ export default function InstallmentCalculatorModal({
                     <label className="flex items-center gap-1"><input type="radio" checked={adminFeePayment === "financed"} onChange={() => setAdminFeePayment("financed")} /> تقسيط</label>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <input type="number" step="0.1" value={adminFeeValue} onChange={(e) => setAdminFeeValue(e.target.value)} className={inputCls} />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <input type="number" step="0.1" placeholder="القيمة" value={adminFeeValue} onChange={(e) => setAdminFeeValue(e.target.value)} className={inputCls} />
                   <select value={adminFeeType} onChange={(e) => setAdminFeeType(e.target.value as FeeType)} className={inputCls}>
                     <option value="percent">نسبة (%)</option>
                     <option value="fixed">مبلغ ثابت</option>
@@ -419,7 +418,7 @@ export default function InstallmentCalculatorModal({
                 </label>
                 {hasPeriodic && (
                   <div className="space-y-2 pt-1.5 border-t border-neutral-200 dark:border-neutral-700">
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <select value={periodicFrequency} onChange={(e) => setPeriodicFrequency(e.target.value as Frequency)} className={inputCls}>
                         {Object.entries(frequencyMap).map(([k, v]) => (
                           <option key={k} value={k}>{v.label}</option>
@@ -669,7 +668,6 @@ export default function InstallmentCalculatorModal({
           )}
         </div>
       </div>
-    </div>
   );
 }
 

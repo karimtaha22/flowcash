@@ -15,7 +15,13 @@ interface ReminderUser {
   name?: string | null;
   base_currency?: string | null;
   telegram_chat_id: string | null;
+  telegram_notifications_muted?: boolean | null;
 }
+
+// كتم عام من زرار "🔕 كتم/تفعيل تنبيهات البوت" — بيوقف كل رسالة استباقية
+// (بتبعتها الكرون) لحد ما المستخدم يشغّلها تاني، بدون ما يأثر على أي حاجة
+// جوه التطبيق نفسه (جرس التنبيهات لسه بيشتغل عادي لأنه مش مربوط بالبوت).
+const isMuted = (user: ReminderUser) => !!user.telegram_notifications_muted;
 
 // One shared bot for every customer now (see the "بوت مركزي" migration
 // notes in app/api/telegram/webhook/route.ts) — every send below used to
@@ -45,7 +51,7 @@ export async function runOverdueDebtsForUser(user: ReminderUser) {
 
     await supabaseAdmin.from("debts").update({ status: "overdue", reminded_at: new Date().toISOString() }).eq("id", d.id);
 
-    if (botToken() && user.telegram_chat_id) {
+    if (botToken() && user.telegram_chat_id && !isMuted(user)) {
       const label = d.direction === "owed_to_me" ? "ليك عند" : "عليك لـ";
       try {
         await sendText(
@@ -74,7 +80,7 @@ export async function runOverdueDebtsForUser(user: ReminderUser) {
 // which is fine since it's only ever compared for equality against a
 // freshly computed key of the same shape.
 export async function runRecurringRemindersForUser(user: ReminderUser) {
-  if (!botToken() || !user.telegram_chat_id) return { sent: 0 };
+  if (!botToken() || !user.telegram_chat_id || isMuted(user)) return { sent: 0 };
 
   const now = new Date();
   const monthKey = now.toISOString().slice(0, 7);
@@ -179,6 +185,7 @@ interface CharityUser extends ReminderUser {
 
 export async function runCharityReminderForUser(user: CharityUser) {
   if (!botToken() || !user.telegram_chat_id) return { notified: false, reason: "no_telegram" };
+  if (isMuted(user)) return { notified: false, reason: "muted" };
 
   const todayIso = new Date().toISOString().slice(0, 10);
   if (user.charity_muted_date === todayIso) return { notified: false, reason: "muted" };
@@ -232,7 +239,7 @@ const ZAKAT_REMINDER_REPEAT_HOURS = 24;
 // installment only ever gets each message once, regardless of how many
 // times /api/cron/tick fires in a day.
 export async function runInstallmentRemindersForUser(user: ReminderUser) {
-  if (!botToken() || !user.telegram_chat_id) return { sent: 0 };
+  if (!botToken() || !user.telegram_chat_id || isMuted(user)) return { sent: 0 };
 
   const todayIso = new Date().toISOString().slice(0, 10);
   const in2Days = new Date();
@@ -287,7 +294,7 @@ export async function runInstallmentRemindersForUser(user: ReminderUser) {
 // contribution — and "organizing" — each participant's row, sent to the
 // organizer since participants aren't FlowCash users themselves).
 export async function runGam3eyaRemindersForUser(user: ReminderUser) {
-  if (!botToken() || !user.telegram_chat_id) return { sent: 0 };
+  if (!botToken() || !user.telegram_chat_id || isMuted(user)) return { sent: 0 };
 
   const todayIso = new Date().toISOString().slice(0, 10);
   const in2Days = new Date();
@@ -343,6 +350,7 @@ export async function runGam3eyaRemindersForUser(user: ReminderUser) {
 
 export async function runZakatReminderForUser(user: ZakatUser) {
   if (!botToken() || !user.telegram_chat_id) return { notified: false, reason: "no_telegram" };
+  if (isMuted(user)) return { notified: false, reason: "muted" };
   if (!user.zakat_reminder_enabled || !user.zakat_next_due_at) return { notified: false, reason: "not_set" };
 
   const dueDate = new Date(user.zakat_next_due_at + "T00:00:00");

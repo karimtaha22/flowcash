@@ -8,7 +8,7 @@ export async function GET() {
   const { data, error } = await supabaseAdmin
     .from("app_users")
     .select(
-      "id,name,base_currency,dark_mode,travel_mode,auto_logout_minutes,charity_amount,charity_frequency,charity_reminder_enabled,telegram_chat_id,charity_muted_date,debt_reminder_hour,recurring_reminder_hour,font_scale,hijri_correction_days,zakat_last_paid_at,zakat_next_due_at,zakat_reminder_enabled,zakat_gold_karat,zakat_country,is_admin,license_type,license_expires_at,license_allowed_pages,license_redeemed_at"
+      "id,name,base_currency,dark_mode,travel_mode,auto_logout_minutes,charity_amount,charity_frequency,charity_reminder_enabled,telegram_chat_id,telegram_notifications_muted,charity_muted_date,debt_reminder_hour,recurring_reminder_hour,font_scale,hijri_correction_days,zakat_last_paid_at,zakat_next_due_at,zakat_reminder_enabled,zakat_gold_karat,zakat_country,is_admin,license_type,license_expires_at,license_allowed_pages,license_redeemed_at,ig_reminders_enabled,ig_reminder_mode,ig_reminder_interval_hours,ig_reminder_hour"
     )
     .eq("id", userId)
     .single();
@@ -35,6 +35,10 @@ export async function PATCH(req: NextRequest) {
     "hijri_correction_days",
     "zakat_gold_karat",
     "zakat_country",
+    "ig_reminders_enabled",
+    "ig_reminder_mode",
+    "ig_reminder_interval_hours",
+    "ig_reminder_hour",
   ];
   const update: Record<string, any> = {};
   for (const k of allowed) if (k in body) update[k] = body[k];

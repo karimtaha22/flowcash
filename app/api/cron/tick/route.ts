@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
   const { data: users, error } = await supabaseAdmin
     .from("app_users")
     .select(
-      "id,base_currency,telegram_chat_id,charity_amount,charity_frequency,charity_reminder_enabled,charity_last_reminded_at,charity_muted_date,debt_reminder_hour,recurring_reminder_hour,hijri_correction_days,zakat_next_due_at,zakat_reminder_enabled,zakat_last_reminded_at"
+      "id,base_currency,telegram_chat_id,telegram_notifications_muted,charity_amount,charity_frequency,charity_reminder_enabled,charity_last_reminded_at,charity_muted_date,debt_reminder_hour,recurring_reminder_hour,hijri_correction_days,zakat_next_due_at,zakat_reminder_enabled,zakat_last_reminded_at,ig_reminders_enabled,ig_reminder_mode,ig_reminder_interval_hours,ig_reminder_hour,ig_last_reminded_at"
     );
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
@@ -53,12 +53,30 @@ export async function GET(req: NextRequest) {
     if (u.zakat_reminder_enabled) {
       entry.zakat = await runZakatReminderForUser(u);
     }
-    // installments/gam3eyat reminders aren't gated by a per-user hour or a
-    // toggle — they only ever send when there's an actual payment due
-    // within the window (see the 2-guard-columns logic in lib/reminders.ts),
-    // so it's safe (and simplest) to check them on every hourly tick.
-    entry.installments = await runInstallmentRemindersForUser(u);
-    entry.gam3eyat = await runGam3eyaRemindersForUser(u);
+    // installments/gam3eyat: من round 21، كل مستخدم بيختار من الإعدادات إما
+    // "كل قد إيه" (ig_reminder_interval_hours، افتراضي كل 6 ساعات) أو معاد
+    // يومي ثابت (ig_reminder_hour، زي الديون والمتكرر)، أو يقفلها تمامًا
+    // (ig_reminders_enabled=false). الجدولة هنا بتتحكم بس في "هل نفحص
+    // دلوقتي؟" — الفحص نفسه لسه بيبعت رسالة مرة واحدة بس لكل قسط/دفعة
+    // (مضمون عن طريق reminded_2days_at/reminded_due_at في lib/reminders.ts).
+    if (u.ig_reminders_enabled !== false) {
+      const mode = u.ig_reminder_mode || "interval";
+      let shouldCheck = false;
+      if (mode === "daily") {
+        shouldCheck = cairoHour === (u.ig_reminder_hour ?? 8);
+      } else {
+        const lastMs = u.ig_last_reminded_at ? new Date(u.ig_last_reminded_at).getTime() : 0;
+        const hoursSince = (Date.now() - lastMs) / 3_600_000;
+        shouldCheck = hoursSince >= (u.ig_reminder_interval_hours ?? 6);
+      }
+      if (shouldCheck) {
+        entry.installments = await runInstallmentRemindersForUser(u);
+        entry.gam3eyat = await runGam3eyaRemindersForUser(u);
+        if (mode !== "daily") {
+          await supabaseAdmin.from("app_users").update({ ig_last_reminded_at: new Date().toISOString() }).eq("id", u.id);
+        }
+      }
+    }
     if (Object.keys(entry).length > 1) results.push(entry);
   }
 

@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
 
   const { data: users, error } = await supabaseAdmin
     .from("app_users")
-    .select("id,telegram_chat_id,hijri_correction_days,zakat_next_due_at,zakat_reminder_enabled,zakat_last_reminded_at")
+    .select("id,telegram_chat_id,telegram_notifications_muted,hijri_correction_days,zakat_next_due_at,zakat_reminder_enabled,zakat_last_reminded_at")
     .eq("zakat_reminder_enabled", true);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
