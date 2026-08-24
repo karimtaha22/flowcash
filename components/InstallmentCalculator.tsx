@@ -130,6 +130,51 @@ function calculatePlan(
   };
 }
 
+// Round 24 — "استنتاج نسبة الفايدة تلقائي": قبل كده الحاسبة كانت بتطلب نسبة
+// الفايدة السنوية كمدخل إجباري، مع إن أغلب الناس بيتقالهم بس "القسط الشهري"
+// من غير ما حد يقولهم نسبة الفايدة صراحة. بيسولڤ للفايدة عن طريق bisection —
+// دالة `monthly(rate)` تصاعدية دايمًا (فايدة أعلى = قسط أعلى) سواء فايدة
+// ثابتة أو متناقصة، فالـ bisection مضمون يتقارب. بيسيب كل حاجة تانية (سعر،
+// مقدم، مصاريف إدارية، دفعة استلام...) زي ما هي وبيدوّر بس على نسبة الفايدة
+// اللي تنتج بالظبط القسط الشهري المعروض.
+function solveRateForTargetMonthly(
+  targetMonthly: number,
+  price: number, down: number, periodVal: number, pType: PeriodType, iType: InterestType,
+  feeVal: number, feeType: FeeType, feePay: PayMode,
+  deliveryEnabled: boolean, deliveryAmt: number,
+  maintEnabled: boolean, maintVal: number, maintPay: PayMode,
+  periodicEnabled: boolean, pAmt: number, pFreq: Frequency, pDurMode: DurationMode, pDurYears: number
+): { rate: number; error: string | null } {
+  const monthlyAt = (r: number) =>
+    calculatePlan(
+      price, down, periodVal, pType, r, iType, feeVal, feeType, feePay,
+      deliveryEnabled, deliveryAmt, maintEnabled, maintVal, maintPay,
+      periodicEnabled, pAmt, pFreq, pDurMode, pDurYears
+    ).monthly;
+
+  if (!(targetMonthly > 0) || !(price > 0) || !(periodVal > 0)) {
+    return { rate: 0, error: null };
+  }
+
+  const monthlyAtZero = monthlyAt(0);
+  if (targetMonthly < monthlyAtZero - 1) {
+    return { rate: 0, error: "القسط الشهري المعروض أقل من القسط من غير أي فايدة خالص — راجع الأرقام." };
+  }
+  const HI = 200; // سقف سخي جدًا (٢٠٠٪ سنويًا) — لو الفايدة الفعلية أعلى من كده الأرقام غالبًا غلط
+  const monthlyAtHi = monthlyAt(HI);
+  if (targetMonthly > monthlyAtHi) {
+    return { rate: HI, error: "الفايدة المستنتجة أعلى من ٪٢٠٠ سنويًا — راجع الأرقام (السعر/المقدم/المدة/القسط)." };
+  }
+
+  let lo = 0;
+  let hi = HI;
+  for (let i = 0; i < 60; i++) {
+    const mid = (lo + hi) / 2;
+    if (monthlyAt(mid) < targetMonthly) lo = mid; else hi = mid;
+  }
+  return { rate: Math.round(((lo + hi) / 2) * 100) / 100, error: null };
+}
+
 const inputCls = "w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-xs font-medium";
 const labelCls = "block text-[10px] text-neutral-400 mb-1";
 const boxCls = "p-3 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 space-y-1.5";
@@ -156,6 +201,11 @@ export default function InstallmentCalculatorModal({
   const [periodType, setPeriodType] = useState<PeriodType>(initial?.periodType ?? "months");
   const [annualRate, setAnnualRate] = useState("");
   const [interestType, setInterestType] = useState<InterestType>("flat");
+  // Round 24 — بدل ما نجبر المستخدم يكتب نسبة الفايدة، نديله اختيار: يكتب
+  // نسبة الفايدة (زي الأول) أو يكتب القسط الشهري المعروض عليه ونستنتج
+  // الفايدة إحنا (solveRateForTargetMonthly تحت).
+  const [rateInputMode, setRateInputMode] = useState<"rate" | "knownMonthly">("rate");
+  const [knownMonthly, setKnownMonthly] = useState("");
 
   const [adminFeeValue, setAdminFeeValue] = useState("");
   const [adminFeeType, setAdminFeeType] = useState<FeeType>("percent");
@@ -185,17 +235,36 @@ export default function InstallmentCalculatorModal({
   const [revMonths, setRevMonths] = useState("12");
   const [revMonthlyInstallment, setRevMonthlyInstallment] = useState("4000");
 
+  const derivedRate = useMemo(() => {
+    if (rateInputMode !== "knownMonthly") return { rate: 0, error: null };
+    return solveRateForTargetMonthly(
+      Number(knownMonthly), Number(itemPrice), Number(downPayment), Number(periodValue), periodType, interestType,
+      Number(adminFeeValue), adminFeeType, adminFeePayment,
+      hasDeliveryPayment, Number(deliveryPaymentAmount),
+      hasMaintenance, Number(maintenanceValue), maintenancePayment,
+      hasPeriodic, Number(periodicAmount), periodicFrequency, periodicDurationMode, Number(periodicDurationYears)
+    );
+  }, [
+    rateInputMode, knownMonthly, itemPrice, downPayment, periodValue, periodType, interestType,
+    adminFeeValue, adminFeeType, adminFeePayment,
+    hasDeliveryPayment, deliveryPaymentAmount,
+    hasMaintenance, maintenanceValue, maintenancePayment,
+    hasPeriodic, periodicAmount, periodicFrequency, periodicDurationMode, periodicDurationYears,
+  ]);
+
+  const effectiveRate = rateInputMode === "knownMonthly" ? derivedRate.rate : Number(annualRate);
+
   const planA = useMemo(
     () =>
       calculatePlan(
-        Number(itemPrice), Number(downPayment), Number(periodValue), periodType, Number(annualRate), interestType,
+        Number(itemPrice), Number(downPayment), Number(periodValue), periodType, effectiveRate, interestType,
         Number(adminFeeValue), adminFeeType, adminFeePayment,
         hasDeliveryPayment, Number(deliveryPaymentAmount),
         hasMaintenance, Number(maintenanceValue), maintenancePayment,
         hasPeriodic, Number(periodicAmount), periodicFrequency, periodicDurationMode, Number(periodicDurationYears)
       ),
     [
-      itemPrice, downPayment, periodValue, periodType, annualRate, interestType,
+      itemPrice, downPayment, periodValue, periodType, effectiveRate, interestType,
       adminFeeValue, adminFeeType, adminFeePayment,
       hasDeliveryPayment, deliveryPaymentAmount,
       hasMaintenance, maintenanceValue, maintenancePayment,
@@ -360,8 +429,45 @@ export default function InstallmentCalculatorModal({
                 </div>
                 <div>
                   <label className={labelCls}>الفائدة السنوية (%)</label>
-                  <input type="number" step="0.1" placeholder="0 لو من غير فايدة" value={annualRate} onChange={(e) => setAnnualRate(e.target.value)} className={inputCls} />
+                  {rateInputMode === "rate" ? (
+                    <input type="number" step="0.1" placeholder="0 لو من غير فايدة" value={annualRate} onChange={(e) => setAnnualRate(e.target.value)} className={inputCls} />
+                  ) : (
+                    <div className={`${inputCls} flex items-center justify-between`}>
+                      <span className="text-orange-600 dark:text-orange-400 font-bold">{derivedRate.rate}%</span>
+                      <span className="text-[9px] text-neutral-400">مستنتجة تلقائيًا</span>
+                    </div>
+                  )}
                 </div>
+              </div>
+
+              <div className={boxCls}>
+                <span className="text-xs font-semibold block mb-1.5">مش عارف نسبة الفايدة؟</span>
+                <div className="flex flex-wrap gap-3 text-[11px]">
+                  <label className="flex items-center gap-1 cursor-pointer">
+                    <input type="radio" checked={rateInputMode === "rate"} onChange={() => setRateInputMode("rate")} /> أعرف نسبة الفايدة
+                  </label>
+                  <label className="flex items-center gap-1 cursor-pointer">
+                    <input type="radio" checked={rateInputMode === "knownMonthly"} onChange={() => setRateInputMode("knownMonthly")} /> أعرف بس القسط الشهري المعروض عليّ
+                  </label>
+                </div>
+                {rateInputMode === "knownMonthly" && (
+                  <div className="pt-1.5">
+                    <input
+                      type="number"
+                      placeholder="مثلاً 4000 — القسط الشهري اللي البائع قالهولك"
+                      value={knownMonthly}
+                      onChange={(e) => setKnownMonthly(e.target.value)}
+                      className={inputCls}
+                    />
+                    {derivedRate.error ? (
+                      <p className="text-[10px] text-red-500 mt-1">⚠️ {derivedRate.error}</p>
+                    ) : Number(knownMonthly) > 0 ? (
+                      <p className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-1">
+                        الفايدة السنوية المستنتجة ({interestType === "flat" ? "ثابتة" : "متناقصة"}): <b>{derivedRate.rate}%</b>
+                      </p>
+                    ) : null}
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">

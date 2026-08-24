@@ -18,6 +18,45 @@ export async function GET() {
 
   const todayIso = new Date().toISOString().slice(0, 10);
 
+  // Round 24 — "لو عندهم البرنامج يجيله اشعار طلب شهادة على دين": a debt
+  // someone ELSE registered (any user_id, not mine) can name ME as a
+  // witness/debtor/creditor by phone number. This is the one alerts-count
+  // check that deliberately searches OTHER users' rows — every other check
+  // in this file stays scoped to `.eq("user_id", userId)` as usual.
+  const { data: meRow } = await supabaseAdmin.from("app_users").select("phone").eq("id", userId).single();
+  const myPhone = (meRow?.phone || "").trim();
+  const debtRequestItems: { label: string; href: string }[] = [];
+  if (myPhone) {
+    const { data: witnessLinks } = await supabaseAdmin
+      .from("debt_links")
+      .select("token, debts(title), debt_witnesses!inner(phone)")
+      .eq("role", "witness")
+      .eq("debt_witnesses.phone", myPhone)
+      .is("acknowledged_at", null)
+      .is("revoked_at", null);
+    for (const l of (witnessLinks || []) as any[]) {
+      debtRequestItems.push({ label: `طلب شهادة على دين "${l.debts?.title || ""}"`, href: `/debt/${l.token}` });
+    }
+
+    const { data: otherLinks } = await supabaseAdmin
+      .from("debt_links")
+      .select("token, role, debts!inner(title, person_id)")
+      .in("role", ["debtor", "creditor_view"])
+      .is("viewed_at", null)
+      .is("revoked_at", null);
+    const personIds = [...new Set((otherLinks || []).map((l: any) => l.debts?.person_id).filter(Boolean))];
+    if (personIds.length) {
+      const { data: people } = await supabaseAdmin.from("people").select("id,phone").in("id", personIds);
+      const phoneByPerson = new Map((people || []).map((p: any) => [p.id, p.phone]));
+      for (const l of (otherLinks || []) as any[]) {
+        if (phoneByPerson.get(l.debts?.person_id) === myPhone) {
+          const label = l.role === "debtor" ? `دين مُسجّل عليك: "${l.debts?.title || ""}" — راجعه` : `دين ليك عند حد سجّله في FlowCash: "${l.debts?.title || ""}" — راجعه`;
+          debtRequestItems.push({ label, href: `/debt/${l.token}` });
+        }
+      }
+    }
+  }
+
   const [{ data: recurring }, { data: budgets }, { data: overdueDebts, count: overdueDebtsCountRaw }, { data: txs }, { data: overdueInstallments }, { data: overdueGam3eya }] =
     await Promise.all([
       supabaseAdmin.from("recurring_items").select("id,name,last_confirmed_month,is_active").eq("user_id", userId).eq("is_active", true),
@@ -74,20 +113,35 @@ export async function GET() {
     const who = p.gam3eya_participants?.name ? ` — ${p.gam3eya_participants.name}` : "";
     items.push({ label: `دفعة "${p.gam3eyas?.name || "جمعية"}"${who} مستحقة`, href: "/installments?tab=gam3eya" });
   }
+  for (const it of debtRequestItems) items.push(it);
+
+  const { data: myUnresolvedObjections } = await supabaseAdmin
+    .from("debts")
+    .select("id,title")
+    .eq("user_id", userId)
+    .not("objection_created_at", "is", null)
+    .is("objection_resolved_at", null);
+  for (const d of myUnresolvedObjections || []) {
+    items.push({ label: `اعتراض على دين "${d.title}" محتاج مراجعتك`, href: `/people?debt=${d.id}` });
+  }
 
   const dueRecurring = dueRecurringList.length;
   const overBudget = overBudgetList.length;
   const overdueCount = overdueDebtsCountRaw ?? (overdueDebts || []).length;
   const overdueInstallmentsCount = (overdueInstallments || []).length;
   const overdueGam3eyaCount = (overdueGam3eya || []).length;
+  const debtRequestsCount = debtRequestItems.length;
+  const unresolvedObjectionsCount = (myUnresolvedObjections || []).length;
 
   return NextResponse.json({
-    count: dueRecurring + overBudget + overdueCount + overdueInstallmentsCount + overdueGam3eyaCount,
+    count: dueRecurring + overBudget + overdueCount + overdueInstallmentsCount + overdueGam3eyaCount + debtRequestsCount + unresolvedObjectionsCount,
     dueRecurring,
     overBudget,
     overdueCount,
     overdueInstallmentsCount,
     overdueGam3eyaCount,
+    debtRequestsCount,
+    unresolvedObjectionsCount,
     items,
   });
 }

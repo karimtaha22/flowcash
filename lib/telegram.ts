@@ -38,7 +38,7 @@ const KNOWN_GOOD_PRODUCTION_DOMAIN = "flowcash-ruddy.vercel.app";
 // whitespace and adds "https://" if whoever set APP_BASE_URL forgot it
 // (a bare host like "flowcash-ruddy.vercel.app" makes Telegram reject the
 // whole webhook registration with "invalid webhook URL specified").
-function resolveBaseUrl() {
+export function resolveBaseUrl() {
   const explicit = (process.env.APP_BASE_URL || "").trim();
   if (explicit) {
     const withProtocol = /^https?:\/\//i.test(explicit) ? explicit : `https://${explicit}`;

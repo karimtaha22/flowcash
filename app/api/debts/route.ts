@@ -11,7 +11,9 @@ export async function GET(req: NextRequest) {
 
   let query = supabaseAdmin
     .from("debts")
-    .select("*, people(name, phone), debt_payments(id, amount, paid_at, receipt_url, note)")
+    .select(
+      "*, people(name, phone), debt_payments(id, amount, paid_at, receipt_url, note), debt_witnesses(id, slot_index, name, phone, address, id_photo_front), debt_links(id, token, role, witness_id, viewed_at, acknowledged_at, revoked_at), debt_events(event_type, description, actor_role, actor_name, created_at)"
+    )
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
 
@@ -20,7 +22,18 @@ export async function GET(req: NextRequest) {
 
   const { data, error } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ debts: data });
+
+  // add the shareable URL to each link here (server-side, same base-URL
+  // resolution the initial creation used) rather than making the client
+  // reconstruct it.
+  const { debtLinkUrl } = await import("@/lib/debtLinks");
+  const debts = (data || []).map((d: any) => ({
+    ...d,
+    debt_witnesses: (d.debt_witnesses || []).sort((a: any, b: any) => a.slot_index - b.slot_index),
+    debt_links: (d.debt_links || []).map((l: any) => ({ ...l, url: debtLinkUrl(l.token) })),
+    debt_events: (d.debt_events || []).sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()),
+  }));
+  return NextResponse.json({ debts });
 }
 
 export async function POST(req: NextRequest) {

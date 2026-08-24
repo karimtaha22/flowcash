@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { getSessionUserId } from "@/lib/session";
+import { logDebtEvent } from "@/lib/debtLinks";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const userId = await getSessionUserId();
@@ -20,6 +21,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     .from("debts")
     .update({ remaining_amount: Math.max(newRemaining, 0), status: newStatus, updated_at: new Date().toISOString() })
     .eq("id", id);
+
+  // audit-log on the public live link — only for advanced debts (see
+  // lib/debtLinks.ts). Only the creditor (this route, always
+  // session-authenticated) can ever reach this — no public endpoint records
+  // payments.
+  if (debt.is_advanced) {
+    await logDebtEvent(id, "payment_recorded", `تم استلام دفعة ${paidAmount.toLocaleString()} ${debt.currency}${newRemaining <= 0 ? " — الدين اتقفل بالكامل" : ""}`, "creditor");
+  }
 
   // optional: reflect the payment as an account transaction (money moving)
   if (account_id) {

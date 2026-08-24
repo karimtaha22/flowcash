@@ -7,11 +7,35 @@
 // available to a browser-photo flow like this.
 //
 // Requires GEMINI_API_KEY in Vercel (ask the user to create one at
-// aistudio.google.com/apikey — free tier is enough for this use case).
-// Model name is overridable via GEMINI_MODEL in case Google renames/retires
-// the default one; falls back to a fast, vision-capable model.
+// aistudio.google.com/apikey — free tier is enough for this use case), OR an
+// override saved from /admin's "التحقق بالذكاء الاصطناعي" card (see
+// resolveGeminiConfig below) — the DB override lets the admin change the key
+// or model live without a Vercel redeploy. gemini-2.0-flash was retired by
+// Google (confirmed via the API's own deprecation error — "no longer
+// available... use models/gemini-3.6-flash") — round 22 moved the default to
+// gemini-3.6-flash, its recommended replacement (balanced multimodal
+// performance, a good fit for the ID-photo/selfie face-matching this does).
+export const DEFAULT_MODEL = "gemini-3.6-flash";
 
-const DEFAULT_MODEL = "gemini-2.0-flash";
+// Resolves the effective API key/model: an admin-set DB override (app_settings,
+// editable from /admin without a redeploy) takes priority over the Vercel env
+// vars, which stay as the zero-config default/fallback.
+export async function resolveGeminiConfig(): Promise<{ apiKey: string; model: string }> {
+  let dbKey = "";
+  let dbModel = "";
+  try {
+    const { supabaseAdmin } = await import("./supabaseAdmin");
+    const { data } = await supabaseAdmin.from("app_settings").select("gemini_api_key,gemini_model").eq("id", "default").single();
+    dbKey = (data?.gemini_api_key || "").trim();
+    dbModel = (data?.gemini_model || "").trim();
+  } catch {
+    // app_settings row missing/unreachable — env vars still work as fallback
+  }
+  return {
+    apiKey: dbKey || (process.env.GEMINI_API_KEY || "").trim(),
+    model: dbModel || (process.env.GEMINI_MODEL || "").trim() || DEFAULT_MODEL,
+  };
+}
 
 function dataUrlToInlinePart(dataUrl: string): { mime_type: string; data: string } | null {
   const m = /^data:(image\/[a-zA-Z+]+);base64,(.+)$/.exec(dataUrl);
@@ -54,7 +78,7 @@ const PROMPT = `أنت نظام مساعد للتحقق من هوية عملاء
 مهم جدًا: انت مش نظام تحقق هوية رسمي زي البنوك (مفيش liveness detection حقيقي هنا)، فلو مش متأكد قول uncertain/low confidence بدل ما تخمن. رجّع النتيجة بصيغة JSON بس زي الـ schema المحدد.`;
 
 export async function verifyIdAgainstSelfie(idFrontDataUrl: string, selfieDataUrl: string): Promise<IdVerificationResult> {
-  const apiKey = (process.env.GEMINI_API_KEY || "").trim();
+  const { apiKey, model } = await resolveGeminiConfig();
   const fallback = (over: Partial<IdVerificationResult>): IdVerificationResult => ({
     ok: false,
     is_id_legible: false,
@@ -67,7 +91,7 @@ export async function verifyIdAgainstSelfie(idFrontDataUrl: string, selfieDataUr
   });
 
   if (!apiKey) {
-    return fallback({ error: "GEMINI_API_KEY مش متسجل في Vercel — التوثيق التلقائي متوقف مؤقتًا." });
+    return fallback({ error: "GEMINI_API_KEY مش متسجل — لا في Vercel ولا من إعدادات التوثيق في /admin. التوثيق التلقائي متوقف مؤقتًا." });
   }
 
   const idPart = dataUrlToInlinePart(idFrontDataUrl);
@@ -76,7 +100,6 @@ export async function verifyIdAgainstSelfie(idFrontDataUrl: string, selfieDataUr
     return fallback({ error: "صورة البطاقة أو السيلفي وصلت بصيغة غير متوقعة." });
   }
 
-  const model = (process.env.GEMINI_MODEL || DEFAULT_MODEL).trim();
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
   try {
@@ -123,5 +146,136 @@ export async function verifyIdAgainstSelfie(idFrontDataUrl: string, selfieDataUr
     };
   } catch (e: any) {
     return fallback({ error: e?.message || "حصل خطأ ومقدرناش نتحقق من الصور، حاول تاني." });
+  }
+}
+
+// Round 24 — دعم "تسجيل الدين المتقدم": بدل ما المستخدم يكتب اسم/رقم بطاقة
+// المدين يدوي بالكامل، بنسمحله يرفع صورة البطاقة و"يستخرج البيانات" منها
+// أوتوماتيك (بيرجعها كـ اقتراح يقدر يراجعه ويعدله قبل الحفظ — مش حفظ مباشر
+// بدون مراجعة). دالة منفصلة عن verifyIdAgainstSelfie لأن هنا معندناش سيلفي
+// نقارن بيه، الهدف بس قراءة البيانات المطبوعة على البطاقة.
+export interface IdExtractionResult {
+  ok: boolean;
+  is_id_legible: boolean;
+  name: string;
+  id_number: string;
+  error?: string;
+}
+
+const EXTRACT_SCHEMA = {
+  type: "object",
+  properties: {
+    is_id_legible: { type: "boolean", description: "الصورة واضحة ومقروءة وفيها كارنيه/بطاقة هوية حقيقية" },
+    name: { type: "string", description: "الاسم بالكامل زي ما هو مكتوب على البطاقة، أو فاضي لو مش واضح" },
+    id_number: { type: "string", description: "الرقم القومي/رقم البطاقة زي ما هو مكتوب، أو فاضي لو مش واضح" },
+  },
+  required: ["is_id_legible", "name", "id_number"],
+};
+
+export async function extractIdFields(idFrontDataUrl: string): Promise<IdExtractionResult> {
+  const { apiKey, model } = await resolveGeminiConfig();
+  const fallback = (over: Partial<IdExtractionResult>): IdExtractionResult => ({
+    ok: false, is_id_legible: false, name: "", id_number: "", ...over,
+  });
+  if (!apiKey) return fallback({ error: "GEMINI_API_KEY مش متسجل — لا في Vercel ولا من إعدادات التوثيق في /admin." });
+
+  const idPart = dataUrlToInlinePart(idFrontDataUrl);
+  if (!idPart) return fallback({ error: "صورة البطاقة وصلت بصيغة غير متوقعة." });
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: "user",
+            parts: [
+              { text: "دي صورة وش بطاقة رقم قومي/هوية. استخرج الاسم بالكامل ورقم البطاقة زي ما هما مكتوبين بالظبط. لو الصورة مش واضحة أو مش بطاقة هوية أصلاً، قول is_id_legible=false وسيب الحقول فاضية. رجّع JSON بس زي الـ schema." },
+              { inline_data: idPart },
+            ],
+          },
+        ],
+        generationConfig: { responseMimeType: "application/json", responseSchema: EXTRACT_SCHEMA, temperature: 0.1 },
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) return fallback({ error: data?.error?.message || `Gemini API error (${res.status})` });
+    const text: string | undefined = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) return fallback({ error: "مفيش رد واضح من نظام الاستخراج، حاول تاني." });
+    const parsed = JSON.parse(text);
+    return { ok: true, is_id_legible: !!parsed.is_id_legible, name: parsed.name || "", id_number: parsed.id_number || "" };
+  } catch (e: any) {
+    return fallback({ error: e?.message || "حصل خطأ ومقدرناش نقرأ الصورة، حاول تاني." });
+  }
+}
+
+// "AI يتأكد إنها صورة بطاقة فعلا مش أي صورة ويطابق الاسم" — يتفرق عن
+// verifyIdAgainstSelfie: هنا مفيش سيلفي، بس بنتأكد (أ) إن الصورة فعلاً بطاقة
+// هوية واضحة و(ب) إن الاسم المكتوب على البطاقة يطابق الاسم اللي المستخدم
+// كتبه في الفورم (مثلاً اسم الشاهد أو المدين).
+export interface IdNameMatchResult {
+  ok: boolean;
+  is_id_legible: boolean;
+  name_matches: boolean;
+  confidence: "low" | "medium" | "high";
+  notes: string;
+  error?: string;
+}
+
+const NAME_MATCH_SCHEMA = {
+  type: "object",
+  properties: {
+    is_id_legible: { type: "boolean" },
+    name_matches: { type: "boolean", description: "الاسم المكتوب على البطاقة يطابق (أو قريب جدًا من) الاسم المطلوب مطابقته" },
+    confidence: { type: "string", enum: ["low", "medium", "high"] },
+    notes: { type: "string", description: "شرح مختصر بالعربي" },
+  },
+  required: ["is_id_legible", "name_matches", "confidence", "notes"],
+};
+
+export async function verifyIdMatchesName(idFrontDataUrl: string, claimedName: string): Promise<IdNameMatchResult> {
+  const { apiKey, model } = await resolveGeminiConfig();
+  const fallback = (over: Partial<IdNameMatchResult>): IdNameMatchResult => ({
+    ok: false, is_id_legible: false, name_matches: false, confidence: "low", notes: "", ...over,
+  });
+  if (!apiKey) return fallback({ error: "GEMINI_API_KEY مش متسجل." });
+
+  const idPart = dataUrlToInlinePart(idFrontDataUrl);
+  if (!idPart) return fallback({ error: "صورة البطاقة وصلت بصيغة غير متوقعة." });
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: "user",
+            parts: [
+              { text: `دي صورة وش بطاقة رقم قومي/هوية. تأكد إنها فعلاً صورة بطاقة هوية حقيقية واضحة (مش أي صورة تانية)، وقارن الاسم المكتوب عليها مع الاسم ده: "${claimedName}". قول name_matches=true لو نفس الاسم أو قريب جدًا منه (فروق بسيطة في الكتابة/الألقاب مقبولة)، وfalse لو مختلف بوضوح. رجّع JSON بس زي الـ schema.` },
+              { inline_data: idPart },
+            ],
+          },
+        ],
+        generationConfig: { responseMimeType: "application/json", responseSchema: NAME_MATCH_SCHEMA, temperature: 0.1 },
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) return fallback({ error: data?.error?.message || `Gemini API error (${res.status})` });
+    const text: string | undefined = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) return fallback({ error: "مفيش رد واضح، حاول تاني." });
+    const parsed = JSON.parse(text);
+    return {
+      ok: true,
+      is_id_legible: !!parsed.is_id_legible,
+      name_matches: !!parsed.name_matches,
+      confidence: parsed.confidence,
+      notes: parsed.notes || "",
+    };
+  } catch (e: any) {
+    return fallback({ error: e?.message || "حصل خطأ، حاول تاني." });
   }
 }
