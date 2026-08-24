@@ -5,10 +5,11 @@ import Card from "@/components/Card";
 import { fmt } from "@/lib/format";
 import { shrinkImage } from "@/lib/image";
 import { shareFile } from "@/lib/shareFile";
+import { isValidPhone } from "@/lib/phone";
 import InstallmentCalculatorModal from "@/components/InstallmentCalculator";
 import {
   Plus, Trash2, Pencil, CreditCard, Users, CheckCircle2, Camera, ShieldCheck, ShieldAlert,
-  Star, ArrowLeftRight, Calculator, ChevronDown, ChevronUp, X, Scale, FileDown, Image as ImageIcon,
+  Star, ArrowLeftRight, Calculator, ChevronDown, ChevronUp, X, Scale, FileDown, Image as ImageIcon, BadgeCheck,
 } from "lucide-react";
 
 // ===================== types =====================
@@ -22,10 +23,16 @@ interface InstallmentPlan {
   installment_payments: InstallmentPayment[];
 }
 interface Gam3eyaParticipant {
-  id: string; name: string; phone: string | null; account_number: string | null; address: string | null;
+  id: string; name: string; phone: string | null; account_number: string | null; payment_method: "bank" | "insta" | "wallet" | null; address: string | null;
   id_photo_front: string | null; id_photo_back: string | null; selfie_photo: string | null;
   verified: boolean; verification_note: string | null; payout_order: number; rating: number | null;
+  // مش عمود في الجدول — محسوبة في الـ API (GET /api/gam3eya) بمطابقة رقم
+  // الموبايل بتاع الفرد مع أي حساب FlowCash موثّق (app_users.is_verified).
+  // منفصلة تمامًا عن `verified` اللي فوق (ده توثيق محلي بواسطة المنظّم نفسه).
+  account_verified?: boolean;
 }
+
+const PAYMENT_METHOD_LABEL: Record<string, string> = { bank: "حساب بنكي", insta: "إنستا باي", wallet: "محفظة إلكترونية" };
 interface Gam3eyaPayment {
   id: string; participant_id: string | null; month_index: number; due_date: string;
   amount: number; status: "pending" | "paid"; paid_at: string | null; receipt_url: string | null;
@@ -650,7 +657,7 @@ function StarPicker({ value, onChange, readOnly = false }: { value: number | nul
 }
 
 // ===================== جمعيات =====================
-type NewParticipant = { name: string; phone: string; account_number: string; address: string; id_photo_front: string };
+type NewParticipant = { name: string; phone: string; account_number: string; payment_method: "bank" | "insta" | "wallet"; address: string; id_photo_front: string };
 
 function Gam3eyaTab({
   gam3eyat, reload, showMsg,
@@ -670,8 +677,8 @@ function Gam3eyaTab({
   const [subForm, setSubForm] = useState({ name: "", monthly_amount: "", currency: "EGP", months_count: "", my_payout_month: "", start_date: todayISO() });
   const [orgForm, setOrgForm] = useState({ name: "", monthly_amount: "", currency: "EGP", start_date: todayISO() });
   const [orgParticipants, setOrgParticipants] = useState<NewParticipant[]>([
-    { name: "", phone: "", account_number: "", address: "", id_photo_front: "" },
-    { name: "", phone: "", account_number: "", address: "", id_photo_front: "" },
+    { name: "", phone: "", account_number: "", payment_method: "bank", address: "", id_photo_front: "" },
+    { name: "", phone: "", account_number: "", payment_method: "bank", address: "", id_photo_front: "" },
   ]);
 
   const active = gam3eyat.filter((g) => g.status === "active");
@@ -706,6 +713,7 @@ function Gam3eyaTab({
   const submitOrganizing = async () => {
     const validParticipants = orgParticipants.filter((p) => p.name.trim());
     if (!orgForm.monthly_amount || validParticipants.length < 2) { showMsg("المبلغ الشهري وأسماء الأفراد (٢ على الأقل) لازم يتملوا", true); return; }
+    if (validParticipants.some((p) => !isValidPhone(p.phone))) { showMsg("رقم موبايل غير صالح — راجع أرقام الأفراد", true); return; }
     setBusy(true);
     try {
       const res = await fetch("/api/gam3eya", {
@@ -724,8 +732,8 @@ function Gam3eyaTab({
       if (!res.ok) { showMsg(data.error || "حصل خطأ ومتحفظش", true); return; }
       setOrgForm({ name: "", monthly_amount: "", currency: "EGP", start_date: todayISO() });
       setOrgParticipants([
-        { name: "", phone: "", account_number: "", address: "", id_photo_front: "" },
-        { name: "", phone: "", account_number: "", address: "", id_photo_front: "" },
+        { name: "", phone: "", account_number: "", payment_method: "bank", address: "", id_photo_front: "" },
+        { name: "", phone: "", account_number: "", payment_method: "bank", address: "", id_photo_front: "" },
       ]);
       setShowForm(false);
       reload();
@@ -869,9 +877,17 @@ function Gam3eyaTab({
                         <input placeholder="الاسم" value={p.name} onChange={(e) => update({ name: e.target.value })} className="flex-1 min-w-0 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 text-xs" />
                         <button onClick={() => setOrgParticipants(orgParticipants.filter((_, xi) => xi !== i))} className="text-neutral-400 hover:text-red-600 p-1 shrink-0"><X size={13} /></button>
                       </div>
+                      <div>
+                        <input placeholder="رقم الموبايل" value={p.phone} onChange={(e) => update({ phone: e.target.value })} className={`w-full rounded-lg border bg-transparent px-2 py-1.5 text-xs ${p.phone && !isValidPhone(p.phone) ? "border-red-400 dark:border-red-700" : "border-neutral-300 dark:border-neutral-700"}`} />
+                        {p.phone && !isValidPhone(p.phone) && <p className="text-[9px] text-red-500 mt-0.5">رقم موبايل غير صالح</p>}
+                      </div>
                       <div className="grid grid-cols-2 gap-1.5">
-                        <input placeholder="رقم الموبايل" value={p.phone} onChange={(e) => update({ phone: e.target.value })} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 text-xs" />
-                        <input placeholder="حساب بنك أو انستجرام" value={p.account_number} onChange={(e) => update({ account_number: e.target.value })} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 text-xs" />
+                        <select value={p.payment_method} onChange={(e) => update({ payment_method: e.target.value as NewParticipant["payment_method"] })} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 text-xs">
+                          <option value="bank">حساب بنكي</option>
+                          <option value="insta">إنستا باي</option>
+                          <option value="wallet">محفظة إلكترونية</option>
+                        </select>
+                        <input placeholder={p.payment_method === "wallet" ? "رقم المحفظة" : p.payment_method === "insta" ? "رابط/يوزر إنستا باي" : "رقم الحساب البنكي"} value={p.account_number} onChange={(e) => update({ account_number: e.target.value })} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 text-xs" />
                       </div>
                       <input placeholder="العنوان (اختياري)" value={p.address} onChange={(e) => update({ address: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 text-xs" />
                       <label className="flex items-center gap-1.5 text-[10px] text-neutral-400 cursor-pointer">
@@ -885,7 +901,7 @@ function Gam3eyaTab({
                   );
                 })}
               </div>
-              <button onClick={() => setOrgParticipants([...orgParticipants, { name: "", phone: "", account_number: "", address: "", id_photo_front: "" }])} className="text-xs text-orange-600 dark:text-orange-400 font-medium">+ إضافة فرد</button>
+              <button onClick={() => setOrgParticipants([...orgParticipants, { name: "", phone: "", account_number: "", payment_method: "bank", address: "", id_photo_front: "" }])} className="text-xs text-orange-600 dark:text-orange-400 font-medium">+ إضافة فرد</button>
               <button disabled={busy} onClick={submitOrganizing} className="w-full bg-orange-600 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-60">حفظ الجمعية</button>
             </div>
           )}
@@ -965,7 +981,7 @@ function Gam3eyaCard({
 }) {
   const today = todayISO();
   const [addingParticipant, setAddingParticipant] = useState(false);
-  const [newParticipant, setNewParticipant] = useState({ name: "", phone: "", account_number: "", address: "", id_photo_front: "" });
+  const [newParticipant, setNewParticipant] = useState<NewParticipant>({ name: "", phone: "", account_number: "", payment_method: "bank", address: "", id_photo_front: "" });
   const [addBusy, setAddBusy] = useState(false);
   const [detailParticipant, setDetailParticipant] = useState<Gam3eyaParticipant | null>(null);
   const [swapA, setSwapA] = useState("");
@@ -996,6 +1012,7 @@ function Gam3eyaCard({
 
   const submitNewParticipant = async () => {
     if (!newParticipant.name.trim()) { showMsg("اسم الفرد لازم يتملى", true); return; }
+    if (!isValidPhone(newParticipant.phone)) { showMsg("رقم موبايل غير صالح", true); return; }
     setAddBusy(true);
     try {
       const res = await fetch(`/api/gam3eya/${g.id}/participants`, {
@@ -1005,7 +1022,7 @@ function Gam3eyaCard({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { showMsg(data.error || "حصل خطأ ومتضافش الفرد", true); return; }
-      setNewParticipant({ name: "", phone: "", account_number: "", address: "", id_photo_front: "" });
+      setNewParticipant({ name: "", phone: "", account_number: "", payment_method: "bank", address: "", id_photo_front: "" });
       setAddingParticipant(false);
       onAddedParticipant();
     } finally {
@@ -1152,7 +1169,11 @@ function Gam3eyaCard({
           ${rowsHtml}
         </div>
         ${receiptsHtml}
-        <p style="font-size:10px;color:#9ca3af;text-align:center;margin-top:16px;">تم الإنشاء بواسطة FlowCash — ${new Date().toLocaleDateString("ar-EG")}</p>
+        <div style="border-top:1px solid #e5e7eb;margin-top:16px;padding-top:10px;text-align:center;">
+          <img src="/icons/icon-192.png" style="width:28px;height:28px;border-radius:6px;margin-bottom:4px;" />
+          <p style="font-size:10px;color:#9ca3af;margin:0;">تم الإنشاء بواسطة FlowCash — ${new Date().toLocaleDateString("ar-EG")}</p>
+          <p style="font-size:9px;color:#d1d5db;margin:2px 0 0;">© 2022–2026 IDEA-EG · www.ideaeg.online</p>
+        </div>
       `;
       document.body.appendChild(node);
       const html2canvas = (await import("html2canvas-pro")).default;
@@ -1252,9 +1273,17 @@ function Gam3eyaCard({
           {addingParticipant && (
             <div className="rounded-lg border border-dashed border-neutral-300 dark:border-neutral-700 p-2 space-y-1.5">
               <input placeholder="اسم الفرد الجديد" value={newParticipant.name} onChange={(e) => setNewParticipant({ ...newParticipant, name: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 text-xs" />
+              <div>
+                <input placeholder="رقم الموبايل" value={newParticipant.phone} onBlur={(e) => checkPhoneHistory(e.target.value)} onChange={(e) => { setNewParticipant({ ...newParticipant, phone: e.target.value }); setPhoneHistory(null); }} className={`w-full rounded-lg border bg-transparent px-2 py-1.5 text-xs ${newParticipant.phone && !isValidPhone(newParticipant.phone) ? "border-red-400 dark:border-red-700" : "border-neutral-300 dark:border-neutral-700"}`} />
+                {newParticipant.phone && !isValidPhone(newParticipant.phone) && <p className="text-[9px] text-red-500 mt-0.5">رقم موبايل غير صالح</p>}
+              </div>
               <div className="grid grid-cols-2 gap-1.5">
-                <input placeholder="رقم الموبايل" value={newParticipant.phone} onBlur={(e) => checkPhoneHistory(e.target.value)} onChange={(e) => { setNewParticipant({ ...newParticipant, phone: e.target.value }); setPhoneHistory(null); }} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 text-xs" />
-                <input placeholder="حساب بنك أو انستجرام" value={newParticipant.account_number} onChange={(e) => setNewParticipant({ ...newParticipant, account_number: e.target.value })} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 text-xs" />
+                <select value={newParticipant.payment_method} onChange={(e) => setNewParticipant({ ...newParticipant, payment_method: e.target.value as NewParticipant["payment_method"] })} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 text-xs">
+                  <option value="bank">حساب بنكي</option>
+                  <option value="insta">إنستا باي</option>
+                  <option value="wallet">محفظة إلكترونية</option>
+                </select>
+                <input placeholder={newParticipant.payment_method === "wallet" ? "رقم المحفظة" : newParticipant.payment_method === "insta" ? "رابط/يوزر إنستا باي" : "رقم الحساب البنكي"} value={newParticipant.account_number} onChange={(e) => setNewParticipant({ ...newParticipant, account_number: e.target.value })} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 text-xs" />
               </div>
               <input placeholder="العنوان (اختياري)" value={newParticipant.address} onChange={(e) => setNewParticipant({ ...newParticipant, address: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 text-xs" />
               <label className="flex items-center gap-1.5 text-[10px] text-neutral-400 cursor-pointer">
@@ -1295,6 +1324,7 @@ function Gam3eyaCard({
                     <span className={`font-medium truncate ${overdueForP ? "text-red-500" : ""}`}>{p.name}</span>
                     {overdueForP && <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" title="متأخر عن السداد" />}
                     {isCollectorNow && <span className="text-[10px] shrink-0">🎁 بيقبض الشهر ده</span>}
+                    {p.account_verified && <span title="شخص موثّق (حساب FlowCash موثّق بنفس رقم الموبايل)"><BadgeCheck size={13} className="text-blue-500 shrink-0" /></span>}
                     {p.verified ? <ShieldCheck size={13} className="text-emerald-600 shrink-0" /> : <ShieldAlert size={13} className="text-neutral-300 dark:text-neutral-600 shrink-0" />}
                   </button>
                   {!swapMode && myPayment && (
@@ -1384,18 +1414,20 @@ function ParticipantDetailModal({
   const [name, setName] = useState(participant.name);
   const [phone, setPhone] = useState(participant.phone || "");
   const [accountNumber, setAccountNumber] = useState(participant.account_number || "");
+  const [paymentMethod, setPaymentMethod] = useState<"bank" | "insta" | "wallet">(participant.payment_method || "bank");
   const [address, setAddress] = useState(participant.address || "");
   const [idPhoto, setIdPhoto] = useState(participant.id_photo_front || "");
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
     if (!name.trim()) { showMsg("اسم الفرد لازم يتملى", true); return; }
+    if (phone && !isValidPhone(phone)) { showMsg("رقم موبايل غير صالح", true); return; }
     setSaving(true);
     try {
       const res = await fetch(`/api/gam3eya/${gam3eyaId}/participants/${participant.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, phone: phone || null, account_number: accountNumber || null, address: address || null, id_photo_front: idPhoto || null }),
+        body: JSON.stringify({ name, phone: phone || null, account_number: accountNumber || null, payment_method: paymentMethod, address: address || null, id_photo_front: idPhoto || null }),
       });
       if (!res.ok) { showMsg("حصل خطأ ومتحفظش التعديل", true); return; }
       showMsg("✅ اتحفظ التعديل");
@@ -1415,6 +1447,9 @@ function ParticipantDetailModal({
           <span className="text-[10px] text-neutral-400 flex items-center gap-1"><ShieldAlert size={12} /> غير موثّق</span>
         )}
       </div>
+      {participant.account_verified && (
+        <p className="text-[11px] text-blue-500 flex items-center gap-1"><BadgeCheck size={13} /> شخص موثّق</p>
+      )}
 
       {idPhoto && (
         // eslint-disable-next-line @next/next/no-img-element
@@ -1432,13 +1467,20 @@ function ParticipantDetailModal({
         <label className="text-[10px] text-neutral-400">الاسم</label>
         <input value={name} onChange={(e) => setName(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
       </div>
+      <div>
+        <label className="text-[10px] text-neutral-400">رقم الموبايل</label>
+        <input value={phone} onChange={(e) => setPhone(e.target.value)} className={`w-full rounded-lg border bg-transparent px-3 py-2 text-sm ${phone && !isValidPhone(phone) ? "border-red-400 dark:border-red-700" : "border-neutral-300 dark:border-neutral-700"}`} />
+        {phone && !isValidPhone(phone) && <p className="text-[10px] text-red-500 mt-0.5">رقم موبايل غير صالح</p>}
+      </div>
       <div className="grid grid-cols-2 gap-2">
         <div>
-          <label className="text-[10px] text-neutral-400">رقم الموبايل</label>
-          <input value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+          <label className="text-[10px] text-neutral-400">طريقة الاستلام</label>
+          <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as "bank" | "insta" | "wallet")} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm">
+            {Object.entries(PAYMENT_METHOD_LABEL).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+          </select>
         </div>
         <div>
-          <label className="text-[10px] text-neutral-400">حساب بنك أو انستجرام</label>
+          <label className="text-[10px] text-neutral-400">{paymentMethod === "wallet" ? "رقم المحفظة" : paymentMethod === "insta" ? "رابط/يوزر إنستا باي" : "رقم الحساب البنكي"}</label>
           <input value={accountNumber} onChange={(e) => setAccountNumber(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
         </div>
       </div>

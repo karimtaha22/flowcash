@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { getSessionUserId } from "@/lib/session";
+import { isValidPhone } from "@/lib/phone";
 
 export async function GET() {
   const userId = await getSessionUserId();
@@ -13,9 +14,28 @@ export async function GET() {
     .order("created_at", { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
+  // Round 22 — "موثّق" account badge cross-reference: a gam3eya participant
+  // is a manually-entered record (name/phone typed by the organizer), not
+  // necessarily tied to any FlowCash account. We match it to a *verified*
+  // app_users row by phone number (same phone-matching pattern already used
+  // by the local credit-score lookup) so that if the person behind this
+  // phone number has self-verified their own account (see /api/verify-me),
+  // their name shows as verified here too — without turning participants
+  // into real linked accounts, which is a much bigger feature.
+  const allPhones = Array.from(
+    new Set((data || []).flatMap((g: any) => (g.gam3eya_participants || []).map((p: any) => (p.phone || "").trim()).filter(Boolean)))
+  );
+  let verifiedPhones = new Set<string>();
+  if (allPhones.length) {
+    const { data: verifiedUsers } = await supabaseAdmin.from("app_users").select("phone").in("phone", allPhones).eq("is_verified", true);
+    verifiedPhones = new Set((verifiedUsers || []).map((u: any) => u.phone));
+  }
+
   const list = (data || []).map((g: any) => ({
     ...g,
-    gam3eya_participants: (g.gam3eya_participants || []).sort((a: any, b: any) => a.payout_order - b.payout_order),
+    gam3eya_participants: (g.gam3eya_participants || [])
+      .map((p: any) => ({ ...p, account_verified: !!p.phone && verifiedPhones.has(p.phone.trim()) }))
+      .sort((a: any, b: any) => a.payout_order - b.payout_order),
     gam3eya_payments: (g.gam3eya_payments || []).sort((a: any, b: any) => a.month_index - b.month_index),
   }));
   return NextResponse.json({ gam3eyas: list });
@@ -83,9 +103,12 @@ export async function POST(req: NextRequest) {
   }
 
   // type === "organizing"
-  const participants: { name: string; phone?: string; account_number?: string; address?: string; id_photo_front?: string }[] = body.participants || [];
+  const participants: { name: string; phone?: string; account_number?: string; payment_method?: string; address?: string; id_photo_front?: string }[] = body.participants || [];
   if (!participants.length || participants.some((p) => !p.name)) {
     return NextResponse.json({ error: "لازم تضيف الأفراد كلهم بالاسم على الأقل" }, { status: 400 });
+  }
+  if (participants.some((p) => p.phone && !isValidPhone(p.phone))) {
+    return NextResponse.json({ error: "رقم موبايل غير صالح" }, { status: 400 });
   }
   const monthsCount = participants.length;
 
@@ -112,6 +135,7 @@ export async function POST(req: NextRequest) {
     name: p.name,
     phone: p.phone || null,
     account_number: p.account_number || null,
+    payment_method: p.payment_method || "bank",
     address: p.address || null,
     id_photo_front: p.id_photo_front || null,
     payout_order: i + 1,

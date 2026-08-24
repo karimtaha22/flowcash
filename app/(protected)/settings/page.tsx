@@ -7,7 +7,87 @@ import PeopleManager from "@/components/PeopleManager";
 import { useTheme } from "@/lib/useTheme";
 import { useFontScale, type FontScale } from "@/lib/useFontScale";
 import { formatHijriFromDate } from "@/lib/hijri";
-import { Moon, Sun, LogOut, ShieldCheck, Plane, Fingerprint, TimerOff, Coins, Tags, Users, ChevronDown, Type, CalendarClock, Minus, Plus, Send, BellRing } from "lucide-react";
+import { isValidPhone } from "@/lib/phone";
+import { shrinkImage } from "@/lib/image";
+import { Moon, Sun, LogOut, ShieldCheck, ShieldAlert, Plane, Fingerprint, TimerOff, Coins, Tags, Users, ChevronDown, Type, CalendarClock, Minus, Plus, Send, BellRing, Camera, BadgeCheck } from "lucide-react";
+
+// نفس نمط الـ Modal المحلي المستخدم في installments/page.tsx — مفيش
+// Modal مشترك في المشروع، كل صفحة بتعرّف نسختها الصغيرة.
+function Modal({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-white dark:bg-neutral-900 rounded-t-2xl sm:rounded-2xl w-full max-w-sm p-4 space-y-3" onClick={(e) => e.stopPropagation()}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// نسخة "توثيق حسابك" من نفس تدفق التوثيق الموجود بالفعل لكل فرد جوه جمعية
+// (ParticipantDetailModal → VerifyParticipantModal في installments/page.tsx)
+// — نفس المنطق بالظبط (صورة بطاقة + سيلفي حي، Gemini بيقارن)، بس هنا بيوثّق
+// الحساب نفسه (app_users.is_verified عن طريق POST /api/verify-me) مش فرد في
+// جمعية حد تاني منظّمها.
+function SelfVerifyModal({ onClose, onDone, showMsg }: { onClose: () => void; onDone: () => void; showMsg: (t: string, e?: boolean) => void }) {
+  const [front, setFront] = useState<string | null>(null);
+  const [selfie, setSelfie] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<any>(null);
+
+  const pick = async (file: File, setter: (v: string) => void) => setter(await shrinkImage(file));
+
+  const submit = async () => {
+    if (!front || !selfie) { showMsg("لازم صورة وش البطاقة والسيلفي على الأقل", true); return; }
+    setBusy(true);
+    try {
+      const res = await fetch("/api/verify-me", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id_photo_front: front, selfie_photo: selfie }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { showMsg(data.error || "حصل خطأ في التوثيق", true); return; }
+      setResult(data.result);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal onClose={onClose}>
+      <p className="font-semibold text-sm">توثيق حسابك</p>
+      <p className="text-[11px] text-neutral-400 leading-relaxed">
+        دي مش عملية تحقق هوية رسمية زي البنوك — مجرد مقارنة بالذكاء الاصطناعي بين صورة البطاقة والسيلفي، بتديك مؤشر ثقة بس. لو اتوثقت، هتظهر علامة موثّق جمب اسمك في الإدارة، وجمب اسمك في أي جمعية بتشترك فيها بنفس رقم موبايلك.
+      </p>
+
+      <div className="grid grid-cols-2 gap-2">
+        <label className="flex flex-col items-center gap-1 border border-dashed border-neutral-300 dark:border-neutral-700 rounded-lg p-2 text-[10px] text-center cursor-pointer">
+          <Camera size={16} className="text-neutral-400" />
+          {front ? "✅ اتصورت" : "وش البطاقة"}
+          <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) pick(f, setFront); }} />
+        </label>
+        <label className="flex flex-col items-center gap-1 border border-dashed border-neutral-300 dark:border-neutral-700 rounded-lg p-2 text-[10px] text-center cursor-pointer">
+          <Camera size={16} className="text-neutral-400" />
+          {selfie ? "✅ اتصورت" : "سيلفي حي"}
+          <input type="file" accept="image/*" capture="user" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) pick(f, setSelfie); }} />
+        </label>
+      </div>
+
+      {result && (
+        <div className={`text-xs rounded-lg p-2 space-y-1 ${result.verified ? "bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300" : "bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300"}`}>
+          <p className="font-medium">{result.verified ? "✅ اتوثق" : "⚠️ مش متطابق / مش واضح"}</p>
+          {result.notes && <p>{result.notes}</p>}
+          {result.error && <p>{result.error}</p>}
+        </div>
+      )}
+
+      <div className="flex gap-2">
+        <button onClick={onDone} className="flex-1 rounded-lg border border-neutral-300 dark:border-neutral-700 py-2 text-sm">قفل</button>
+        <button disabled={busy} onClick={submit} className="flex-1 bg-orange-600 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-60">{busy ? "جاري التحقق..." : "ابدأ التحقق"}</button>
+      </div>
+    </Modal>
+  );
+}
 
 const FONT_SCALES: { key: FontScale; label: string }[] = [
   { key: "small", label: "أصغر" },
@@ -42,6 +122,12 @@ export default function SettingsPage() {
   const [telegramBusy, setTelegramBusy] = useState(false);
   const [telegramMsg, setTelegramMsg] = useState("");
   const [telegramLink, setTelegramLink] = useState("");
+  const [phone, setPhone] = useState("");
+  const [phoneMsg, setPhoneMsg] = useState("");
+  const [savingPhone, setSavingPhone] = useState(false);
+  const [isVerified, setIsVerified] = useState(false);
+  const [showSelfVerify, setShowSelfVerify] = useState(false);
+  const [verifyMsg, setVerifyMsg] = useState("");
   const [igEnabled, setIgEnabled] = useState(true);
   const [igMode, setIgMode] = useState<"interval" | "daily">("interval");
   const [igIntervalHours, setIgIntervalHours] = useState("6");
@@ -63,6 +149,8 @@ export default function SettingsPage() {
         setIgMode(d.user.ig_reminder_mode === "daily" ? "daily" : "interval");
         setIgIntervalHours(String(d.user.ig_reminder_interval_hours ?? 6));
         setIgHour(String(d.user.ig_reminder_hour ?? 8));
+        setPhone(d.user.phone || "");
+        setIsVerified(!!d.user.is_verified);
       }
     });
     setBioSupported(typeof window !== "undefined" && !!window.PublicKeyCredential);
@@ -86,6 +174,28 @@ export default function SettingsPage() {
       setTelegramMsg("مفيش اتصال بالإنترنت، حاول تاني");
     } finally {
       setTelegramBusy(false);
+    }
+  };
+
+  // فولباك "اربط رقمك" لمن تخطّى خانة الموبايل في التسجيل — نفس رقم الموبايل
+  // اللي بيتسجل في تسجيل الدخول الأول، بس هنا ممكن يضيفه أو يعدّله في أي وقت.
+  const savePhone = async () => {
+    setPhoneMsg("");
+    if (phone && !isValidPhone(phone)) { setPhoneMsg("رقم موبايل غير صالح"); return; }
+    setSavingPhone(true);
+    try {
+      const res = await fetch("/api/me", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: phone || null }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setPhoneMsg(data.error || "حصل خطأ"); return; }
+      setPhoneMsg("✅ اتحفظ الرقم");
+    } catch {
+      setPhoneMsg("مفيش اتصال بالإنترنت، حاول تاني");
+    } finally {
+      setSavingPhone(false);
     }
   };
 
@@ -238,8 +348,42 @@ export default function SettingsPage() {
 
       <Card className="space-y-2">
         <div className="flex items-center gap-2 text-sm">
+          <BadgeCheck size={18} />
+          توثيق حسابك
+        </div>
+        {isVerified ? (
+          <p className="text-xs text-blue-500 flex items-center gap-1"><BadgeCheck size={14} /> حسابك موثّق ✅ — هتظهر علامة موثّق جمب اسمك في أي جمعية بتشترك فيها بنفس رقم موبايلك.</p>
+        ) : (
+          <>
+            <p className="text-xs text-neutral-400">وثّق حسابك بصورة بطاقة وسيلفي — نفس فكرة التوثيق الموجودة في الجمعيات، بس على مستوى حسابك كله.</p>
+            <button onClick={() => setShowSelfVerify(true)} className="w-full flex items-center justify-center gap-1 rounded-lg border border-neutral-300 dark:border-neutral-700 py-2 text-sm">
+              <ShieldCheck size={14} /> ابدأ التوثيق
+            </button>
+          </>
+        )}
+        {verifyMsg && <p className="text-[11px] text-neutral-400">{verifyMsg}</p>}
+      </Card>
+
+      <Card className="space-y-2">
+        <div className="flex items-center gap-2 text-sm">
           <Send size={18} />
           بوت تليجرام
+        </div>
+        <div>
+          <label className="text-[10px] text-neutral-400">رقم الموبايل</label>
+          <div className="flex gap-1.5">
+            <input
+              type="tel"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="رقم موبايلك"
+              className={`flex-1 min-w-0 rounded-lg border bg-transparent px-3 py-2 text-sm ${phone && !isValidPhone(phone) ? "border-red-400 dark:border-red-700" : "border-neutral-300 dark:border-neutral-700"}`}
+            />
+            <button disabled={savingPhone} onClick={savePhone} className="rounded-lg border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-xs shrink-0 disabled:opacity-60">
+              {savingPhone ? "..." : "حفظ"}
+            </button>
+          </div>
+          {phoneMsg && <p className={`text-[11px] mt-1 ${phoneMsg.startsWith("✅") ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}`}>{phoneMsg}</p>}
         </div>
         {telegramLinked ? (
           <>
@@ -475,6 +619,17 @@ export default function SettingsPage() {
       <button onClick={logout} className="w-full flex items-center justify-center gap-2 text-sm text-red-500 border border-red-200 dark:border-red-900 rounded-xl py-3">
         <LogOut size={16} /> تسجيل خروج
       </button>
+
+      {showSelfVerify && (
+        <SelfVerifyModal
+          onClose={() => setShowSelfVerify(false)}
+          onDone={() => {
+            setShowSelfVerify(false);
+            fetch("/api/me").then((r) => r.json()).then((d) => { if (d.user) setIsVerified(!!d.user.is_verified); });
+          }}
+          showMsg={(t) => setVerifyMsg(t)}
+        />
+      )}
     </div>
   );
 }

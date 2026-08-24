@@ -11,7 +11,7 @@ export async function GET() {
   const { data, error } = await supabaseAdmin
     .from("app_users")
     .select(
-      "id,name,base_currency,telegram_bot_username,telegram_chat_id,google_sheet_id,is_family,parent_user_id,created_at,debt_reminder_hour,recurring_reminder_hour,is_admin,email,license_code,license_type,license_started_at,license_expires_at,license_allowed_pages,license_redeemed_at"
+      "id,name,base_currency,telegram_bot_username,telegram_chat_id,google_sheet_id,is_family,parent_user_id,created_at,debt_reminder_hour,recurring_reminder_hour,is_admin,email,phone,is_verified,license_code,license_type,license_started_at,license_expires_at,license_allowed_pages,license_redeemed_at"
     )
     .order("created_at", { ascending: true });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

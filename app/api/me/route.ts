@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { getSessionUserId } from "@/lib/session";
+import { isValidPhone } from "@/lib/phone";
 
 export async function GET() {
   const userId = await getSessionUserId();
@@ -8,7 +9,7 @@ export async function GET() {
   const { data, error } = await supabaseAdmin
     .from("app_users")
     .select(
-      "id,name,base_currency,dark_mode,travel_mode,auto_logout_minutes,charity_amount,charity_frequency,charity_reminder_enabled,telegram_chat_id,telegram_notifications_muted,charity_muted_date,debt_reminder_hour,recurring_reminder_hour,font_scale,hijri_correction_days,zakat_last_paid_at,zakat_next_due_at,zakat_reminder_enabled,zakat_gold_karat,zakat_country,is_admin,license_type,license_expires_at,license_allowed_pages,license_redeemed_at,ig_reminders_enabled,ig_reminder_mode,ig_reminder_interval_hours,ig_reminder_hour"
+      "id,name,email,phone,is_verified,verification_note,base_currency,dark_mode,travel_mode,auto_logout_minutes,charity_amount,charity_frequency,charity_reminder_enabled,telegram_chat_id,telegram_notifications_muted,charity_muted_date,debt_reminder_hour,recurring_reminder_hour,font_scale,hijri_correction_days,zakat_last_paid_at,zakat_next_due_at,zakat_reminder_enabled,zakat_gold_karat,zakat_country,is_admin,license_type,license_expires_at,license_allowed_pages,license_redeemed_at,ig_reminders_enabled,ig_reminder_mode,ig_reminder_interval_hours,ig_reminder_hour"
     )
     .eq("id", userId)
     .single();
@@ -20,7 +21,12 @@ export async function PATCH(req: NextRequest) {
   const userId = await getSessionUserId();
   if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const body = await req.json();
+  if ("phone" in body && body.phone && !isValidPhone(body.phone)) {
+    return NextResponse.json({ error: "رقم موبايل غير صالح" }, { status: 400 });
+  }
   const allowed = [
+    "email",
+    "phone",
     "base_currency",
     "dark_mode",
     "travel_mode",

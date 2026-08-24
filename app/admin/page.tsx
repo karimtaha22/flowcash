@@ -4,6 +4,13 @@ import Card from "@/components/Card";
 import Footer from "@/components/Footer";
 import Link from "next/link";
 import { PAGE_KEYS, PAGE_LABELS, computeLicenseStatus, type PageKey } from "@/lib/license";
+import { BadgeCheck } from "lucide-react";
+
+// نسخة نصية بس من lib/gemini.ts's DEFAULT_MODEL — متعمّد إننا منستوردش
+// lib/gemini.ts هنا (ملف "use client") عشان هو نفسه بيعمل dynamic import
+// لـ supabaseAdmin (service role)، وأحسن ميتلمش ببندل العميل خالص حتى لو
+// نظريًا lazy.
+const DEFAULT_GEMINI_MODEL = "gemini-3.6-flash";
 
 interface AdminUser {
   id: string;
@@ -18,6 +25,8 @@ interface AdminUser {
   recurring_reminder_hour: number | null;
   is_admin?: boolean | null;
   email?: string | null;
+  phone?: string | null;
+  is_verified?: boolean | null;
   license_code?: string | null;
   license_type?: "trial" | "permanent" | null;
   license_started_at?: string | null;
@@ -69,6 +78,12 @@ export default function AdminPage() {
   // /api/admin/telegram-setup.
   const [sharedBotStatus, setSharedBotStatus] = useState<any>(null);
   const [sharedBotBusy, setSharedBotBusy] = useState(false);
+  const [geminiStatus, setGeminiStatus] = useState<any>(null);
+  const [geminiKeyInput, setGeminiKeyInput] = useState("");
+  const [geminiModelInput, setGeminiModelInput] = useState("");
+  const [geminiBusy, setGeminiBusy] = useState(false);
+  const [geminiTestResult, setGeminiTestResult] = useState<any>(null);
+  const [geminiMsg, setGeminiMsg] = useState("");
   const [locked, setLocked] = useState(false);
   const [checkedAccess, setCheckedAccess] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -154,6 +169,40 @@ export default function AdminPage() {
       }
     } finally {
       setSharedBotBusy(false);
+    }
+  };
+
+  const loadGeminiStatus = async () => {
+    const res = await fetch("/api/admin/gemini-settings");
+    const data = await res.json();
+    setGeminiStatus(data);
+    setGeminiModelInput(data.dbModelOverride || "");
+  };
+  useEffect(() => { if (!locked && checkedAccess) loadGeminiStatus(); }, [locked, checkedAccess]);
+
+  const saveGeminiSettings = async (patch: Record<string, any>) => {
+    setGeminiBusy(true);
+    setGeminiMsg("");
+    try {
+      const res = await fetch("/api/admin/gemini-settings", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
+      if (!res.ok) { setGeminiMsg("حصل خطأ ومتحفظش"); return; }
+      setGeminiMsg("اتحفظ ✅");
+      setGeminiKeyInput("");
+      await loadGeminiStatus();
+    } finally {
+      setGeminiBusy(false);
+    }
+  };
+
+  const testGemini = async () => {
+    setGeminiBusy(true);
+    setGeminiTestResult(null);
+    try {
+      const res = await fetch("/api/admin/gemini-settings/test", { method: "POST" });
+      const data = await res.json();
+      setGeminiTestResult(data);
+    } finally {
+      setGeminiBusy(false);
     }
   };
 
@@ -383,6 +432,57 @@ export default function AdminPage() {
       </Card>
 
       <Card className="space-y-3">
+        <h2 className="font-semibold">التحقق بالذكاء الاصطناعي (Gemini)</h2>
+        <p className="text-xs text-neutral-500 leading-relaxed">
+          المفتاح والموديل بييجوا افتراضيًا من <code className="bg-neutral-100 dark:bg-neutral-800 px-1 rounded">GEMINI_API_KEY</code>/<code className="bg-neutral-100 dark:bg-neutral-800 px-1 rounded">GEMINI_MODEL</code> في Vercel، لكن تقدر تغيّرهم من هنا مباشرة من غير ما تحتاج ريدبلوي — اللي تحفظه هنا بيبقى له الأولوية.
+        </p>
+        {geminiStatus && (
+          <div className={`text-xs rounded-lg p-2 space-y-1 ${geminiStatus.hasKey ? "bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300" : "bg-red-50 dark:bg-red-950 text-red-600 dark:text-red-400"}`}>
+            <p>المفتاح: {geminiStatus.hasKey ? `متسجل ✅ (${geminiStatus.keySource === "db" ? "من هنا" : "من Vercel"})` : "مش متسجل خالص ⚠️"}</p>
+            <p>الموديل الفعلي دلوقتي: <code className="break-all">{geminiStatus.effectiveModel}</code></p>
+          </div>
+        )}
+        <div>
+          <label className="text-[10px] text-neutral-400">مفتاح Gemini جديد (سيبه فاضي لو مش هتغيّره)</label>
+          <input
+            type="password"
+            placeholder="AIza..."
+            value={geminiKeyInput}
+            onChange={(e) => setGeminiKeyInput(e.target.value)}
+            className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm"
+          />
+        </div>
+        <div>
+          <label className="text-[10px] text-neutral-400">الموديل (سيبه فاضي عشان يرجع للافتراضي الذكي — {DEFAULT_GEMINI_MODEL})</label>
+          <input
+            placeholder={DEFAULT_GEMINI_MODEL}
+            value={geminiModelInput}
+            onChange={(e) => setGeminiModelInput(e.target.value)}
+            className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm"
+          />
+        </div>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            disabled={geminiBusy}
+            onClick={() => saveGeminiSettings({ ...(geminiKeyInput ? { gemini_api_key: geminiKeyInput } : {}), gemini_model: geminiModelInput })}
+            className="flex-1 bg-orange-600 text-white rounded-lg py-1.5 text-xs disabled:opacity-50"
+          >
+            احفظ
+          </button>
+          <button type="button" disabled={geminiBusy} onClick={testGemini} className="flex-1 border border-neutral-300 dark:border-neutral-700 rounded-lg py-1.5 text-xs disabled:opacity-50">
+            {geminiBusy ? "جاري الاختبار..." : "اختبر النموذج"}
+          </button>
+        </div>
+        {geminiMsg && <p className="text-xs text-center text-neutral-500">{geminiMsg}</p>}
+        {geminiTestResult && (
+          <div className={`text-xs rounded-lg p-2 ${geminiTestResult.ok ? "bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300" : "bg-red-50 dark:bg-red-950 text-red-600 dark:text-red-400"}`}>
+            {geminiTestResult.ok ? `شغال ✅ (${geminiTestResult.model}) — الرد: "${geminiTestResult.reply}"` : `فشل (${geminiTestResult.model}): ${geminiTestResult.error}`}
+          </div>
+        )}
+      </Card>
+
+      <Card className="space-y-3">
         <h2 className="font-semibold">إصدار كود ترخيص لعميل جديد (SaaS)</h2>
         <p className="text-xs text-neutral-500">
           العميل بياخد الكود ده وياخد ب بينه PIN من صفحة "تفعيل الحساب" (/activate). لو نسيت تحدد صفحات، الحساب بيتقفل كله للقراءة فقط لحد ما تحدد.
@@ -530,7 +630,11 @@ export default function AdminPage() {
         <h2 className="font-semibold">٤. المستخدمون الحاليون</h2>
         {users.map((u) => (
           <Card key={u.id} className="space-y-2">
-            <p className="font-medium text-sm">{u.name} {u.is_family && <span className="text-xs text-neutral-400">(عائلة)</span>}</p>
+            <p className="font-medium text-sm flex items-center gap-1">
+              {u.name}
+              {u.is_verified && <BadgeCheck size={14} className="text-blue-500" />}
+              {u.is_family && <span className="text-xs text-neutral-400">(عائلة)</span>}
+            </p>
             <div className="text-xs text-neutral-400">
               معرّف المستخدم (للاستخدام الداخلي): <code>{u.id}</code>
             </div>
