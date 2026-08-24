@@ -1,10 +1,12 @@
 import Link from "next/link";
 import Card from "@/components/Card";
-import { Repeat, Search, FileDown, Settings, ChevronLeft, CreditCard } from "lucide-react";
+import { Search, FileDown, Settings, ChevronLeft, CalendarDays } from "lucide-react";
 
+// التخطيط المالي و"أقساط وجمعيات" اتنقلوا للشريط السفلي نفسه (BottomNav) بدل
+// ما يتدوّر عليهم هنا — التقويم اتنقل هنا بدالهم عشان الشريط السفلي يفضل ٨
+// عناصر بس (بعد ما كان ٧ + التقويم اتشال منه).
 const items = [
-  { href: "/planning", label: "التخطيط المالي", desc: "مصاريف ودخل متكرر، ميزانية، أهداف توفير، صدقات وزكاة", icon: Repeat },
-  { href: "/installments", label: "أقساط وجمعيات", desc: "أقساط شراء، جمعيات (اشتراك أو إدارة)، تذكيرات ومحاكاة", icon: CreditCard },
+  { href: "/calendar", label: "التقويم", desc: "شوف حركاتك والمواعيد المتكررة في شكل تقويم شهري", icon: CalendarDays },
   { href: "/search", label: "البحث", desc: "دور بأي حاجة في حساباتك", icon: Search },
   { href: "/export", label: "تصدير كشف حساب", desc: "PDF أو Excel لأي حساب أو شخص", icon: FileDown },
   { href: "/settings", label: "الإعدادات", desc: "العملة الأساسية، التصنيفات، الأشخاص، الوضع الليلي", icon: Settings },
