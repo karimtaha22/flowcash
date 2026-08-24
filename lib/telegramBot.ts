@@ -128,6 +128,39 @@ export async function handleTelegramCallback(userId: string, botToken: string, c
     return reply(botToken, chatId, "تم تسجيل إخراج الصدقة ✅ مش هتوصلك تذكيرات صدقة تانية النهاردة.");
   }
 
+  // "✅ تم الدفع" button on an installment/gam3eya due-day reminder — marks
+  // that one month's row paid directly from Telegram, same effect as tapping
+  // it in the app (see app/api/installments/[id]/payments/[paymentId] and
+  // app/api/gam3eya/[id]/payments/[paymentId]). No account/balance is
+  // touched here, unlike recurring items — these are just schedule trackers.
+  if (prefix === "installment_paid") {
+    const { data: payment } = await supabaseAdmin
+      .from("installment_payments")
+      .select("id,status,plan_id,installment_plans!inner(user_id,item_name)")
+      .eq("id", value)
+      .single();
+    if (!payment || (payment as any).installment_plans?.user_id !== userId) return reply(botToken, chatId, "القسط ده مش موجود.");
+    if (payment.status === "paid") return reply(botToken, chatId, "اتسجل قبل كده ✅");
+    await supabaseAdmin.from("installment_payments").update({ status: "paid", paid_at: new Date().toISOString() }).eq("id", value);
+    const { count } = await supabaseAdmin.from("installment_payments").select("id", { count: "exact", head: true }).eq("plan_id", payment.plan_id).eq("status", "pending");
+    if ((count || 0) === 0) await supabaseAdmin.from("installment_plans").update({ status: "completed" }).eq("id", payment.plan_id);
+    return reply(botToken, chatId, `✅ اتسجل قسط "${(payment as any).installment_plans?.item_name}" مدفوع.`);
+  }
+
+  if (prefix === "gam3eya_paid") {
+    const { data: payment } = await supabaseAdmin
+      .from("gam3eya_payments")
+      .select("id,status,gam3eya_id,gam3eyas!inner(user_id,name)")
+      .eq("id", value)
+      .single();
+    if (!payment || (payment as any).gam3eyas?.user_id !== userId) return reply(botToken, chatId, "الدفعة دي مش موجودة.");
+    if (payment.status === "paid") return reply(botToken, chatId, "اتسجلت قبل كده ✅");
+    await supabaseAdmin.from("gam3eya_payments").update({ status: "paid", paid_at: new Date().toISOString() }).eq("id", value);
+    const { count } = await supabaseAdmin.from("gam3eya_payments").select("id", { count: "exact", head: true }).eq("gam3eya_id", payment.gam3eya_id).eq("status", "pending");
+    if ((count || 0) === 0) await supabaseAdmin.from("gam3eyas").update({ status: "completed" }).eq("id", payment.gam3eya_id);
+    return reply(botToken, chatId, `✅ اتسجلت الدفعة في "${(payment as any).gam3eyas?.name || "الجمعية"}".`);
+  }
+
   const session = await getSession(userId, chatId);
   if (!session?.flow) return;
 

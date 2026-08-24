@@ -495,20 +495,7 @@ export default function AdminPage() {
       </Card>
 
       <Card className="space-y-3">
-        <h2 className="font-semibold">٢. ازاي تجيب توكن بوت تليجرام؟</h2>
-        <ol className="text-sm space-y-1.5 list-decimal list-inside text-neutral-600 dark:text-neutral-300">
-          <li>افتح تليجرام وابحث عن <b>@BotFather</b></li>
-          <li>ابعتله الأمر <code className="bg-neutral-100 dark:bg-neutral-800 px-1 rounded">/newbot</code></li>
-          <li>اكتب اسم للبوت (مثال: FlowCash Karim)</li>
-          <li>اكتب username ينتهي بـ <code>bot</code> (مثال: karim_flowcash_bot)</li>
-          <li>هيبعتلك BotFather توكن شكله كده: <code className="bg-neutral-100 dark:bg-neutral-800 px-1 rounded">123456:ABC-DEF...</code> — انسخه</li>
-          <li>الصقه في خانة "توكن بوت تليجرام" تحت وادوس حفظ — هيتربط أوتوماتيك</li>
-          <li>افتح شات مع بوتك وابعتله <code>/start</code></li>
-        </ol>
-      </Card>
-
-      <Card className="space-y-3">
-        <h2 className="font-semibold">٣. مزامنة Google Sheets (مرآة اختيارية)</h2>
+        <h2 className="font-semibold">٢. مزامنة Google Sheets (مرآة اختيارية)</h2>
         <p className="text-sm text-neutral-600 dark:text-neutral-300">
           قاعدة البيانات الأساسية للتطبيق شغالة لحظيًا بدون Google Sheets. لو عايز نسخة قابلة للقراءة/التعديل في شيت،
           محتاجين منك:
@@ -524,7 +511,7 @@ export default function AdminPage() {
       </Card>
 
       <Card className="space-y-3">
-        <h2 className="font-semibold">٤. تفعيل تذكيرات الساعة المختارة + الصدقة كل ٣ ساعات</h2>
+        <h2 className="font-semibold">٣. تفعيل تذكيرات الساعة المختارة + الصدقة كل ٣ ساعات</h2>
         <p className="text-sm text-neutral-600 dark:text-neutral-300">
           خطة Vercel المجانية (Hobby) بتشغّل الـ Cron بتاعها مرة واحدة بس في اليوم — عشان تذكير الديون/الالتزامات يشتغل في
           الساعة اللي تختارها لكل مستخدم تحت، وتذكير الصدقة يتكرر كل ٣ ساعات، لازم خدمة مجانية خارجية تنده على رابط واحد كل ساعة:
@@ -540,7 +527,7 @@ export default function AdminPage() {
       </Card>
 
       <div className="space-y-3">
-        <h2 className="font-semibold">٥. المستخدمون الحاليون</h2>
+        <h2 className="font-semibold">٤. المستخدمون الحاليون</h2>
         {users.map((u) => (
           <Card key={u.id} className="space-y-2">
             <p className="font-medium text-sm">{u.name} {u.is_family && <span className="text-xs text-neutral-400">(عائلة)</span>}</p>

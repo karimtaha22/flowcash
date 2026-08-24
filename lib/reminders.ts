@@ -224,6 +224,123 @@ const ZAKAT_REMINDER_WINDOW_DAYS = 7;
 // re-notify at most once every this many hours once inside the reminder window
 const ZAKAT_REMINDER_REPEAT_HOURS = 24;
 
+// ---------------- installment (أقساط) reminders ----------------
+// Two heads-up messages per installment: 2 days before due_date, then again
+// on due_date itself with a "✅ تم الدفع" inline button (handled in
+// lib/telegramBot.ts's installment_paid callback) — mirrors the recurring-item
+// reminder pattern. Guarded by reminded_2days_at/reminded_due_at so each
+// installment only ever gets each message once, regardless of how many
+// times /api/cron/tick fires in a day.
+export async function runInstallmentRemindersForUser(user: ReminderUser) {
+  if (!botToken() || !user.telegram_chat_id) return { sent: 0 };
+
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const in2Days = new Date();
+  in2Days.setDate(in2Days.getDate() + 2);
+  const in2DaysIso = in2Days.toISOString().slice(0, 10);
+
+  const { data: plans } = await supabaseAdmin
+    .from("installment_plans")
+    .select("id,item_name,company_name,currency,status,installment_payments(id,month_index,due_date,amount,status,reminded_2days_at,reminded_due_at)")
+    .eq("user_id", user.id)
+    .eq("status", "active");
+
+  let sent = 0;
+  for (const plan of plans || []) {
+    for (const p of (plan as any).installment_payments || []) {
+      if (p.status !== "pending") continue;
+
+      if (p.due_date === in2DaysIso && !p.reminded_2days_at) {
+        try {
+          await tgCall(botToken(), "sendMessage", {
+            chat_id: user.telegram_chat_id,
+            text: `📅 تذكير: باقي يومين على قسط "${plan.item_name}"${plan.company_name ? ` (${plan.company_name})` : ""}\nالمبلغ: ${Number(p.amount).toLocaleString()} ${plan.currency}`,
+          });
+          sent++;
+        } catch {
+          // best-effort
+        }
+        await supabaseAdmin.from("installment_payments").update({ reminded_2days_at: new Date().toISOString() }).eq("id", p.id);
+      }
+
+      if (p.due_date <= todayIso && !p.reminded_due_at) {
+        try {
+          await tgCall(botToken(), "sendMessage", {
+            chat_id: user.telegram_chat_id,
+            text: `🔔 قسط "${plan.item_name}"${plan.company_name ? ` (${plan.company_name})` : ""} مستحق${p.due_date < todayIso ? " ومتأخر" : " النهاردة"}\nالمبلغ: ${Number(p.amount).toLocaleString()} ${plan.currency}`,
+            reply_markup: { inline_keyboard: [[{ text: "✅ تم الدفع", callback_data: `installment_paid:${p.id}` }]] },
+          });
+          sent++;
+        } catch {
+          // best-effort
+        }
+        await supabaseAdmin.from("installment_payments").update({ reminded_due_at: new Date().toISOString() }).eq("id", p.id);
+      }
+    }
+  }
+  return { sent };
+}
+
+// ---------------- gam3eya (جمعيات) reminders ----------------
+// Same 2-days-before + due-day pattern as installments, for every pending
+// gam3eya_payments row (both "subscribed" — the user's own monthly
+// contribution — and "organizing" — each participant's row, sent to the
+// organizer since participants aren't FlowCash users themselves).
+export async function runGam3eyaRemindersForUser(user: ReminderUser) {
+  if (!botToken() || !user.telegram_chat_id) return { sent: 0 };
+
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const in2Days = new Date();
+  in2Days.setDate(in2Days.getDate() + 2);
+  const in2DaysIso = in2Days.toISOString().slice(0, 10);
+
+  const { data: gam3eyat } = await supabaseAdmin
+    .from("gam3eyas")
+    .select(
+      "id,type,name,currency,status,gam3eya_payments(id,participant_id,month_index,due_date,amount,status,reminded_2days_at,reminded_due_at,gam3eya_participants(name))"
+    )
+    .eq("user_id", user.id)
+    .eq("status", "active");
+
+  let sent = 0;
+  for (const g of gam3eyat || []) {
+    const label = (g as any).name || (g.type === "subscribed" ? "الجمعية اللي مشترك فيها" : "الجمعية اللي بتديرها");
+    for (const p of (g as any).gam3eya_payments || []) {
+      if (p.status !== "pending") continue;
+      const who = p.gam3eya_participants?.name ? ` — ${p.gam3eya_participants.name}` : "";
+
+      if (p.due_date === in2DaysIso && !p.reminded_2days_at) {
+        try {
+          await tgCall(botToken(), "sendMessage", {
+            chat_id: user.telegram_chat_id,
+            text: `📅 باقي يومين على دفعة في "${label}"${who}\nالمبلغ: ${Number(p.amount).toLocaleString()} ${g.currency}`,
+          });
+          sent++;
+        } catch {
+          // best-effort
+        }
+        await supabaseAdmin.from("gam3eya_payments").update({ reminded_2days_at: new Date().toISOString() }).eq("id", p.id);
+      }
+
+      if (p.due_date <= todayIso && !p.reminded_due_at) {
+        const when = p.due_date < todayIso ? "دفعة متأخرة" : "دفعة النهاردة";
+        try {
+          await tgCall(botToken(), "sendMessage", {
+            chat_id: user.telegram_chat_id,
+            text: `🔔 ${when} في "${label}"${who}\nالمبلغ: ${Number(p.amount).toLocaleString()} ${g.currency}`,
+            reply_markup: { inline_keyboard: [[{ text: "✅ تم الدفع", callback_data: `gam3eya_paid:${p.id}` }]] },
+          });
+          sent++;
+        } catch {
+          // best-effort
+        }
+        await supabaseAdmin.from("gam3eya_payments").update({ reminded_due_at: new Date().toISOString() }).eq("id", p.id);
+      }
+    }
+  }
+  return { sent };
+}
+
 export async function runZakatReminderForUser(user: ZakatUser) {
   if (!botToken() || !user.telegram_chat_id) return { notified: false, reason: "no_telegram" };
   if (!user.zakat_reminder_enabled || !user.zakat_next_due_at) return { notified: false, reason: "not_set" };

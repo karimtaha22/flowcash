@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { runOverdueDebtsForUser, runRecurringRemindersForUser, runCharityReminderForUser, runZakatReminderForUser } from "@/lib/reminders";
+import {
+  runOverdueDebtsForUser,
+  runRecurringRemindersForUser,
+  runCharityReminderForUser,
+  runZakatReminderForUser,
+  runInstallmentRemindersForUser,
+  runGam3eyaRemindersForUser,
+} from "@/lib/reminders";
 
 // Unified reminder endpoint meant to be pinged HOURLY by a free external
 // scheduler (e.g. cron-job.org) — Vercel's own Cron Jobs are capped at
@@ -46,6 +53,12 @@ export async function GET(req: NextRequest) {
     if (u.zakat_reminder_enabled) {
       entry.zakat = await runZakatReminderForUser(u);
     }
+    // installments/gam3eyat reminders aren't gated by a per-user hour or a
+    // toggle — they only ever send when there's an actual payment due
+    // within the window (see the 2-guard-columns logic in lib/reminders.ts),
+    // so it's safe (and simplest) to check them on every hourly tick.
+    entry.installments = await runInstallmentRemindersForUser(u);
+    entry.gam3eyat = await runGam3eyaRemindersForUser(u);
     if (Object.keys(entry).length > 1) results.push(entry);
   }
 

@@ -1,9 +1,10 @@
 import Link from "next/link";
 import Card from "@/components/Card";
-import { Repeat, Search, FileDown, Settings, ChevronLeft } from "lucide-react";
+import { Repeat, Search, FileDown, Settings, ChevronLeft, CreditCard } from "lucide-react";
 
 const items = [
   { href: "/planning", label: "التخطيط المالي", desc: "مصاريف ودخل متكرر، ميزانية، أهداف توفير، صدقات وزكاة", icon: Repeat },
+  { href: "/installments", label: "أقساط وجمعيات", desc: "أقساط شراء، جمعيات (اشتراك أو إدارة)، تذكيرات ومحاكاة", icon: CreditCard },
   { href: "/search", label: "البحث", desc: "دور بأي حاجة في حساباتك", icon: Search },
   { href: "/export", label: "تصدير كشف حساب", desc: "PDF أو Excel لأي حساب أو شخص", icon: FileDown },
   { href: "/settings", label: "الإعدادات", desc: "العملة الأساسية، التصنيفات، الأشخاص، الوضع الليلي", icon: Settings },

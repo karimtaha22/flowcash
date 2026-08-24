@@ -16,15 +16,30 @@ export async function GET() {
   const monthKey = new Date().toISOString().slice(0, 7);
   const monthStart = startOfMonth(new Date()).toISOString();
 
-  const [{ data: recurring }, { data: budgets }, { data: overdueDebts, count: overdueDebtsCountRaw }, { data: txs }] = await Promise.all([
-    supabaseAdmin.from("recurring_items").select("id,name,last_confirmed_month,is_active").eq("user_id", userId).eq("is_active", true),
-    supabaseAdmin.from("budgets").select("id,category_id,monthly_limit,alert_threshold_pct,categories(name)").eq("user_id", userId),
-    // limit(20) on the actual rows (so the dropdown list stays short) but
-    // count: "exact" still reflects the TRUE total, so the badge number
-    // never undercounts a user with more than 20 overdue debts.
-    supabaseAdmin.from("debts").select("id,title,people(name)", { count: "exact" }).eq("user_id", userId).eq("status", "overdue").limit(20),
-    supabaseAdmin.from("transactions").select("category_id,amount").eq("user_id", userId).eq("type", "expense").gte("occurred_at", monthStart),
-  ]);
+  const todayIso = new Date().toISOString().slice(0, 10);
+
+  const [{ data: recurring }, { data: budgets }, { data: overdueDebts, count: overdueDebtsCountRaw }, { data: txs }, { data: overdueInstallments }, { data: overdueGam3eya }] =
+    await Promise.all([
+      supabaseAdmin.from("recurring_items").select("id,name,last_confirmed_month,is_active").eq("user_id", userId).eq("is_active", true),
+      supabaseAdmin.from("budgets").select("id,category_id,monthly_limit,alert_threshold_pct,categories(name)").eq("user_id", userId),
+      // limit(20) on the actual rows (so the dropdown list stays short) but
+      // count: "exact" still reflects the TRUE total, so the badge number
+      // never undercounts a user with more than 20 overdue debts.
+      supabaseAdmin.from("debts").select("id,title,people(name)", { count: "exact" }).eq("user_id", userId).eq("status", "overdue").limit(20),
+      supabaseAdmin.from("transactions").select("category_id,amount").eq("user_id", userId).eq("type", "expense").gte("occurred_at", monthStart),
+      supabaseAdmin
+        .from("installment_payments")
+        .select("id,due_date,installment_plans!inner(user_id,item_name)")
+        .eq("installment_plans.user_id", userId)
+        .eq("status", "pending")
+        .lte("due_date", todayIso),
+      supabaseAdmin
+        .from("gam3eya_payments")
+        .select("id,due_date,gam3eyas!inner(user_id,name),gam3eya_participants(name)")
+        .eq("gam3eyas.user_id", userId)
+        .eq("status", "pending")
+        .lte("due_date", todayIso),
+    ]);
 
   const items: { label: string; href: string }[] = [];
 
@@ -52,15 +67,27 @@ export async function GET() {
     items.push({ label: `دين "${d.title}"${person} متأخر`, href: `/people?debt=${d.id}` });
   }
 
+  for (const p of (overdueInstallments || []) as any[]) {
+    items.push({ label: `قسط "${p.installment_plans?.item_name}" مستحق`, href: "/installments?tab=installments" });
+  }
+  for (const p of (overdueGam3eya || []) as any[]) {
+    const who = p.gam3eya_participants?.name ? ` — ${p.gam3eya_participants.name}` : "";
+    items.push({ label: `دفعة "${p.gam3eyas?.name || "جمعية"}"${who} مستحقة`, href: "/installments?tab=gam3eya" });
+  }
+
   const dueRecurring = dueRecurringList.length;
   const overBudget = overBudgetList.length;
   const overdueCount = overdueDebtsCountRaw ?? (overdueDebts || []).length;
+  const overdueInstallmentsCount = (overdueInstallments || []).length;
+  const overdueGam3eyaCount = (overdueGam3eya || []).length;
 
   return NextResponse.json({
-    count: dueRecurring + overBudget + overdueCount,
+    count: dueRecurring + overBudget + overdueCount + overdueInstallmentsCount + overdueGam3eyaCount,
     dueRecurring,
     overBudget,
     overdueCount,
+    overdueInstallmentsCount,
+    overdueGam3eyaCount,
     items,
   });
 }
