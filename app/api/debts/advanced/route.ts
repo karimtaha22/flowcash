@@ -21,6 +21,7 @@ export async function POST(req: NextRequest) {
     title, reason, amount, value_type, metal_karat, unit_label,
     debt_date, due_date,
     witness_mode, witnesses,
+    creditor_name, debtor_name, // Round 25 — typed manually, not derived from the person/account record (see below)
   } = body;
 
   if (!direction || !["owed_to_me", "i_owe"].includes(direction)) {
@@ -28,6 +29,16 @@ export async function POST(req: NextRequest) {
   }
   if (!title || !(Number(amount) > 0)) {
     return NextResponse.json({ error: "اسم الدين والمبلغ لازم يتملوا صح" }, { status: 400 });
+  }
+  // Round 25 — "اسم الدائن و المدين يتكتبوا يدويا": the app's own `people.name`
+  // / the account owner's `name` can be an English name, a nickname, or an
+  // alias — not necessarily what should print on a legal-feeling debt
+  // record/export. So for an advanced debt both names are REQUIRED as free
+  // text at creation time, stored on the debt itself (creditor_name_override/
+  // debtor_name_override) instead of always being derived live from the
+  // linked person row or the session user's account name.
+  if (!creditor_name?.trim() || !debtor_name?.trim()) {
+    return NextResponse.json({ error: "لازم تكتب اسم الدائن واسم المدين" }, { status: 400 });
   }
   if (!person_id && !new_person_name?.trim()) {
     return NextResponse.json({ error: "لازم تختار شخص أو تكتب اسم جديد" }, { status: 400 });
@@ -95,6 +106,8 @@ export async function POST(req: NextRequest) {
       status: "open",
       is_advanced: true,
       witness_mode,
+      creditor_name_override: creditor_name.trim(),
+      debtor_name_override: debtor_name.trim(),
     })
     .select()
     .single();

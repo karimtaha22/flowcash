@@ -1094,7 +1094,16 @@ function Gam3eyaCard({
         <span className="inline-block text-[9px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400">🙋 جمعية مشترك فيها</span>
         <div className="flex items-center justify-between cursor-pointer" onClick={onToggle}>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium" onClick={(e) => { e.stopPropagation(); setEditingInfo(true); }}>{g.name || "جمعية (مشترك فيها)"}</p>
+            <div className="flex items-center gap-1">
+              <p className="text-sm font-medium truncate">{g.name || "جمعية (مشترك فيها)"}</p>
+              <button
+                onClick={(e) => { e.stopPropagation(); setEditingInfo(true); }}
+                className="text-neutral-400 hover:text-orange-600 p-1 -m-1 shrink-0"
+                title="تعديل بيانات الجمعية"
+              >
+                <Pencil size={12} />
+              </button>
+            </div>
             <p className="text-[11px] text-neutral-400">
               {fmt(g.monthly_amount, g.currency)}/شهر · {paidCount}/{g.months_count} اتدفعوا · هتقبض في الشهر {g.my_payout_month}
               {g.status === "completed" && " · خلصت ✅"}
@@ -1255,7 +1264,16 @@ function Gam3eyaCard({
       <span className="inline-block text-[9px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400">🗂️ جمعية أنشأتها انت</span>
       <div className="flex items-center justify-between cursor-pointer" onClick={onToggle}>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium" onClick={(e) => { e.stopPropagation(); setEditingInfo(true); }}>{g.name || "جمعية (بتديرها)"}</p>
+          <div className="flex items-center gap-1">
+            <p className="text-sm font-medium truncate">{g.name || "جمعية (بتديرها)"}</p>
+            <button
+              onClick={(e) => { e.stopPropagation(); setEditingInfo(true); }}
+              className="text-neutral-400 hover:text-orange-600 p-1 -m-1 shrink-0"
+              title="تعديل بيانات الجمعية"
+            >
+              <Pencil size={12} />
+            </button>
+          </div>
           <p className="text-[11px] text-neutral-400">
             {fmt(g.monthly_amount, g.currency)}/فرد شهريًا · {g.participants_count} فرد
             {g.status === "completed" && " · خلصت ✅"}

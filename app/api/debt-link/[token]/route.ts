@@ -46,8 +46,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ tok
 
   const ackByWitness = new Map((allWitnessLinks || []).map((l: any) => [l.witness_id, !!l.acknowledged_at]));
 
-  const creditorName = debt.direction === "owed_to_me" ? debt.app_users?.name || "الدائن" : debt.people?.name || "الدائن";
-  const debtorName = debt.direction === "owed_to_me" ? debt.people?.name || "المدين" : debt.app_users?.name || "المدين";
+  // Round 25 — prefer the manually-typed names (creditor_name_override/
+  // debtor_name_override, required on every advanced debt as of this round)
+  // over the linked person/account record, since that record's name can be
+  // in English or an alias. Falls back to the old derived logic for any
+  // advanced debt created before this field existed.
+  const creditorName = debt.creditor_name_override || (debt.direction === "owed_to_me" ? debt.app_users?.name || "الدائن" : debt.people?.name || "الدائن");
+  const debtorName = debt.debtor_name_override || (debt.direction === "owed_to_me" ? debt.people?.name || "المدين" : debt.app_users?.name || "المدين");
 
   return NextResponse.json({
     role: link.role,

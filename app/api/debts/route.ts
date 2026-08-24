@@ -35,8 +35,13 @@ export async function GET(req: NextRequest) {
   const { debtLinkUrl } = await import("@/lib/debtLinks");
   const debts = (data || []).map((d: any) => ({
     ...d,
-    creditor_name: d.direction === "owed_to_me" ? myName : d.people?.name || "الدائن",
-    debtor_name: d.direction === "owed_to_me" ? d.people?.name || "المدين" : myName,
+    // Round 25 — an advanced debt's creditor_name_override/debtor_name_override
+    // (typed manually at creation, since the linked person/account name can be
+    // an alias or English name) always wins when present; simple debts (and any
+    // pre-round-25 advanced debt created before this field existed) keep the
+    // old derived-from-record behavior.
+    creditor_name: d.creditor_name_override || (d.direction === "owed_to_me" ? myName : d.people?.name || "الدائن"),
+    debtor_name: d.debtor_name_override || (d.direction === "owed_to_me" ? d.people?.name || "المدين" : myName),
     debt_witnesses: (d.debt_witnesses || []).sort((a: any, b: any) => a.slot_index - b.slot_index),
     debt_links: (d.debt_links || []).map((l: any) => ({ ...l, url: debtLinkUrl(l.token) })),
     debt_events: (d.debt_events || []).sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()),

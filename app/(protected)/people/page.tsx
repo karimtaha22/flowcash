@@ -159,11 +159,19 @@ function PeopleInner() {
     debt_date: todayISO(),
     due_date: "",
     witness_mode: "two_men" as "two_men" | "man_two_women",
+    // Round 25 — "اسم الدائن و المدين يتكتبوا يدويا": typed explicitly rather
+    // than always derived from the linked person/account record (which can
+    // carry an English name or a nickname). Prefilled where a sensible guess
+    // exists (my own account name, or the picked person's name) but always
+    // editable, and required before submit.
+    creditor_name: "",
+    debtor_name: "",
   });
   const [advWarning, setAdvWarning] = useState("");
   const [advSaving, setAdvSaving] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [extractSuggestion, setExtractSuggestion] = useState<{ name: string; id_number: string } | null>(null);
+  const [myAccountName, setMyAccountName] = useState("");
 
   const load = async () => {
     const d = await fetch("/api/debts").then((r) => r.json());
@@ -172,6 +180,9 @@ function PeopleInner() {
     setPeople((p.people || []).map((x: any) => ({ id: x.id, name: x.name })));
   };
   useEffect(() => { load(); }, []);
+  useEffect(() => {
+    fetch("/api/me").then((r) => r.json()).then((d) => setMyAccountName(d.user?.name || "")).catch(() => {});
+  }, []);
 
   const submit = async () => {
     if (!form.person_id && !form.new_person.trim()) {
@@ -325,14 +336,23 @@ function PeopleInner() {
     }
   };
 
+  // Round 25 (2nd fix) — "الرابط بيظهر ملزوق بالكلمة اللي جمبه فمش بيفتح
+  // غير لما تمسحها": some paste targets (WhatsApp compose box, certain
+  // Android share sheets) collapse/drop a bare "\n" line break, which glues
+  // the label straight onto "https://..." with no separating character at
+  // all — most link auto-detectors require whitespace immediately before a
+  // URL, so a glued "رابط شاهدhttps://..." never linkifies. Fixed by always
+  // keeping an explicit space (": ") between label and link IN ADDITION TO
+  // the newline, so even in the worst case (newline stripped entirely) the
+  // link still has a real space right before it and stays clickable.
   const copyLink = async (l: { url: string }, label: string) => {
-    const ok = await copyText(`${label}\n${l.url}`);
+    const ok = await copyText(`${label}: \n${l.url}`);
     setCopyMsg(ok ? "✅ تم نسخ الرابط" : `تعذّر النسخ التلقائي — الرابط: ${l.url}`);
     setTimeout(() => setCopyMsg(""), ok ? 2500 : 8000);
   };
 
   const shareLink = async (l: { url: string }, label: string) => {
-    const ok = await shareText(`${label}\n${l.url}`);
+    const ok = await shareText(`${label}: \n${l.url}`);
     if (!ok) await copyLink(l, label);
   };
 
@@ -378,12 +398,14 @@ function PeopleInner() {
       person_id: "", new_person: "", phone: "", address: "", id_number: "", id_photo_front: null,
       title: "", reason: "", amount: "", value_type: "currency", metal_karat: "", unit_label: "",
       currency: "EGP", debt_date: todayISO(), due_date: "", witness_mode: "two_men",
+      creditor_name: "", debtor_name: "",
     });
     setExtractSuggestion(null);
   };
 
   const submitAdvanced = async () => {
     if (!advForm.person_id && !advForm.new_person.trim()) { setAdvWarning("لازم تختار شخص أو تكتب اسم جديد"); return; }
+    if (!advForm.creditor_name.trim() || !advForm.debtor_name.trim()) { setAdvWarning("لازم تكتب اسم الدائن واسم المدين"); return; }
     if (!advForm.title.trim()) { setAdvWarning("اسم الدين لازم يتملى"); return; }
     if (!advForm.amount || parseFloat(advForm.amount) <= 0) { setAdvWarning("المبلغ لازم يتملى برقم أكبر من صفر"); return; }
     if (advForm.value_type === "gold" && !advForm.metal_karat) { setAdvWarning("لازم تحدد عيار الدهب"); return; }
@@ -414,6 +436,8 @@ function PeopleInner() {
           debt_date: advForm.debt_date || undefined,
           due_date: advForm.due_date || null,
           witness_mode: advForm.witness_mode,
+          creditor_name: advForm.creditor_name,
+          debtor_name: advForm.debtor_name,
           // no witness data sent — each witness fills their own name/phone/
           // address/photo when they open their own link (see
           // /app/debt/[token]/page.tsx); the API pads empty-slot witness
@@ -615,7 +639,24 @@ function PeopleInner() {
         <h1 className="text-xl font-bold">الأشخاص والديون</h1>
         <div className="flex items-center gap-1.5">
           <button
-            onClick={() => { setShowAdvancedForm((s) => !s); setShowForm(false); setAdvWarning(""); }}
+            onClick={() => {
+              setShowAdvancedForm((s) => {
+                const opening = !s;
+                if (opening) {
+                  // prefill (never overwrite an already-typed value) — "my"
+                  // side defaults to the account name, the other side is left
+                  // blank until a person is picked/typed (see onChange below)
+                  setAdvForm((f) => ({
+                    ...f,
+                    creditor_name: f.creditor_name || (tab === "owed_to_me" ? myAccountName : ""),
+                    debtor_name: f.debtor_name || (tab === "i_owe" ? myAccountName : ""),
+                  }));
+                }
+                return opening;
+              });
+              setShowForm(false);
+              setAdvWarning("");
+            }}
             className="flex items-center gap-1 text-xs border border-orange-600 text-orange-600 dark:text-orange-400 rounded-full px-2.5 py-1.5"
           >
             <Link2 size={14} /> تسجيل متقدم
@@ -708,16 +749,67 @@ function PeopleInner() {
             </p>
           </div>
 
+          <div className="space-y-2 bg-neutral-50 dark:bg-neutral-900/60 rounded-lg p-2.5">
+            <p className="text-xs font-semibold text-neutral-500">اسم الدائن واسم المدين اللي هيتكتبوا في المستند/التصدير</p>
+            <p className="text-[10px] text-neutral-400 leading-relaxed">
+              اكتبهم زي ما تحب يظهروا بالظبط — دول مش لازم يطابقوا الاسم المسجل في البرنامج (اللي أحيانًا بيبقى انجلش أو اسم مستعار).
+            </p>
+            <div>
+              <label className="text-[10px] text-neutral-400">اسم الدائن</label>
+              <input
+                placeholder="اسم الدائن"
+                value={advForm.creditor_name}
+                onChange={(e) => setAdvForm({ ...advForm, creditor_name: e.target.value })}
+                className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] text-neutral-400">اسم المدين</label>
+              <input
+                placeholder="اسم المدين"
+                value={advForm.debtor_name}
+                onChange={(e) => setAdvForm({ ...advForm, debtor_name: e.target.value })}
+                className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm"
+              />
+            </div>
+          </div>
+
           <div className="space-y-2">
-            <p className="text-xs font-semibold text-neutral-500">بيانات {tab === "owed_to_me" ? "المدين" : "صاحب الدين"}</p>
-            <select value={advForm.person_id} onChange={(e) => setAdvForm({ ...advForm, person_id: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm">
+            <p className="text-xs font-semibold text-neutral-500">بيانات {tab === "owed_to_me" ? "المدين" : "صاحب الدين"} (للرابط والتواصل معاه)</p>
+            <select
+              value={advForm.person_id}
+              onChange={(e) => {
+                const pid = e.target.value;
+                const picked = people.find((p) => p.id === pid);
+                setAdvForm((f) => {
+                  const otherPartyKey = tab === "owed_to_me" ? "debtor_name" : "creditor_name";
+                  // prefill the "other party" name from the picked person — but
+                  // never overwrite something already typed by hand.
+                  const shouldFill = picked && !f[otherPartyKey].trim();
+                  return { ...f, person_id: pid, ...(shouldFill ? { [otherPartyKey]: picked!.name } : {}) };
+                });
+              }}
+              className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm"
+            >
               <option value="">-- اختار شخص أو ضيف جديد تحت --</option>
               {people.map((p) => (
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </select>
             {!advForm.person_id && (
-              <input placeholder="الاسم بالكامل" value={advForm.new_person} onChange={(e) => setAdvForm({ ...advForm, new_person: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+              <input
+                placeholder="الاسم بالكامل"
+                value={advForm.new_person}
+                onChange={(e) => {
+                  const name = e.target.value;
+                  setAdvForm((f) => {
+                    const otherPartyKey = tab === "owed_to_me" ? "debtor_name" : "creditor_name";
+                    const shouldFill = !f[otherPartyKey].trim() || f[otherPartyKey] === f.new_person;
+                    return { ...f, new_person: name, ...(shouldFill ? { [otherPartyKey]: name } : {}) };
+                  });
+                }}
+                className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm"
+              />
             )}
             <input placeholder="رقم الموبايل (اختياري — بيستخدم لاكتشاف حسابه ولإرسال الإشعار)" value={advForm.phone} onChange={(e) => setAdvForm({ ...advForm, phone: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
             <input placeholder="العنوان (اختياري)" value={advForm.address} onChange={(e) => setAdvForm({ ...advForm, address: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
