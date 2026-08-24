@@ -25,13 +25,13 @@ export async function GET(req: NextRequest) {
   const { data: users, error } = await supabaseAdmin
     .from("app_users")
     .select(
-      "id,base_currency,telegram_bot_token,telegram_chat_id,charity_amount,charity_frequency,charity_reminder_enabled,charity_last_reminded_at,charity_muted_date,debt_reminder_hour,recurring_reminder_hour,hijri_correction_days,zakat_next_due_at,zakat_reminder_enabled,zakat_last_reminded_at"
+      "id,base_currency,telegram_chat_id,charity_amount,charity_frequency,charity_reminder_enabled,charity_last_reminded_at,charity_muted_date,debt_reminder_hour,recurring_reminder_hour,hijri_correction_days,zakat_next_due_at,zakat_reminder_enabled,zakat_last_reminded_at"
     );
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   const results: any[] = [];
   for (const u of users || []) {
-    if (!u.telegram_bot_token || !u.telegram_chat_id) continue;
+    if (!process.env.TELEGRAM_BOT_TOKEN || !u.telegram_chat_id) continue;
     const entry: any = { user_id: u.id };
 
     if (cairoHour === (u.debt_reminder_hour ?? 8)) {

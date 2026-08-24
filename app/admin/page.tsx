@@ -63,8 +63,12 @@ export default function AdminPage() {
   const [newUser, setNewUser] = useState({ name: "", pin: "", is_family: false, parent_user_id: "" });
   const [editing, setEditing] = useState<Record<string, any>>({});
   const [msg, setMsg] = useState("");
-  const [botStatus, setBotStatus] = useState<Record<string, any>>({});
-  const [botBusy, setBotBusy] = useState<Record<string, boolean>>({});
+  // Global bot status now (one shared bot for every customer) — was
+  // per-customer before (Record<id, ...>) back when each customer had their
+  // own bot token. See "بوت تليجرام المركزي" card below and
+  // /api/admin/telegram-setup.
+  const [sharedBotStatus, setSharedBotStatus] = useState<any>(null);
+  const [sharedBotBusy, setSharedBotBusy] = useState(false);
   const [locked, setLocked] = useState(false);
   const [checkedAccess, setCheckedAccess] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -126,32 +130,30 @@ export default function AdminPage() {
     );
   }
 
-  const checkBotStatus = async (id: string) => {
-    setBotBusy((b) => ({ ...b, [id]: true }));
+  const checkSharedBotStatus = async () => {
+    setSharedBotBusy(true);
     try {
-      const res = await fetch(`/api/admin/telegram/${id}`);
+      const res = await fetch("/api/admin/telegram-setup");
       const data = await res.json();
-      setBotStatus((s) => ({ ...s, [id]: data }));
+      setSharedBotStatus(data);
     } finally {
-      setBotBusy((b) => ({ ...b, [id]: false }));
+      setSharedBotBusy(false);
     }
   };
 
-  const resyncWebhook = async (id: string) => {
-    setBotBusy((b) => ({ ...b, [id]: true }));
+  const resyncSharedWebhook = async () => {
+    setSharedBotBusy(true);
     try {
-      const res = await fetch(`/api/admin/telegram/${id}`, { method: "POST" });
+      const res = await fetch("/api/admin/telegram-setup", { method: "POST" });
       const data = await res.json();
       if (!data.ok) {
-        // shown inside this user's own Telegram card, not the page-wide banner —
-        // it's specific to this bot, not a general "saved settings" message.
-        setBotStatus((s) => ({ ...s, [id]: { ok: false, error: `فشلت إعادة التسجيل: ${data.error}`, computedUrl: data.computedUrl } }));
+        setSharedBotStatus({ ok: false, error: `فشلت إعادة التسجيل: ${data.error}`, computedUrl: data.computedUrl });
       } else {
-        await checkBotStatus(id);
-        setBotStatus((s) => ({ ...s, [id]: { ...s[id], resyncMsg: "تم إعادة تسجيل الويب هوك ✅ ابعت /start للبوت دلوقتي" } }));
+        await checkSharedBotStatus();
+        setSharedBotStatus((s: any) => ({ ...s, resyncMsg: "تم تسجيل الويب هوك ✅ جرب دلوقتي: افتح البوت وابعت /start" }));
       }
     } finally {
-      setBotBusy((b) => ({ ...b, [id]: false }));
+      setSharedBotBusy(false);
     }
   };
 
@@ -198,7 +200,7 @@ export default function AdminPage() {
     });
     const data = await res.json();
     if (res.ok) {
-      setMsg(data.webhookResult ? `تم الحفظ — ربط البوت: ${data.webhookResult.ok ? "نجح ✅" : "فشل، راجع التوكن"}` : "تم الحفظ ✅");
+      setMsg("تم الحفظ ✅");
       load();
     } else setMsg("حصل خطأ في الحفظ");
   };
@@ -333,6 +335,52 @@ export default function AdminPage() {
       </div>
 
       {msg && <Card className="text-sm bg-orange-50 dark:bg-orange-950 text-orange-700 dark:text-orange-300 whitespace-pre-wrap break-all">{msg}</Card>}
+
+      <Card className="space-y-3">
+        <h2 className="font-semibold">بوت تليجرام المركزي</h2>
+        <p className="text-xs text-neutral-500 leading-relaxed">
+          بوت واحد بتاعك يستخدمه كل العملاء (مش بوت منفصل لكل عميل). اعمل بوت مرة واحدة من @BotFather على تليجرام، وسجّل في Vercel متغيرين: <code className="bg-neutral-100 dark:bg-neutral-800 px-1 rounded">TELEGRAM_BOT_TOKEN</code> (التوكن) و<code className="bg-neutral-100 dark:bg-neutral-800 px-1 rounded">TELEGRAM_BOT_USERNAME</code> (يوزر البوت من غير @). بعدها دوس "سجّل الويب هوك" هنا مرة واحدة بس. أي عميل بعد كده بيربط حسابه بنفسه من الإعدادات عنده — من غير ما تعمل أي حاجة يدويًا لأي عميل.
+        </p>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            disabled={sharedBotBusy}
+            onClick={checkSharedBotStatus}
+            className="flex-1 border border-neutral-300 dark:border-neutral-700 rounded-lg py-1.5 text-xs disabled:opacity-50"
+          >
+            {sharedBotBusy ? "جاري الفحص..." : "افحص حالة البوت"}
+          </button>
+          <button
+            type="button"
+            disabled={sharedBotBusy}
+            onClick={resyncSharedWebhook}
+            className="flex-1 border border-orange-300 dark:border-orange-800 text-orange-600 dark:text-orange-400 rounded-lg py-1.5 text-xs disabled:opacity-50"
+          >
+            سجّل الويب هوك
+          </button>
+        </div>
+        {sharedBotStatus && (
+          <div className={`text-xs rounded-lg p-2 space-y-1 whitespace-pre-wrap break-all ${sharedBotStatus.ok && !sharedBotStatus.hasErrors ? "bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300" : "bg-red-50 dark:bg-red-950 text-red-600 dark:text-red-400"}`}>
+            {sharedBotStatus.resyncMsg && <p className="text-green-700 dark:text-green-300">{sharedBotStatus.resyncMsg}</p>}
+            {!sharedBotStatus.ok && (
+              <>
+                <p>خطأ: {sharedBotStatus.error}</p>
+                {sharedBotStatus.computedUrl && <p>الرابط اللي اتحاول تسجيله: {sharedBotStatus.computedUrl}</p>}
+              </>
+            )}
+            {sharedBotStatus.ok && (
+              <>
+                <p>الرابط المسجل عند تليجرام: {sharedBotStatus.url ? <code className="break-all">{sharedBotStatus.url}</code> : "مفيش رابط متسجل خالص ⚠️"}</p>
+                {sharedBotStatus.hasErrors && (
+                  <p>آخر خطأ من تليجرام: {sharedBotStatus.last_error_message} {sharedBotStatus.last_error_date ? `(${new Date(sharedBotStatus.last_error_date).toLocaleString("ar-EG")})` : ""}</p>
+                )}
+                {!sharedBotStatus.hasErrors && sharedBotStatus.url && <p>الويب هوك شغال وملوش أخطاء ✅</p>}
+                <p>رسائل واقفة معلقة: {sharedBotStatus.pending_update_count}</p>
+              </>
+            )}
+          </div>
+        )}
+      </Card>
 
       <Card className="space-y-3">
         <h2 className="font-semibold">إصدار كود ترخيص لعميل جديد (SaaS)</h2>
@@ -625,56 +673,9 @@ export default function AdminPage() {
               />
             </div>
 
-            <input
-              placeholder="توكن بوت تليجرام"
-              defaultValue={""}
-              onChange={(e) => setEditing({ ...editing, [u.id]: { ...editing[u.id], telegram_bot_token: e.target.value } })}
-              className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm"
-            />
             <div className="text-xs text-neutral-400">
-              حالة البوت: {u.telegram_chat_id ? "متصل ✅" : "لسه مش متصل"}
+              تليجرام: {u.telegram_chat_id ? "متصل ✅" : "لسه مش رابط حسابه"} — كل العملاء بيستخدموا بوت واحد مشترك دلوقتي (شوف كارت "بوت تليجرام المركزي" فوق)، العميل بيربط نفسه من الإعدادات عنده.
             </div>
-
-            <div className="flex gap-2">
-              <button
-                type="button"
-                disabled={botBusy[u.id]}
-                onClick={() => checkBotStatus(u.id)}
-                className="flex-1 border border-neutral-300 dark:border-neutral-700 rounded-lg py-1.5 text-xs disabled:opacity-50"
-              >
-                {botBusy[u.id] ? "جاري الفحص..." : "افحص حالة البوت"}
-              </button>
-              <button
-                type="button"
-                disabled={botBusy[u.id]}
-                onClick={() => resyncWebhook(u.id)}
-                className="flex-1 border border-orange-300 dark:border-orange-800 text-orange-600 dark:text-orange-400 rounded-lg py-1.5 text-xs disabled:opacity-50"
-              >
-                أعد ربط الويب هوك
-              </button>
-            </div>
-
-            {botStatus[u.id] && (
-              <div className={`text-xs rounded-lg p-2 space-y-1 whitespace-pre-wrap break-all ${botStatus[u.id].ok && !botStatus[u.id].hasErrors ? "bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300" : "bg-red-50 dark:bg-red-950 text-red-600 dark:text-red-400"}`}>
-                {botStatus[u.id].resyncMsg && <p className="text-green-700 dark:text-green-300">{botStatus[u.id].resyncMsg}</p>}
-                {!botStatus[u.id].ok && (
-                  <>
-                    <p>خطأ: {botStatus[u.id].error}</p>
-                    {botStatus[u.id].computedUrl && <p>الرابط اللي اتحاول تسجيله: {botStatus[u.id].computedUrl}</p>}
-                  </>
-                )}
-                {botStatus[u.id].ok && (
-                  <>
-                    <p>الرابط المسجل عند تليجرام: {botStatus[u.id].url ? <code className="break-all">{botStatus[u.id].url}</code> : "مفيش رابط متسجل خالص ⚠️"}</p>
-                    {botStatus[u.id].hasErrors && (
-                      <p>آخر خطأ من تليجرام: {botStatus[u.id].last_error_message} {botStatus[u.id].last_error_date ? `(${new Date(botStatus[u.id].last_error_date).toLocaleString("ar-EG")})` : ""}</p>
-                    )}
-                    {!botStatus[u.id].hasErrors && botStatus[u.id].url && <p>الويب هوك شغال وملوش أخطاء ✅</p>}
-                    <p>رسائل واقفة معلقة: {botStatus[u.id].pending_update_count}</p>
-                  </>
-                )}
-              </div>
-            )}
 
             <input
               placeholder="Google Sheet ID (اختياري، لاحقًا)"

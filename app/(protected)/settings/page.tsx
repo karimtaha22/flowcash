@@ -7,7 +7,7 @@ import PeopleManager from "@/components/PeopleManager";
 import { useTheme } from "@/lib/useTheme";
 import { useFontScale, type FontScale } from "@/lib/useFontScale";
 import { formatHijriFromDate } from "@/lib/hijri";
-import { Moon, Sun, LogOut, ShieldCheck, Plane, Fingerprint, TimerOff, Coins, Tags, Users, ChevronDown, Type, CalendarClock, Minus, Plus } from "lucide-react";
+import { Moon, Sun, LogOut, ShieldCheck, Plane, Fingerprint, TimerOff, Coins, Tags, Users, ChevronDown, Type, CalendarClock, Minus, Plus, Send } from "lucide-react";
 
 const FONT_SCALES: { key: FontScale; label: string }[] = [
   { key: "small", label: "أصغر" },
@@ -38,6 +38,10 @@ export default function SettingsPage() {
   const [hijriCorrection, setHijriCorrection] = useState(0);
   const [savingHijri, setSavingHijri] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [telegramLinked, setTelegramLinked] = useState(false);
+  const [telegramBusy, setTelegramBusy] = useState(false);
+  const [telegramMsg, setTelegramMsg] = useState("");
+  const [telegramLink, setTelegramLink] = useState("");
 
   useEffect(() => {
     fetch("/api/me").then((r) => r.json()).then((d) => {
@@ -49,10 +53,48 @@ export default function SettingsPage() {
         if (mins > 0) setAutoLogoutMinutes(String(mins));
         setHijriCorrection(Number(d.user.hijri_correction_days) || 0);
         setIsAdmin(!!d.user.is_admin);
+        setTelegramLinked(!!d.user.telegram_chat_id);
       }
     });
     setBioSupported(typeof window !== "undefined" && !!window.PublicKeyCredential);
   }, []);
+
+  // "اربط حسابك بتليجرام" — every customer now shares one official bot
+  // (previously each customer needed their own bot, set up by the admin —
+  // see claude/licensing-system.md's Telegram section). One tap here gets a
+  // one-time deep link; opening it in Telegram and hitting Start finishes
+  // the link automatically, no token/typing required on the customer's side.
+  const linkTelegram = async () => {
+    setTelegramBusy(true);
+    setTelegramMsg("");
+    try {
+      const res = await fetch("/api/telegram/link", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) { setTelegramMsg(data.error || "حصل خطأ"); return; }
+      setTelegramLink(data.link);
+      if (typeof window !== "undefined") window.open(data.link, "_blank");
+    } catch {
+      setTelegramMsg("مفيش اتصال بالإنترنت، حاول تاني");
+    } finally {
+      setTelegramBusy(false);
+    }
+  };
+
+  const unlinkTelegram = async () => {
+    setTelegramBusy(true);
+    setTelegramMsg("");
+    try {
+      const res = await fetch("/api/telegram/unlink", { method: "POST" });
+      if (!res.ok) { setTelegramMsg("حصل خطأ"); return; }
+      setTelegramLinked(false);
+      setTelegramLink("");
+      setTelegramMsg("تم إلغاء الربط ✅");
+    } catch {
+      setTelegramMsg("مفيش اتصال بالإنترنت، حاول تاني");
+    } finally {
+      setTelegramBusy(false);
+    }
+  };
 
   const changeHijriCorrection = async (delta: number) => {
     const next = Math.max(-3, Math.min(3, hijriCorrection + delta));
@@ -153,6 +195,46 @@ export default function SettingsPage() {
         <button onClick={toggle} className={`w-11 h-6 rounded-full transition ${dark ? "bg-orange-600" : "bg-neutral-300"}`}>
           <span className={`block w-5 h-5 bg-white rounded-full shadow transition ${dark ? "translate-x-[-22px]" : "translate-x-[-2px]"}`} />
         </button>
+      </Card>
+
+      <Card className="space-y-2">
+        <div className="flex items-center gap-2 text-sm">
+          <Send size={18} />
+          بوت تليجرام
+        </div>
+        {telegramLinked ? (
+          <>
+            <p className="text-xs text-emerald-600 dark:text-emerald-400">متصل ✅ — هتوصلك التذكيرات على تليجرام</p>
+            <button
+              disabled={telegramBusy}
+              onClick={unlinkTelegram}
+              className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 py-2 text-sm disabled:opacity-60"
+            >
+              {telegramBusy ? "جاري الإلغاء..." : "إلغاء الربط"}
+            </button>
+          </>
+        ) : (
+          <>
+            <p className="text-xs text-neutral-400">اربط حسابك عشان توصلك تذكيرات الدفعات المتكررة والديون والصدقة والزكاة على تليجرام.</p>
+            <button
+              disabled={telegramBusy}
+              onClick={linkTelegram}
+              className="w-full bg-orange-600 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-60"
+            >
+              {telegramBusy ? "جاري التجهيز..." : "اربط حسابك بتليجرام"}
+            </button>
+            {telegramLink && (
+              <p className="text-[11px] text-neutral-400 text-center">
+                لو التطبيق ماودّاكش تلقائي لتليجرام،{" "}
+                <a href={telegramLink} target="_blank" rel="noopener noreferrer" className="text-orange-600 underline">
+                  دوس هنا
+                </a>{" "}
+                وابعت Start.
+              </p>
+            )}
+          </>
+        )}
+        {telegramMsg && <p className="text-xs text-center text-red-500">{telegramMsg}</p>}
       </Card>
 
       <Card className="space-y-2">

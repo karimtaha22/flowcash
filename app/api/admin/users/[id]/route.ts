@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { setWebhook } from "@/lib/telegram";
 import { requireAdminAuth } from "@/lib/adminGuard";
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -10,10 +9,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const { id } = await params;
   const body = await req.json();
+  // telegram_bot_token / telegram_chat_id are deliberately NOT admin-editable
+  // any more — every customer now shares one bot and links themselves via
+  // الإعدادات → اربط حسابك بتليجرام (see app/api/telegram/link). Admin
+  // setting an arbitrary chat_id here would let it be pointed at the wrong
+  // Telegram chat, silently misrouting someone's financial reminders.
   const allowed = [
-    "telegram_bot_token",
-    "telegram_bot_username",
-    "telegram_chat_id",
     "google_sheet_id",
     "google_service_account_email",
     "base_currency",
@@ -50,16 +51,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  let webhookResult = null;
-  if (body.telegram_bot_token) {
-    try {
-      webhookResult = await setWebhook(body.telegram_bot_token, id);
-    } catch (e: any) {
-      webhookResult = { ok: false, error: e.message };
-    }
-  }
-
-  return NextResponse.json({ user: data, webhookResult });
+  return NextResponse.json({ user: data });
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

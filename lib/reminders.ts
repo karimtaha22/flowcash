@@ -14,9 +14,13 @@ interface ReminderUser {
   id: string;
   name?: string | null;
   base_currency?: string | null;
-  telegram_bot_token: string | null;
   telegram_chat_id: string | null;
 }
+
+// One shared bot for every customer now (see the "بوت مركزي" migration
+// notes in app/api/telegram/webhook/route.ts) — every send below used to
+// take user.telegram_bot_token; now they all use this instead.
+const botToken = () => (process.env.TELEGRAM_BOT_TOKEN || "").trim();
 
 // ---------------- overdue debts ----------------
 // Fires once per debt (guarded by reminded_at, not by day/hour) — the hour
@@ -41,11 +45,11 @@ export async function runOverdueDebtsForUser(user: ReminderUser) {
 
     await supabaseAdmin.from("debts").update({ status: "overdue", reminded_at: new Date().toISOString() }).eq("id", d.id);
 
-    if (user.telegram_bot_token && user.telegram_chat_id) {
+    if (botToken() && user.telegram_chat_id) {
       const label = d.direction === "owed_to_me" ? "ليك عند" : "عليك لـ";
       try {
         await sendText(
-          user.telegram_bot_token,
+          botToken(),
           user.telegram_chat_id,
           `⏰ تذكير: دين متأخر أكتر من 30 يوم\n${label} ${d.people?.name || "شخص"} — ${d.title}\nالباقي: ${Number(d.remaining_amount).toLocaleString()} ${d.currency}`
         );
@@ -70,7 +74,7 @@ export async function runOverdueDebtsForUser(user: ReminderUser) {
 // which is fine since it's only ever compared for equality against a
 // freshly computed key of the same shape.
 export async function runRecurringRemindersForUser(user: ReminderUser) {
-  if (!user.telegram_bot_token || !user.telegram_chat_id) return { sent: 0 };
+  if (!botToken() || !user.telegram_chat_id) return { sent: 0 };
 
   const now = new Date();
   const monthKey = now.toISOString().slice(0, 7);
@@ -92,7 +96,7 @@ export async function runRecurringRemindersForUser(user: ReminderUser) {
   const sendHeadsUp = async (item: any, label: string) => {
     const verb = item.kind === "income" ? `هتستلم مرتبك ${label}` : `عليك دفعة ${label}`;
     try {
-      await tgCall(user.telegram_bot_token as string, "sendMessage", {
+      await tgCall(botToken(), "sendMessage", {
         chat_id: user.telegram_chat_id,
         text: `📅 تذكير: ${verb}\n${item.name} — ${Number(item.amount).toLocaleString()} ${item.currency}`,
       });
@@ -104,7 +108,7 @@ export async function runRecurringRemindersForUser(user: ReminderUser) {
   const sendDueNow = async (item: any, guardKey: string) => {
     const verb = item.kind === "income" ? "مرتبك نزل؟" : `عليك ${Number(item.amount).toLocaleString()} ${item.currency}`;
     try {
-      await tgCall(user.telegram_bot_token as string, "sendMessage", {
+      await tgCall(botToken(), "sendMessage", {
         chat_id: user.telegram_chat_id,
         text: `🔔 ${verb}\n${item.name} — ${Number(item.amount).toLocaleString()} ${item.currency}`,
         reply_markup: { inline_keyboard: [[{ text: item.kind === "income" ? "نزل ✅" : "دفعت ✅", callback_data: `recur_paid:${item.id}` }]] },
@@ -174,7 +178,7 @@ interface CharityUser extends ReminderUser {
 }
 
 export async function runCharityReminderForUser(user: CharityUser) {
-  if (!user.telegram_bot_token || !user.telegram_chat_id) return { notified: false, reason: "no_telegram" };
+  if (!botToken() || !user.telegram_chat_id) return { notified: false, reason: "no_telegram" };
 
   const todayIso = new Date().toISOString().slice(0, 10);
   if (user.charity_muted_date === todayIso) return { notified: false, reason: "muted" };
@@ -192,7 +196,7 @@ export async function runCharityReminderForUser(user: CharityUser) {
     `"وَمَا أَنفَقْتُم مِّن شَيْءٍ فَهُوَ يُخْلِفُهُ وَهُوَ خَيْرُ الرَّازِقِينَ" {سبأ:39}`;
 
   try {
-    await tgCall(user.telegram_bot_token, "sendMessage", {
+    await tgCall(botToken(), "sendMessage", {
       chat_id: user.telegram_chat_id,
       text,
       reply_markup: { inline_keyboard: [[{ text: "✅ تم إخراج الصدقة", callback_data: "charity_mute" }]] },
@@ -221,7 +225,7 @@ const ZAKAT_REMINDER_WINDOW_DAYS = 7;
 const ZAKAT_REMINDER_REPEAT_HOURS = 24;
 
 export async function runZakatReminderForUser(user: ZakatUser) {
-  if (!user.telegram_bot_token || !user.telegram_chat_id) return { notified: false, reason: "no_telegram" };
+  if (!botToken() || !user.telegram_chat_id) return { notified: false, reason: "no_telegram" };
   if (!user.zakat_reminder_enabled || !user.zakat_next_due_at) return { notified: false, reason: "not_set" };
 
   const dueDate = new Date(user.zakat_next_due_at + "T00:00:00");
@@ -243,7 +247,7 @@ export async function runZakatReminderForUser(user: ZakatUser) {
   const text = `🕌 تذكير الزكاة\n${whenLine}\n\nافتح تبويب "صدقات وزكاة" في التطبيق عشان تحسبها وتخرجها، وبعدها احفظ التاريخ عشان يتحسب معاد السنة الجاية.`;
 
   try {
-    await sendText(user.telegram_bot_token, user.telegram_chat_id, text);
+    await sendText(botToken(), user.telegram_chat_id, text);
     await supabaseAdmin.from("app_users").update({ zakat_last_reminded_at: new Date().toISOString() }).eq("id", user.id);
     return { notified: true, daysUntil };
   } catch {

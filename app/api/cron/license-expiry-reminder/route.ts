@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
   const windowEnd = new Date(Date.now() + WARNING_WINDOW_DAYS * 86_400_000).toISOString();
   const { data: users, error } = await supabaseAdmin
     .from("app_users")
-    .select("id,name,telegram_bot_token,telegram_chat_id,license_type,license_expires_at,license_expiry_last_reminded_at")
+    .select("id,name,telegram_chat_id,license_type,license_expires_at,license_expiry_last_reminded_at")
     .eq("is_admin", false)
     .not("license_expires_at", "is", null)
     .lte("license_expires_at", windowEnd)
@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
   let notified = 0;
   for (const u of users || []) {
     if (u.license_expiry_last_reminded_at?.slice(0, 10) === todayKey) continue;
-    if (!u.telegram_bot_token || !u.telegram_chat_id) continue;
+    if (!process.env.TELEGRAM_BOT_TOKEN || !u.telegram_chat_id) continue;
 
     const daysLeft = Math.ceil((new Date(u.license_expires_at as string).getTime() - Date.now()) / 86_400_000);
     const label = u.license_type === "trial" ? "فترتك التجريبية" : "ترخيصك";
@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
       : `⏰ ${label} هتنتهي بعد ${daysLeft} يوم. تواصل مع فريق الدعم للتجديد عشان تفضل تستخدم البرنامج من غير انقطاع.`;
 
     try {
-      await sendText(u.telegram_bot_token, u.telegram_chat_id, text);
+      await sendText(process.env.TELEGRAM_BOT_TOKEN as string, u.telegram_chat_id, text);
       await supabaseAdmin.from("app_users").update({ license_expiry_last_reminded_at: new Date().toISOString() }).eq("id", u.id);
       notified++;
     } catch {

@@ -18,21 +18,23 @@ export async function POST(req: NextRequest) {
   const { data: broadcast, error } = await supabaseAdmin.from("broadcasts").insert({ message }).select().single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
+  const botToken = (process.env.TELEGRAM_BOT_TOKEN || "").trim();
   const { data: recipients } = await supabaseAdmin
     .from("app_users")
-    .select("id,telegram_bot_token,telegram_chat_id")
+    .select("id,telegram_chat_id")
     .eq("is_admin", false)
-    .not("telegram_bot_token", "is", null)
     .not("telegram_chat_id", "is", null);
 
   let sent = 0;
   let failed = 0;
-  for (const r of recipients || []) {
-    try {
-      await sendText(r.telegram_bot_token as string, r.telegram_chat_id as string, `📢 ${message}`);
-      sent++;
-    } catch {
-      failed++;
+  if (botToken) {
+    for (const r of recipients || []) {
+      try {
+        await sendText(botToken, r.telegram_chat_id as string, `📢 ${message}`);
+        sent++;
+      } catch {
+        failed++;
+      }
     }
   }
 

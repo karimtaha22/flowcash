@@ -1,4 +1,23 @@
+// Module-level pacing: now that every customer shares ONE bot (see the
+// "بوت مركزي" migration notes), a cron sending reminders to hundreds/thousands
+// of customers one after another in a loop could otherwise burst well past
+// Telegram's ~30 messages/sec-across-chats ceiling. This adds a small forced
+// gap (40ms ≈ 25/sec, comfortably under Telegram's limit) before every API
+// call, so any existing sequential `for (const u of users) await sendText(...)`
+// loop is automatically paced without having to touch each call site. This is
+// in-memory and per-process — exactly what's needed here, since the pacing
+// only has to hold across sends happening within the same function
+// invocation (one cron run), not across separate ones.
+const MIN_GAP_MS = 40;
+let lastCallAt = 0;
+async function pace() {
+  const wait = lastCallAt + MIN_GAP_MS - Date.now();
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  lastCallAt = Date.now();
+}
+
 export async function tgCall(botToken: string, method: string, payload: any = {}) {
+  await pace();
   const res = await fetch(`https://api.telegram.org/bot${botToken}/${method}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -31,10 +50,16 @@ function resolveBaseUrl() {
   return "http://localhost:3000";
 }
 
-export async function setWebhook(botToken: string, userId: string) {
+// ONE shared bot for every customer now (previously each customer had their
+// own bot + their own webhook URL /api/telegram/{userId}) — so there's only
+// ever one webhook to register, at /api/telegram/webhook, regardless of how
+// many customers exist. Which customer sent a given update is now resolved
+// from the update's own chat_id (see app/api/telegram/webhook/route.ts),
+// not baked into the URL.
+export async function setWebhook(botToken: string) {
   const base = resolveBaseUrl();
   const secret = (process.env.TELEGRAM_WEBHOOK_SECRET || "").trim();
-  const url = `${base}/api/telegram/${userId}?secret=${encodeURIComponent(secret)}`;
+  const url = `${base}/api/telegram/webhook?secret=${encodeURIComponent(secret)}`;
   const redactedUrl = secret ? url.replace(secret, "<secret>") : url;
 
   if (!secret) {
