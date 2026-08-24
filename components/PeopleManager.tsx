@@ -2,12 +2,91 @@
 import { useEffect, useState } from "react";
 import { Trash2, UserPlus, Plus, X, Pencil, Check } from "lucide-react";
 
-interface PaymentAccount { type: "bank" | "instapay" | "wallet"; label?: string; account_number: string }
+export interface PaymentAccount { type: "bank" | "instapay" | "wallet"; label?: string; account_number: string }
 interface Person { id: string; name: string; phone: string | null; phones: string[]; payment_accounts: PaymentAccount[] }
 
-const ACCOUNT_TYPE_LABELS: Record<PaymentAccount["type"], string> = { bank: "حساب بنك", instapay: "إنستاباي", wallet: "محفظة" };
+export const ACCOUNT_TYPE_LABELS: Record<PaymentAccount["type"], string> = { bank: "حساب بنك", instapay: "إنستاباي", wallet: "محفظة" };
 const inputCls = "rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm";
-const emptyAccount = (): PaymentAccount => ({ type: "bank", label: "", account_number: "" });
+export const emptyAccount = (): PaymentAccount => ({ type: "bank", label: "", account_number: "" });
+
+export function PhoneListEditor({ phones, setPhones }: { phones: string[]; setPhones: (p: string[]) => void }) {
+  return (
+    <div className="space-y-1.5">
+      <p className="text-xs text-neutral-400">أرقام الموبايل</p>
+      {phones.map((ph, i) => (
+        <div key={i} className="flex gap-2">
+          <input
+            value={ph}
+            onChange={(e) => setPhones(phones.map((p, j) => (j === i ? e.target.value : p)))}
+            placeholder="رقم الموبايل"
+            className={`flex-1 ${inputCls}`}
+          />
+          {phones.length > 1 && (
+            <button onClick={() => setPhones(phones.filter((_, j) => j !== i))} className="text-neutral-400 hover:text-red-600 p-2">
+              <X size={14} />
+            </button>
+          )}
+        </div>
+      ))}
+      <button onClick={() => setPhones([...phones, ""])} className="flex items-center gap-1 text-xs text-orange-600 font-medium">
+        <Plus size={12} /> إضافة رقم تاني
+      </button>
+    </div>
+  );
+}
+
+// Reusable "multiple bank/InstaPay/wallet accounts" list editor — originally
+// built just for the standalone Person record (Settings ← الأشخاص), reused
+// as-is (round 25) by the gam3eya participant forms so "إضافة اكتر من حساب
+// بنكي أو محفظة" doesn't need a second implementation. `dense` shrinks
+// padding/text for tight contexts like an inline gam3eya-card form.
+export function PaymentAccountsEditor({
+  accounts, setAccounts, dense,
+}: {
+  accounts: PaymentAccount[];
+  setAccounts: (a: PaymentAccount[]) => void;
+  dense?: boolean;
+}) {
+  const cls = dense ? `${inputCls} !px-2 !py-1.5 text-xs` : inputCls;
+  return (
+    <div className="space-y-1.5">
+      <p className={dense ? "text-[10px] text-neutral-400" : "text-xs text-neutral-400"}>حسابات الدفع (بنك / إنستاباي / محفظة) — تقدر تضيف أكتر من واحد</p>
+      {accounts.map((acc, i) => (
+        <div key={i} className="space-y-1.5 bg-neutral-50 dark:bg-neutral-900/60 rounded-lg p-2">
+          <div className="flex gap-2">
+            <select
+              value={acc.type}
+              onChange={(e) => setAccounts(accounts.map((a, j) => (j === i ? { ...a, type: e.target.value as PaymentAccount["type"] } : a)))}
+              className={cls}
+            >
+              <option value="bank">حساب بنك</option>
+              <option value="instapay">إنستاباي</option>
+              <option value="wallet">محفظة</option>
+            </select>
+            <input
+              value={acc.label || ""}
+              onChange={(e) => setAccounts(accounts.map((a, j) => (j === i ? { ...a, label: e.target.value } : a)))}
+              placeholder="اسم البنك / ملاحظة (اختياري)"
+              className={`flex-1 ${cls}`}
+            />
+            <button onClick={() => setAccounts(accounts.filter((_, j) => j !== i))} className="text-neutral-400 hover:text-red-600 p-1 shrink-0">
+              <X size={14} />
+            </button>
+          </div>
+          <input
+            value={acc.account_number}
+            onChange={(e) => setAccounts(accounts.map((a, j) => (j === i ? { ...a, account_number: e.target.value } : a)))}
+            placeholder="رقم الحساب / IBAN / رقم المحفظة"
+            className={`w-full ${cls}`}
+          />
+        </div>
+      ))}
+      <button onClick={() => setAccounts([...accounts, emptyAccount()])} className="flex items-center gap-1 text-xs text-orange-600 font-medium">
+        <Plus size={12} /> إضافة حساب تاني
+      </button>
+    </div>
+  );
+}
 
 // Shared editor for the "phones[]" + "payment_accounts[]" fields — used both
 // in the "add person" form and in each person's inline edit mode, so the
@@ -22,64 +101,8 @@ function ContactFieldsEditor({
 }) {
   return (
     <div className="space-y-3">
-      <div className="space-y-1.5">
-        <p className="text-xs text-neutral-400">أرقام الموبايل</p>
-        {phones.map((ph, i) => (
-          <div key={i} className="flex gap-2">
-            <input
-              value={ph}
-              onChange={(e) => setPhones(phones.map((p, j) => (j === i ? e.target.value : p)))}
-              placeholder="رقم الموبايل"
-              className={`flex-1 ${inputCls}`}
-            />
-            {phones.length > 1 && (
-              <button onClick={() => setPhones(phones.filter((_, j) => j !== i))} className="text-neutral-400 hover:text-red-600 p-2">
-                <X size={14} />
-              </button>
-            )}
-          </div>
-        ))}
-        <button onClick={() => setPhones([...phones, ""])} className="flex items-center gap-1 text-xs text-orange-600 font-medium">
-          <Plus size={12} /> إضافة رقم تاني
-        </button>
-      </div>
-
-      <div className="space-y-1.5">
-        <p className="text-xs text-neutral-400">حسابات الدفع (بنك / إنستاباي / محفظة)</p>
-        {accounts.map((acc, i) => (
-          <div key={i} className="space-y-1.5 bg-neutral-50 dark:bg-neutral-900/60 rounded-lg p-2">
-            <div className="flex gap-2">
-              <select
-                value={acc.type}
-                onChange={(e) => setAccounts(accounts.map((a, j) => (j === i ? { ...a, type: e.target.value as PaymentAccount["type"] } : a)))}
-                className={`${inputCls} !px-2 !py-1.5 text-xs`}
-              >
-                <option value="bank">حساب بنك</option>
-                <option value="instapay">إنستاباي</option>
-                <option value="wallet">محفظة</option>
-              </select>
-              <input
-                value={acc.label || ""}
-                onChange={(e) => setAccounts(accounts.map((a, j) => (j === i ? { ...a, label: e.target.value } : a)))}
-                placeholder="اسم البنك / ملاحظة (اختياري)"
-                className={`flex-1 ${inputCls} !px-2 !py-1.5 text-xs`}
-              />
-              <button onClick={() => setAccounts(accounts.filter((_, j) => j !== i))} className="text-neutral-400 hover:text-red-600 p-1 shrink-0">
-                <X size={14} />
-              </button>
-            </div>
-            <input
-              value={acc.account_number}
-              onChange={(e) => setAccounts(accounts.map((a, j) => (j === i ? { ...a, account_number: e.target.value } : a)))}
-              placeholder="رقم الحساب / IBAN / رقم المحفظة"
-              className={`w-full ${inputCls} !px-2 !py-1.5 text-xs`}
-            />
-          </div>
-        ))}
-        <button onClick={() => setAccounts([...accounts, emptyAccount()])} className="flex items-center gap-1 text-xs text-orange-600 font-medium">
-          <Plus size={12} /> إضافة حساب تاني
-        </button>
-      </div>
+      <PhoneListEditor phones={phones} setPhones={setPhones} />
+      <PaymentAccountsEditor accounts={accounts} setAccounts={setAccounts} />
     </div>
   );
 }

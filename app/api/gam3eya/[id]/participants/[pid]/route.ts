@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { getSessionUserId } from "@/lib/session";
+import { isValidPhone } from "@/lib/phone";
 
 async function ownsGam3eya(userId: string, gam3eyaId: string) {
   const { data } = await supabaseAdmin.from("gam3eyas").select("id").eq("id", gam3eyaId).eq("user_id", userId).single();
@@ -18,9 +19,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!(await ownsGam3eya(userId, id))) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   const body = await req.json();
-  const allowed = ["name", "phone", "account_number", "address", "id_photo_front", "rating"];
+  const allowed = ["name", "phone", "account_number", "payment_method", "address", "id_photo_front", "rating", "payment_accounts"];
   const update: Record<string, any> = {};
   for (const k of allowed) if (k in body) update[k] = body[k];
+  if ("phone" in update && update.phone && !isValidPhone(update.phone)) {
+    return NextResponse.json({ error: "رقم موبايل غير صالح" }, { status: 400 });
+  }
   if ("rating" in update && update.rating !== null) {
     const r = Math.floor(Number(update.rating));
     if (!(r >= 1 && r <= 5)) return NextResponse.json({ error: "التقييم لازم يكون من ١ لـ ٥" }, { status: 400 });

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { getSessionUserId } from "@/lib/session";
+import { isValidPhone } from "@/lib/phone";
 
 function addMonths(dateIso: string, n: number) {
   const d = new Date(dateIso + "T00:00:00");
@@ -18,8 +19,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
   const body = await req.json();
-  const { name, phone, account_number, address, id_photo_front } = body;
+  const { name, phone, account_number, payment_method, address, id_photo_front, payment_accounts } = body;
   if (!name) return NextResponse.json({ error: "اسم الفرد لازم يتملى" }, { status: 400 });
+  if (phone && !isValidPhone(phone)) return NextResponse.json({ error: "رقم موبايل غير صالح" }, { status: 400 });
 
   const { data: g } = await supabaseAdmin.from("gam3eyas").select("*").eq("id", id).eq("user_id", userId).eq("type", "organizing").single();
   if (!g) return NextResponse.json({ error: "not found" }, { status: 404 });
@@ -30,7 +32,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const { data: participant, error } = await supabaseAdmin
     .from("gam3eya_participants")
-    .insert({ gam3eya_id: id, name, phone: phone || null, account_number: account_number || null, address: address || null, id_photo_front: id_photo_front || null, payout_order: nextOrder })
+    .insert({ gam3eya_id: id, name, phone: phone || null, account_number: account_number || null, payment_method: payment_method || "bank", address: address || null, id_photo_front: id_photo_front || null, payment_accounts: Array.isArray(payment_accounts) ? payment_accounts : [], payout_order: nextOrder })
     .select()
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

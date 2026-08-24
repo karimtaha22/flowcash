@@ -3,7 +3,9 @@ import { useEffect, useState, use as usePromise } from "react";
 import Card from "@/components/Card";
 import Footer from "@/components/Footer";
 import { fmt } from "@/lib/format";
-import { ShieldCheck, ShieldAlert, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { isValidPhone } from "@/lib/phone";
+import { shrinkImage } from "@/lib/image";
+import { ShieldCheck, ShieldAlert, AlertTriangle, CheckCircle2, Camera } from "lucide-react";
 
 // PUBLIC page — no login, no Sidebar/BottomNav (outside the (protected)
 // route group on purpose). This is the "اللينك الحي" itself: whoever holds
@@ -30,6 +32,11 @@ export default function DebtLinkPage({ params }: { params: Promise<{ token: stri
   const [msg, setMsg] = useState("");
   const [objectionReason, setObjectionReason] = useState("");
   const [showObjectionForm, setShowObjectionForm] = useState(false);
+  // Round 25 — الشاهد بيدخل بياناته بنفسه هنا (مش الدائن بالنيابة عنه)
+  const [wName, setWName] = useState("");
+  const [wPhone, setWPhone] = useState("");
+  const [wAddress, setWAddress] = useState("");
+  const [wPhoto, setWPhoto] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -38,6 +45,12 @@ export default function DebtLinkPage({ params }: { params: Promise<{ token: stri
       const d = await res.json();
       if (!res.ok) { setError(d.error || "الرابط غير صالح"); return; }
       setData(d);
+      if (d.myWitness) {
+        setWName(d.myWitness.name || "");
+        setWPhone(d.myWitness.phone || "");
+        setWAddress(d.myWitness.address || "");
+        setWPhoto(d.myWitness.id_photo_front || null);
+      }
     } catch {
       setError("مفيش اتصال بالإنترنت، حاول تاني");
     } finally {
@@ -47,10 +60,16 @@ export default function DebtLinkPage({ params }: { params: Promise<{ token: stri
   useEffect(() => { load(); }, [token]);
 
   const acknowledge = async () => {
+    if (!wName.trim()) { setMsg("اسمك لازم يتملى الأول"); return; }
+    if (wPhone && !isValidPhone(wPhone)) { setMsg("رقم موبايل غير صالح"); return; }
     setBusy(true);
     setMsg("");
     try {
-      const res = await fetch(`/api/debt-link/${token}/acknowledge`, { method: "POST" });
+      const res = await fetch(`/api/debt-link/${token}/acknowledge`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: wName, phone: wPhone || null, address: wAddress || null, id_photo_front: wPhoto || null }),
+      });
       const d = await res.json();
       if (!res.ok) { setMsg(d.error || "حصل خطأ"); return; }
       setMsg("✅ تم تسجيل شهادتك");
@@ -142,7 +161,7 @@ export default function DebtLinkPage({ params }: { params: Promise<{ token: stri
         <div className="space-y-1.5">
           {witnesses.map((w: any, i: number) => (
             <div key={i} className="flex items-center justify-between text-xs">
-              <span>{w.name}</span>
+              <span>{w.name?.trim() || `شاهد ${w.slot_index} — لسه محددش بياناته`}</span>
               {w.acknowledged ? (
                 <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1"><ShieldCheck size={12} /> أشهد</span>
               ) : (
@@ -159,11 +178,32 @@ export default function DebtLinkPage({ params }: { params: Promise<{ token: stri
             <p className="text-sm text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5"><CheckCircle2 size={16} /> اتسجلت شهادتك على الدين ده بالفعل</p>
           ) : (
             <>
-              <label className="flex items-start gap-2 text-xs cursor-pointer">
+              <p className="text-xs text-neutral-500 leading-relaxed">
+                <b>{creditorName}</b> و<b>{debtorName}</b> طالبين شهادتك على الدين ده. املا بياناتك تحت وأكّد شهادتك.
+              </p>
+              <div>
+                <label className="text-[10px] text-neutral-400">اسمك بالكامل</label>
+                <input value={wName} onChange={(e) => setWName(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="text-[10px] text-neutral-400">رقم موبايلك (اختياري)</label>
+                <input value={wPhone} onChange={(e) => setWPhone(e.target.value)} className={`w-full rounded-lg border bg-transparent px-3 py-2 text-sm ${wPhone && !isValidPhone(wPhone) ? "border-red-400 dark:border-red-700" : "border-neutral-300 dark:border-neutral-700"}`} />
+                {wPhone && !isValidPhone(wPhone) && <p className="text-[10px] text-red-500 mt-0.5">رقم موبايل غير صالح</p>}
+              </div>
+              <div>
+                <label className="text-[10px] text-neutral-400">عنوانك (اختياري)</label>
+                <input value={wAddress} onChange={(e) => setWAddress(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+              </div>
+              <label className="flex items-center gap-2 text-[11px] text-neutral-600 dark:text-neutral-300 border border-dashed border-neutral-300 dark:border-neutral-700 rounded-lg px-3 py-2 cursor-pointer">
+                <Camera size={14} />
+                {wPhoto ? "✅ صورة بطاقتك اتصورت — دوس لتغييرها" : "صورة بطاقتك (اختياري)"}
+                <input type="file" accept="image/*" capture="environment" className="hidden" onChange={async (e) => { const f = e.target.files?.[0]; if (f) setWPhoto(await shrinkImage(f)); }} />
+              </label>
+              <label className="flex items-start gap-2 text-xs cursor-pointer pt-1">
                 <input type="checkbox" checked={ackChecked} onChange={(e) => setAckChecked(e.target.checked)} className="mt-0.5" />
                 <span>قرأت بيانات الدين بالتفصيل واشهد على هذا الدين</span>
               </label>
-              <button disabled={!ackChecked || busy} onClick={acknowledge} className="w-full bg-orange-600 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50">
+              <button disabled={!ackChecked || !wName.trim() || busy} onClick={acknowledge} className="w-full bg-orange-600 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50">
                 {busy ? "جاري التسجيل..." : "تأكيد الشهادة"}
               </button>
             </>

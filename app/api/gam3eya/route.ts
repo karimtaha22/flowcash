@@ -103,7 +103,7 @@ export async function POST(req: NextRequest) {
   }
 
   // type === "organizing"
-  const participants: { name: string; phone?: string; account_number?: string; payment_method?: string; address?: string; id_photo_front?: string }[] = body.participants || [];
+  const participants: { name: string; phone?: string; account_number?: string; payment_method?: string; address?: string; id_photo_front?: string; payment_accounts?: any[] }[] = body.participants || [];
   if (!participants.length || participants.some((p) => !p.name)) {
     return NextResponse.json({ error: "لازم تضيف الأفراد كلهم بالاسم على الأقل" }, { status: 400 });
   }
@@ -138,6 +138,7 @@ export async function POST(req: NextRequest) {
     payment_method: p.payment_method || "bank",
     address: p.address || null,
     id_photo_front: p.id_photo_front || null,
+    payment_accounts: Array.isArray(p.payment_accounts) ? p.payment_accounts : [],
     payout_order: i + 1,
   }));
   const { data: insertedParticipants, error: partErr } = await supabaseAdmin.from("gam3eya_participants").insert(participantRows).select();

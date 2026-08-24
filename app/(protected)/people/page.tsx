@@ -12,24 +12,49 @@ import { downloadFile, shareFile } from "@/lib/shareFile";
 import { isValidPhone } from "@/lib/phone";
 import ReceiptActions from "@/components/ReceiptActions";
 
-// "نسخ/شارك رابط" — نفس فكرة shareFile بس للنص/الروابط مش للملفات: يفضّل
-// نافذة المشاركة الأصلية للجهاز (واتساب، تليجرام...) لو متاحة، وإلا بينسخ
-// الرابط للحافظة.
-async function shareOrCopyText(text: string, title = "FlowCash") {
-  const nav = navigator as Navigator & { share?: (data: any) => Promise<void> };
-  if (nav.share) {
-    try {
-      await nav.share({ title, text });
-      return "shared";
-    } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") return "cancelled";
+// Round 25 fix — "مفتاح نسخ الرابط مش بينسخ": the old combined
+// shareOrCopyText tried navigator.share first and only fell back to
+// clipboard.writeText if share was unavailable/aborted, and if BOTH of
+// those failed (e.g. a webview where navigator.clipboard is undefined or
+// blocked, which is common) it silently did nothing — no error, no
+// feedback, so a tap just looked broken. Split into two explicit, always-
+// truthful actions: copyText (guaranteed to either copy or say so, via a
+// three-tier fallback) and shareText (native share sheet only, never
+// silently substitutes for copy).
+async function copyText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
     }
+  } catch {
+    // fall through to the legacy fallback below
   }
   try {
-    await navigator.clipboard.writeText(text);
-    return "copied";
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    ta.style.top = "0";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
   } catch {
-    return "failed";
+    return false;
+  }
+}
+
+async function shareText(text: string, title = "FlowCash"): Promise<boolean> {
+  const nav = navigator as Navigator & { share?: (data: any) => Promise<void> };
+  if (!nav.share) return false;
+  try {
+    await nav.share({ title, text });
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -52,7 +77,7 @@ interface Debt {
   status: string;
   due_date: string | null;
   debt_date: string | null;
-  people: { name: string; phone: string | null };
+  people: { name: string; phone: string | null; address?: string | null; id_photo_front?: string | null };
   debt_payments: Payment[];
   value_type?: "currency" | "gold" | "silver" | "other";
   metal_karat?: number | null;
@@ -64,10 +89,11 @@ interface Debt {
   debt_witnesses?: Witness[];
   debt_links?: DebtLink[];
   debt_events?: DebtEvent[];
+  creditor_name?: string;
+  debtor_name?: string;
 }
 
 const WITNESS_MODE_LABEL: Record<string, string> = { two_men: "رجلين", man_two_women: "رجل وامرأتان" };
-const WITNESS_SLOTS: Record<string, number> = { two_men: 2, man_two_women: 3 };
 const EVENT_ICON: Record<string, string> = {
   created: "📜", payment_recorded: "💰", due_date_extended: "📅",
   witness_acknowledged: "✅", objection_raised: "⚠️", objection_resolved: "✅", link_revoked: "🚫",
@@ -98,12 +124,16 @@ function PeopleInner() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<Record<string, any>>({});
   const [confirmDelete, setConfirmDelete] = useState<Debt | null>(null);
+  const [deleteConfirmWord, setDeleteConfirmWord] = useState("");
   const [editError, setEditError] = useState("");
   const [payError, setPayError] = useState("");
   const [receiptDataUrl, setReceiptDataUrl] = useState<string | null>(null);
   const [showAyah, setShowAyah] = useState(false);
   const [exportFor, setExportFor] = useState<Debt | null>(null);
   const [exportIncludeAyah, setExportIncludeAyah] = useState(true);
+  const [exportIncludePhones, setExportIncludePhones] = useState(false);
+  const [exportIncludeAddresses, setExportIncludeAddresses] = useState(false);
+  const [exportIncludePhotos, setExportIncludePhotos] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [showAdvancedForm, setShowAdvancedForm] = useState(false);
   const [justCreatedLinks, setJustCreatedLinks] = useState<DebtLink[] | null>(null);
@@ -112,7 +142,6 @@ function PeopleInner() {
   const [exportError, setExportError] = useState("");
   const [copyMsg, setCopyMsg] = useState("");
 
-  const emptyWitness = () => ({ name: "", phone: "", address: "", id_photo_front: null as string | null, matchResult: null as any, matching: false });
   const [advForm, setAdvForm] = useState({
     person_id: "",
     new_person: "",
@@ -131,7 +160,6 @@ function PeopleInner() {
     due_date: "",
     witness_mode: "two_men" as "two_men" | "man_two_women",
   });
-  const [advWitnesses, setAdvWitnesses] = useState([emptyWitness(), emptyWitness()]);
   const [advWarning, setAdvWarning] = useState("");
   const [advSaving, setAdvSaving] = useState(false);
   const [extracting, setExtracting] = useState(false);
@@ -266,6 +294,7 @@ function PeopleInner() {
   const remove = async (d: Debt) => {
     const res = await fetch(`/api/debts/${d.id}`, { method: "DELETE" });
     setConfirmDelete(null);
+    setDeleteConfirmWord("");
     if (!res.ok) { setEditError("حصل خطأ ومتحذفش الدين، حاول تاني"); return; }
     setExpandedId(null);
     load();
@@ -297,21 +326,14 @@ function PeopleInner() {
   };
 
   const copyLink = async (l: { url: string }, label: string) => {
-    const r = await shareOrCopyText(`${label}\n${l.url}`);
-    if (r === "copied") {
-      setCopyMsg("تم نسخ الرابط");
-      setTimeout(() => setCopyMsg(""), 2500);
-    }
+    const ok = await copyText(`${label}\n${l.url}`);
+    setCopyMsg(ok ? "✅ تم نسخ الرابط" : `تعذّر النسخ التلقائي — الرابط: ${l.url}`);
+    setTimeout(() => setCopyMsg(""), ok ? 2500 : 8000);
   };
 
-  const setWitnessMode = (mode: "two_men" | "man_two_women") => {
-    const n = WITNESS_SLOTS[mode];
-    setAdvWitnesses((prev) => {
-      const next = [...prev];
-      while (next.length < n) next.push(emptyWitness());
-      return next.slice(0, n);
-    });
-    setAdvForm((f) => ({ ...f, witness_mode: mode }));
+  const shareLink = async (l: { url: string }, label: string) => {
+    const ok = await shareText(`${label}\n${l.url}`);
+    if (!ok) await copyLink(l, label);
   };
 
   const onAdvIdPhotoPicked = async (file: File) => {
@@ -351,35 +373,12 @@ function PeopleInner() {
     setExtractSuggestion(null);
   };
 
-  const onWitnessPhotoPicked = async (i: number, file: File) => {
-    const dataUrl = await shrinkImage(file);
-    setAdvWitnesses((prev) => prev.map((w, idx) => (idx === i ? { ...w, id_photo_front: dataUrl, matchResult: null } : w)));
-  };
-
-  const checkWitnessMatch = async (i: number) => {
-    const w = advWitnesses[i];
-    if (!w.id_photo_front || !w.name.trim()) return;
-    setAdvWitnesses((prev) => prev.map((x, idx) => (idx === i ? { ...x, matching: true } : x)));
-    try {
-      const res = await fetch("/api/debts/extract-id", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "match_name", id_photo_front: w.id_photo_front, claimed_name: w.name }),
-      });
-      const data = await res.json().catch(() => ({}));
-      setAdvWitnesses((prev) => prev.map((x, idx) => (idx === i ? { ...x, matchResult: data.result || { error: data.error || "حصل خطأ" } } : x)));
-    } finally {
-      setAdvWitnesses((prev) => prev.map((x, idx) => (idx === i ? { ...x, matching: false } : x)));
-    }
-  };
-
   const resetAdvForm = () => {
     setAdvForm({
       person_id: "", new_person: "", phone: "", address: "", id_number: "", id_photo_front: null,
       title: "", reason: "", amount: "", value_type: "currency", metal_karat: "", unit_label: "",
       currency: "EGP", debt_date: todayISO(), due_date: "", witness_mode: "two_men",
     });
-    setAdvWitnesses([emptyWitness(), emptyWitness()]);
     setExtractSuggestion(null);
   };
 
@@ -389,10 +388,6 @@ function PeopleInner() {
     if (!advForm.amount || parseFloat(advForm.amount) <= 0) { setAdvWarning("المبلغ لازم يتملى برقم أكبر من صفر"); return; }
     if (advForm.value_type === "gold" && !advForm.metal_karat) { setAdvWarning("لازم تحدد عيار الدهب"); return; }
     if (advForm.phone && !isValidPhone(advForm.phone)) { setAdvWarning("رقم موبايل الطرف التاني غير صالح"); return; }
-    const n = WITNESS_SLOTS[advForm.witness_mode];
-    const activeWitnesses = advWitnesses.slice(0, n);
-    if (activeWitnesses.some((w) => !w.name.trim())) { setAdvWarning(`لازم اسم كل الشهود (${n})`); return; }
-    if (activeWitnesses.some((w) => w.phone && !isValidPhone(w.phone))) { setAdvWarning("رقم موبايل غير صالح — راجع أرقام الشهود"); return; }
     setAdvWarning("");
     setAdvSaving(true);
     try {
@@ -419,9 +414,10 @@ function PeopleInner() {
           debt_date: advForm.debt_date || undefined,
           due_date: advForm.due_date || null,
           witness_mode: advForm.witness_mode,
-          witnesses: activeWitnesses.map((w) => ({
-            name: w.name, phone: w.phone || undefined, address: w.address || undefined, id_photo_front: w.id_photo_front || undefined,
-          })),
+          // no witness data sent — each witness fills their own name/phone/
+          // address/photo when they open their own link (see
+          // /app/debt/[token]/page.tsx); the API pads empty-slot witness
+          // rows itself based on witness_mode's count.
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -473,7 +469,12 @@ function PeopleInner() {
         <h2 style="font-size:16px;margin:0 0 4px;">${dirLabel}</h2>
         <p style="font-size:13px;color:#6b7280;margin:0 0 12px;">${d.title}${d.reason ? " — " + d.reason : ""}</p>
         <div style="border-top:1px solid #e5e7eb;padding-top:10px;font-size:12px;line-height:2;">
-          <div style="display:flex;justify-content:space-between;"><span>الشخص</span><b>${d.people?.name || ""}</b></div>
+          ${
+            d.is_advanced
+              ? `<div style="display:flex;justify-content:space-between;"><span>الدائن</span><b>${d.creditor_name || (d.direction === "owed_to_me" ? "أنا" : d.people?.name || "")}</b></div>
+                 <div style="display:flex;justify-content:space-between;"><span>المدين</span><b>${d.debtor_name || (d.direction === "owed_to_me" ? d.people?.name || "" : "أنا")}</b></div>`
+              : `<div style="display:flex;justify-content:space-between;"><span>الشخص</span><b>${d.people?.name || ""}</b></div>`
+          }
           <div style="display:flex;justify-content:space-between;"><span>تاريخ الدين</span><b>${d.debt_date ? new Date(d.debt_date).toLocaleDateString("ar-EG") : "-"}</b></div>
           <div style="display:flex;justify-content:space-between;"><span>تاريخ الأجل</span><b>${d.due_date ? new Date(d.due_date).toLocaleDateString("ar-EG") : "غير محدد"}</b></div>
           <div style="display:flex;justify-content:space-between;"><span>المبلغ الأصلي</span><b>${fmt(Number(d.original_amount), d.currency)}</b></div>
@@ -497,6 +498,25 @@ function PeopleInner() {
             : ""
         }
         ${
+          d.is_advanced && (exportIncludePhones || exportIncludeAddresses)
+            ? `<div style="border-top:1px solid #e5e7eb;margin-top:10px;padding-top:10px;">
+                 <p style="font-size:12px;font-weight:700;margin:0 0 6px;">بيانات ${d.direction === "owed_to_me" ? "المدين" : "الدائن"}</p>
+                 <div style="font-size:11px;color:#6b7280;line-height:1.8;">
+                   ${exportIncludePhones && d.people?.phone ? `<div>📱 ${d.people.phone}</div>` : ""}
+                   ${exportIncludeAddresses && d.people?.address ? `<div>📍 ${d.people.address}</div>` : ""}
+                 </div>
+               </div>`
+            : ""
+        }
+        ${
+          d.is_advanced && exportIncludePhotos && d.people?.id_photo_front
+            ? `<div style="border-top:1px solid #e5e7eb;margin-top:10px;padding-top:10px;">
+                 <p style="font-size:12px;font-weight:700;margin:0 0 6px;">صورة بطاقة ${d.direction === "owed_to_me" ? "المدين" : "الدائن"}</p>
+                 <img src="${d.people.id_photo_front}" style="width:100%;max-height:160px;object-fit:cover;border-radius:8px;" />
+               </div>`
+            : ""
+        }
+        ${
           d.is_advanced && d.debt_witnesses?.length
             ? `<div style="border-top:1px solid #e5e7eb;margin-top:10px;padding-top:10px;">
                  <p style="font-size:12px;font-weight:700;margin:0 0 6px;">الشهود (${WITNESS_MODE_LABEL[d.witness_mode || ""] || ""})</p>
@@ -504,7 +524,13 @@ function PeopleInner() {
                    .map((w) => {
                      const link = d.debt_links?.find((l) => l.witness_id === w.id);
                      const status = link?.acknowledged_at ? "أشهد ✅" : "لسه ماأشهدش";
-                     return `<div style="display:flex;justify-content:space-between;font-size:11px;color:#6b7280;padding:2px 0;"><span>${w.name}</span><b>${status}</b></div>`;
+                     const name = w.name?.trim() || `شاهد ${w.slot_index}`;
+                     const contact = [exportIncludePhones && w.phone ? `📱 ${w.phone}` : "", exportIncludeAddresses && w.address ? `📍 ${w.address}` : ""].filter(Boolean).join(" · ");
+                     return `
+                       <div style="display:flex;justify-content:space-between;font-size:11px;color:#6b7280;padding:2px 0;"><span>${name}</span><b>${status}</b></div>
+                       ${contact ? `<div style="font-size:10px;color:#9ca3af;padding:0 0 4px;">${contact}</div>` : ""}
+                       ${exportIncludePhotos && w.id_photo_front ? `<img src="${w.id_photo_front}" style="width:100%;max-height:140px;object-fit:cover;border-radius:8px;margin-bottom:6px;" />` : ""}
+                     `;
                    })
                    .join("")}
                </div>`
@@ -767,37 +793,17 @@ function PeopleInner() {
             </div>
           </div>
 
-          <div className="space-y-3 border-t border-neutral-200 dark:border-neutral-800 pt-2">
+          <div className="space-y-2 border-t border-neutral-200 dark:border-neutral-800 pt-2">
             <div className="flex items-center justify-between">
               <p className="text-xs font-semibold text-neutral-500">الشهود</p>
-              <select value={advForm.witness_mode} onChange={(e) => setWitnessMode(e.target.value as any)} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1 text-xs">
+              <select value={advForm.witness_mode} onChange={(e) => setAdvForm({ ...advForm, witness_mode: e.target.value as any })} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1 text-xs">
                 <option value="two_men">رجلين</option>
                 <option value="man_two_women">رجل وامرأتان</option>
               </select>
             </div>
-            {advWitnesses.slice(0, WITNESS_SLOTS[advForm.witness_mode]).map((w, i) => (
-              <div key={i} className="space-y-1.5 bg-neutral-50 dark:bg-neutral-800/50 rounded-lg p-2">
-                <p className="text-[10px] text-neutral-400">شاهد {i + 1}</p>
-                <input placeholder="اسم الشاهد" value={w.name} onChange={(e) => setAdvWitnesses((prev) => prev.map((x, idx) => (idx === i ? { ...x, name: e.target.value } : x)))} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
-                <input placeholder="رقم موبايل الشاهد (اختياري)" value={w.phone} onChange={(e) => setAdvWitnesses((prev) => prev.map((x, idx) => (idx === i ? { ...x, phone: e.target.value } : x)))} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
-                <input placeholder="عنوان الشاهد (اختياري)" value={w.address} onChange={(e) => setAdvWitnesses((prev) => prev.map((x, idx) => (idx === i ? { ...x, address: e.target.value } : x)))} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
-                <label className="flex items-center gap-2 text-[11px] text-neutral-600 dark:text-neutral-300 border border-dashed border-neutral-300 dark:border-neutral-700 rounded-lg px-3 py-1.5 cursor-pointer">
-                  <Camera size={12} />
-                  {w.id_photo_front ? "✅ صورة بطاقة الشاهد اتصورت" : "صورة بطاقة الشاهد (اختياري)"}
-                  <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onWitnessPhotoPicked(i, f); }} />
-                </label>
-                {w.id_photo_front && w.name.trim() && (
-                  <button type="button" disabled={w.matching} onClick={() => checkWitnessMatch(i)} className="w-full text-[11px] border border-orange-300 dark:border-orange-800 text-orange-600 dark:text-orange-400 rounded-lg py-1.5 disabled:opacity-60">
-                    {w.matching ? "جاري التحقق..." : "تحقق إن الاسم مطابق للبطاقة"}
-                  </button>
-                )}
-                {w.matchResult && (
-                  <p className={`text-[11px] ${w.matchResult.name_matches ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`}>
-                    {w.matchResult.error ? w.matchResult.error : w.matchResult.name_matches ? "✅ الاسم مطابق للبطاقة" : "⚠️ الاسم مش متطابق أو مش واضح"}
-                  </p>
-                )}
-              </div>
-            ))}
+            <p className="text-[11px] text-neutral-400 leading-relaxed">
+              مش هتكتب بيانات الشهود بنفسك — بعد الحفظ هيتولّدلك رابط منفصل لكل شاهد، وانت بس تبعته له (واتساب مثلاً). لما هو يفتح الرابط، هيشوف "الدائن والمدين طالبين شهادتك على الدين" ويملا اسمه وبياناته بنفسه ويشهد.
+            </p>
           </div>
 
           {advWarning && <p className="text-xs text-red-500">{advWarning}</p>}
@@ -820,7 +826,10 @@ function PeopleInner() {
             {justCreatedLinks.map((l) => (
               <div key={l.id} className="flex items-center justify-between bg-white dark:bg-neutral-900 rounded-lg px-3 py-2 text-xs">
                 <span>{LINK_ROLE_LABEL[l.role] || l.role}</span>
-                <button onClick={() => copyLink(l, LINK_ROLE_LABEL[l.role] || l.role)} className="flex items-center gap-1 text-orange-600 dark:text-orange-400"><Copy size={12} /> نسخ/مشاركة</button>
+                <span className="flex items-center gap-2 shrink-0">
+                  <button onClick={() => copyLink(l, LINK_ROLE_LABEL[l.role] || l.role)} className="flex items-center gap-1 text-orange-600 dark:text-orange-400"><Copy size={12} /> نسخ</button>
+                  <button onClick={() => shareLink(l, LINK_ROLE_LABEL[l.role] || l.role)} className="flex items-center gap-1 text-orange-600 dark:text-orange-400"><Share2 size={12} /> مشاركة</button>
+                </span>
               </div>
             ))}
           </div>
@@ -832,8 +841,13 @@ function PeopleInner() {
           const isOpen = expandedId === d.id;
           const paid = Number(d.original_amount) - Number(d.remaining_amount);
           return (
-            <Card key={d.id} className="!p-0 overflow-hidden">
+            <Card key={d.id} className={`!p-0 overflow-hidden ${d.is_advanced ? "ring-1 ring-violet-300 dark:ring-violet-800" : ""}`}>
               <button className="w-full text-right p-4" onClick={() => toggleExpand(d)}>
+                {d.is_advanced && (
+                  <div className="flex items-center gap-1 text-[10px] font-semibold text-violet-600 dark:text-violet-400 mb-1.5">
+                    <ShieldCheck size={12} /> تسجيل متقدم — شهود ورابط حي · تفاصيله (عرض وتصدير)
+                  </div>
+                )}
                 <div className="flex items-start justify-between">
                   <div>
                     <p className="font-medium text-sm">{d.people?.name} — {d.title}</p>
@@ -914,7 +928,7 @@ function PeopleInner() {
                     </button>
                   </div>
                   <button
-                    onClick={() => { setExportFor(d); setExportIncludeAyah(true); setExportError(""); }}
+                    onClick={() => { setExportFor(d); setExportIncludeAyah(true); setExportIncludePhones(false); setExportIncludeAddresses(false); setExportIncludePhotos(false); setExportError(""); }}
                     className="w-full flex items-center justify-center gap-1.5 text-xs border border-neutral-300 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 rounded-lg py-2"
                   >
                     <FileDown size={13} /> تصدير تفاصيل الدين (صورة / PDF)
@@ -952,6 +966,7 @@ function PeopleInner() {
                               {!l.revoked_at && (
                                 <span className="flex items-center gap-2">
                                   <button onClick={() => copyLink(l, LINK_ROLE_LABEL[l.role])} className="text-orange-600 dark:text-orange-400"><Copy size={12} /></button>
+                                  <button onClick={() => shareLink(l, LINK_ROLE_LABEL[l.role])} className="text-orange-600 dark:text-orange-400"><Share2 size={12} /></button>
                                   <button disabled={revokingLinkId === l.id} onClick={() => revokeLink(d.id, l.id)} className="text-red-500 disabled:opacity-60"><X size={12} /></button>
                                 </span>
                               )}
@@ -967,7 +982,7 @@ function PeopleInner() {
                             const link = d.debt_links?.find((l) => l.witness_id === w.id);
                             return (
                               <div key={w.id} className="flex items-center justify-between bg-white dark:bg-neutral-900 rounded-lg px-2.5 py-1.5 text-[11px]">
-                                <span>{w.name}</span>
+                                <span>{w.name?.trim() || `شاهد ${w.slot_index} — لسه ما دخلش بياناته`}</span>
                                 <span className="flex items-center gap-2">
                                   {link?.revoked_at ? (
                                     <span className="text-neutral-400">ملغي</span>
@@ -978,7 +993,8 @@ function PeopleInner() {
                                   )}
                                   {link && !link.revoked_at && (
                                     <>
-                                      <button onClick={() => copyLink(link, `دعوة شهادة على دين — ${w.name}`)} className="text-orange-600 dark:text-orange-400"><Copy size={12} /></button>
+                                      <button onClick={() => copyLink(link, `دعوة شهادة على دين${w.name?.trim() ? ` — ${w.name}` : ""}`)} className="text-orange-600 dark:text-orange-400"><Copy size={12} /></button>
+                                      <button onClick={() => shareLink(link, `دعوة شهادة على دين${w.name?.trim() ? ` — ${w.name}` : ""}`)} className="text-orange-600 dark:text-orange-400"><Share2 size={12} /></button>
                                       <button disabled={revokingLinkId === link.id} onClick={() => revokeLink(d.id, link.id)} className="text-red-500 disabled:opacity-60"><X size={12} /></button>
                                     </>
                                   )}
@@ -1035,13 +1051,31 @@ function PeopleInner() {
       )}
 
       {confirmDelete && (
-        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50" onClick={() => setConfirmDelete(null)}>
+        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50" onClick={() => { setConfirmDelete(null); setDeleteConfirmWord(""); }}>
           <div className="bg-white dark:bg-neutral-900 rounded-t-2xl sm:rounded-2xl w-full max-w-sm p-4 space-y-3" onClick={(e) => e.stopPropagation()}>
             <p className="font-semibold text-sm">تأكيد الحذف</p>
-            <p className="text-xs text-neutral-500">هتحذف دين "{confirmDelete.title}" مع كل تفاصيل السداد الخاصة بيه. الإجراء ده مش قابل للتراجع.</p>
+            <p className="text-xs text-neutral-500">
+              هتحذف دين "{confirmDelete.title}" مع كل تفاصيل السداد الخاصة بيه. الإجراء ده مش قابل للتراجع.
+              {confirmDelete.is_advanced && " هيوصل إشعار لكل الأطراف (الطرف التاني والشهود اللي عندهم حساب FlowCash) إن الدين اتلغى."}
+            </p>
+            <div>
+              <label className="text-[10px] text-neutral-400">اكتب كلمة idea في المربع علشان يتم الحذف</label>
+              <input
+                value={deleteConfirmWord}
+                onChange={(e) => setDeleteConfirmWord(e.target.value)}
+                placeholder="idea"
+                className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm"
+              />
+            </div>
             <div className="flex gap-2">
-              <button onClick={() => setConfirmDelete(null)} className="flex-1 rounded-lg border border-neutral-300 dark:border-neutral-700 py-2 text-sm">إلغاء</button>
-              <button onClick={() => remove(confirmDelete)} className="flex-1 bg-red-600 text-white rounded-lg py-2 text-sm font-medium">حذف نهائي</button>
+              <button onClick={() => { setConfirmDelete(null); setDeleteConfirmWord(""); }} className="flex-1 rounded-lg border border-neutral-300 dark:border-neutral-700 py-2 text-sm">إلغاء</button>
+              <button
+                disabled={deleteConfirmWord.trim().toLowerCase() !== "idea"}
+                onClick={() => remove(confirmDelete)}
+                className="flex-1 bg-red-600 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-40"
+              >
+                حذف نهائي
+              </button>
             </div>
           </div>
         </div>
@@ -1055,6 +1089,23 @@ function PeopleInner() {
               <input type="checkbox" checked={exportIncludeAyah} onChange={(e) => setExportIncludeAyah(e.target.checked)} />
               إرفاق آية الدَّين في أول الصفحة
             </label>
+            {exportFor.is_advanced && (
+              <div className="space-y-1.5 border-t border-neutral-100 dark:border-neutral-800 pt-2">
+                <p className="text-[10px] text-neutral-400">بيانات إضافية (الطرف التاني + الشهود) — كل واحدة بسويتش منفصل</p>
+                <label className="flex items-center gap-2 text-xs text-neutral-600 dark:text-neutral-300">
+                  <input type="checkbox" checked={exportIncludePhones} onChange={(e) => setExportIncludePhones(e.target.checked)} />
+                  إرفاق أرقام الهواتف
+                </label>
+                <label className="flex items-center gap-2 text-xs text-neutral-600 dark:text-neutral-300">
+                  <input type="checkbox" checked={exportIncludeAddresses} onChange={(e) => setExportIncludeAddresses(e.target.checked)} />
+                  إرفاق العناوين
+                </label>
+                <label className="flex items-center gap-2 text-xs text-neutral-600 dark:text-neutral-300">
+                  <input type="checkbox" checked={exportIncludePhotos} onChange={(e) => setExportIncludePhotos(e.target.checked)} />
+                  إرفاق صور البطاقات
+                </label>
+              </div>
+            )}
             <div className="flex gap-2">
               <button disabled={exporting} onClick={() => generateDebtExport("image")} className="flex-1 flex items-center justify-center gap-1.5 text-sm bg-neutral-800 dark:bg-neutral-700 text-white rounded-lg py-2 disabled:opacity-60">
                 <ImageIcon size={14} /> صورة

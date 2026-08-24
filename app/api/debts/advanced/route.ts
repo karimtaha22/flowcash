@@ -37,10 +37,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "لازم تختار نوع الشهود (رجلين، أو رجل وامرأتان)" }, { status: 400 });
   }
   const requiredWitnesses = WITNESS_SLOTS[witness_mode];
-  const witnessList: { name: string; phone?: string; address?: string; id_photo_front?: string }[] = witnesses || [];
-  if (witnessList.length !== requiredWitnesses || witnessList.some((w) => !w.name?.trim())) {
-    return NextResponse.json({ error: `لازم بيانات ${requiredWitnesses} شهود بالاسم على الأقل` }, { status: 400 });
-  }
+  // Round 25 — الشاهد هو اللي بيدخل بياناته بنفسه لما يفتح رابطه (مش الدائن
+  // اللي بيكتبها بالنيابة عنه)، فمفيش أي بيانات مطلوبة من الشاهد هنا وقت
+  // إنشاء الدين — بس عدد الشهود (مشتق من witness_mode). لو الدائن حابب
+  // يسجّل اسم/رقم شاهد يعرفه مقدمًا، ده اختياري ومسموح، بس مش شرط.
+  const providedWitnesses: { name?: string; phone?: string; address?: string; id_photo_front?: string }[] = witnesses || [];
+  const witnessList = Array.from({ length: requiredWitnesses }, (_, i) => providedWitnesses[i] || {});
   if (witnessList.some((w) => w.phone && !isValidPhone(w.phone))) {
     return NextResponse.json({ error: "رقم موبايل غير صالح — راجع أرقام الشهود" }, { status: 400 });
   }
@@ -102,7 +104,7 @@ export async function POST(req: NextRequest) {
   const witnessRows = witnessList.map((w, i) => ({
     debt_id: debt.id,
     slot_index: i + 1,
-    name: w.name.trim(),
+    name: (w.name || "").trim(), // usually empty — the witness fills this in themselves via their link (see /debt/[token]/route.ts's acknowledge endpoint)
     phone: w.phone || null,
     address: w.address || null,
     id_photo_front: w.id_photo_front || null,

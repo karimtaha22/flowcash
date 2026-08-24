@@ -34,6 +34,16 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ tok
   ]);
   const { data: witnesses } = await supabaseAdmin.from("debt_witnesses").select("id,name,slot_index").eq("debt_id", debt.id).order("slot_index");
 
+  // Round 25 — when the viewer IS a witness, hand back their own current
+  // self-entered fields (name/phone/address/photo may be empty if they
+  // haven't filled them in yet) so the public page can pre-fill/edit its
+  // own "بياناتك" form instead of starting blank every visit.
+  let myWitness: { name: string; phone: string | null; address: string | null; id_photo_front: string | null } | null = null;
+  if (link.role === "witness" && link.witness_id) {
+    const { data: mw } = await supabaseAdmin.from("debt_witnesses").select("name,phone,address,id_photo_front").eq("id", link.witness_id).single();
+    if (mw) myWitness = mw;
+  }
+
   const ackByWitness = new Map((allWitnessLinks || []).map((l: any) => [l.witness_id, !!l.acknowledged_at]));
 
   const creditorName = debt.direction === "owed_to_me" ? debt.app_users?.name || "الدائن" : debt.people?.name || "الدائن";
@@ -60,6 +70,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ tok
     },
     creditorName,
     debtorName,
+    myWitness,
     witnesses: (witnesses || []).map((w: any) => ({ name: w.name, slot_index: w.slot_index, acknowledged: !!ackByWitness.get(w.id) })),
     events: events || [],
   });

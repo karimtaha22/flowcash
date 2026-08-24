@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { getSessionUserId } from "@/lib/session";
-import { logDebtEvent } from "@/lib/debtLinks";
+import { logDebtEvent, notifyIfLinkedAccount } from "@/lib/debtLinks";
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const userId = await getSessionUserId();
@@ -54,8 +54,28 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   const userId = await getSessionUserId();
   if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
-  const { data: debt } = await supabaseAdmin.from("debts").select("id").eq("id", id).eq("user_id", userId).single();
+  const { data: debt } = await supabaseAdmin
+    .from("debts")
+    .select("id,title,is_advanced,person_id,people(phone)")
+    .eq("id", id)
+    .eq("user_id", userId)
+    .single();
   if (!debt) return NextResponse.json({ error: "not found" }, { status: 404 });
+
+  // Round 25 — "يروح لكل الأطراف إن الدائن مسح الدين": best-effort notify
+  // everyone this advanced debt was shared with, BEFORE the cascade-delete
+  // removes debt_witnesses. Only reaches parties who already have a linked
+  // FlowCash/Telegram account (same phone-match mechanism as everywhere
+  // else in this feature) — there's no channel to reach someone who never
+  // opened the app at all.
+  if (debt.is_advanced) {
+    const otherPartyPhone = (debt as any).people?.phone;
+    const { data: witnesses } = await supabaseAdmin.from("debt_witnesses").select("phone").eq("debt_id", id);
+    const msg = `🗑️ تم إلغاء وحذف الدين "${debt.title}" من صاحبه`;
+    await notifyIfLinkedAccount(otherPartyPhone, msg);
+    for (const w of witnesses || []) await notifyIfLinkedAccount(w.phone, msg);
+  }
+
   await supabaseAdmin.from("debt_payments").delete().eq("debt_id", id);
   await supabaseAdmin.from("transactions").update({ debt_id: null }).eq("debt_id", id);
   const { error } = await supabaseAdmin.from("debts").delete().eq("id", id).eq("user_id", userId);

@@ -7,10 +7,24 @@ import { shrinkImage } from "@/lib/image";
 import { shareFile } from "@/lib/shareFile";
 import { isValidPhone } from "@/lib/phone";
 import InstallmentCalculatorModal from "@/components/InstallmentCalculator";
+import { PaymentAccountsEditor, ACCOUNT_TYPE_LABELS, emptyAccount, type PaymentAccount } from "@/components/PeopleManager";
 import {
   Plus, Trash2, Pencil, CreditCard, Users, CheckCircle2, Camera, ShieldCheck, ShieldAlert,
   Star, ArrowLeftRight, Calculator, ChevronDown, ChevronUp, X, Scale, FileDown, Image as ImageIcon, BadgeCheck,
 } from "lucide-react";
+
+// Round 25 — "اضافة اكتر من حساب بنكي او محفظه": the old single
+// account_number/payment_method fields stay on the row (still shown/used
+// wherever they already were) but a participant can now ALSO carry a list of
+// accounts via the same PaymentAccountsEditor people already use in Settings
+// ← الأشخاص. `legacyToAccounts` folds an old single account into that list
+// (for participants created before this round) so nothing already entered is
+// lost or hidden once the multi-account editor takes over as the primary UI.
+const LEGACY_METHOD_TO_TYPE: Record<string, PaymentAccount["type"]> = { bank: "bank", insta: "instapay", wallet: "wallet" };
+function legacyToAccounts(accountNumber: string | null, method: string | null): PaymentAccount[] {
+  if (!accountNumber || !accountNumber.trim()) return [];
+  return [{ type: LEGACY_METHOD_TO_TYPE[method || "bank"] || "bank", label: "", account_number: accountNumber }];
+}
 
 // ===================== types =====================
 interface InstallmentPayment {
@@ -24,6 +38,7 @@ interface InstallmentPlan {
 }
 interface Gam3eyaParticipant {
   id: string; name: string; phone: string | null; account_number: string | null; payment_method: "bank" | "insta" | "wallet" | null; address: string | null;
+  payment_accounts?: PaymentAccount[];
   id_photo_front: string | null; id_photo_back: string | null; selfie_photo: string | null;
   verified: boolean; verification_note: string | null; payout_order: number; rating: number | null;
   // مش عمود في الجدول — محسوبة في الـ API (GET /api/gam3eya) بمطابقة رقم
@@ -657,7 +672,8 @@ function StarPicker({ value, onChange, readOnly = false }: { value: number | nul
 }
 
 // ===================== جمعيات =====================
-type NewParticipant = { name: string; phone: string; account_number: string; payment_method: "bank" | "insta" | "wallet"; address: string; id_photo_front: string };
+type NewParticipant = { name: string; phone: string; account_number: string; payment_method: "bank" | "insta" | "wallet"; address: string; id_photo_front: string; payment_accounts: PaymentAccount[] };
+const emptyNewParticipant = (): NewParticipant => ({ name: "", phone: "", account_number: "", payment_method: "bank", address: "", id_photo_front: "", payment_accounts: [] });
 
 function Gam3eyaTab({
   gam3eyat, reload, showMsg,
@@ -666,20 +682,19 @@ function Gam3eyaTab({
 }) {
   const [showForm, setShowForm] = useState(false);
   const [formType, setFormType] = useState<"subscribed" | "organizing">("subscribed");
+  // Round 25 — 3 تبويبات حقيقية بدل "جمعية جديدة" واحدة بتتحول جوّاها + زرار
+  // محاكاة منفصل: "مشترك في جمعية" / "أبدأ جمعية" / "محاكاة".
+  const [subTab, setSubTab] = useState<"subscribed" | "organizing" | "simulate">("subscribed");
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Gam3eya | null>(null);
-  const [showSimulator, setShowSimulator] = useState(false);
   const [verifyPanel, setVerifyPanel] = useState<{ gam3eyaId: string; participantId: string } | null>(null);
   const [swapMode, setSwapMode] = useState<string | null>(null); // gam3eya id currently in swap-picker mode
   const [swapFirst, setSwapFirst] = useState<string | null>(null); // first participant picked for swap
 
   const [subForm, setSubForm] = useState({ name: "", monthly_amount: "", currency: "EGP", months_count: "", my_payout_month: "", start_date: todayISO() });
   const [orgForm, setOrgForm] = useState({ name: "", monthly_amount: "", currency: "EGP", start_date: todayISO() });
-  const [orgParticipants, setOrgParticipants] = useState<NewParticipant[]>([
-    { name: "", phone: "", account_number: "", payment_method: "bank", address: "", id_photo_front: "" },
-    { name: "", phone: "", account_number: "", payment_method: "bank", address: "", id_photo_front: "" },
-  ]);
+  const [orgParticipants, setOrgParticipants] = useState<NewParticipant[]>([emptyNewParticipant(), emptyNewParticipant()]);
 
   const active = gam3eyat.filter((g) => g.status === "active");
 
@@ -731,10 +746,7 @@ function Gam3eyaTab({
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { showMsg(data.error || "حصل خطأ ومتحفظش", true); return; }
       setOrgForm({ name: "", monthly_amount: "", currency: "EGP", start_date: todayISO() });
-      setOrgParticipants([
-        { name: "", phone: "", account_number: "", payment_method: "bank", address: "", id_photo_front: "" },
-        { name: "", phone: "", account_number: "", payment_method: "bank", address: "", id_photo_front: "" },
-      ]);
+      setOrgParticipants([emptyNewParticipant(), emptyNewParticipant()]);
       setShowForm(false);
       reload();
     } finally {
@@ -807,19 +819,48 @@ function Gam3eyaTab({
     }
   };
 
+  const subscribedList = gam3eyat.filter((g) => g.type === "subscribed");
+  const organizingList = gam3eyat.filter((g) => g.type === "organizing");
+  const visibleList = subTab === "subscribed" ? subscribedList : subTab === "organizing" ? organizingList : [];
+
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-sm font-semibold text-neutral-600 dark:text-neutral-300">{active.length} جمعية شغالة</p>
-        <div className="flex gap-2">
-          <button onClick={() => setShowSimulator(true)} className="flex items-center gap-1 text-xs border border-orange-300 dark:border-orange-800 text-orange-600 dark:text-orange-400 rounded-full px-3 py-1.5">
-            <Calculator size={14} /> محاكاة
-          </button>
-          <button onClick={() => setShowForm((s) => !s)} className="flex items-center gap-1 text-xs bg-orange-600 text-white rounded-full px-3 py-1.5">
-            <Plus size={14} /> جمعية جديدة
+      <p className="text-sm font-semibold text-neutral-600 dark:text-neutral-300">{active.length} جمعية شغالة</p>
+
+      <div className="grid grid-cols-3 gap-2 bg-neutral-100 dark:bg-neutral-800 rounded-xl p-1">
+        <button
+          onClick={() => { setSubTab("subscribed"); setShowForm(false); }}
+          className={`py-2 rounded-lg text-xs font-medium ${subTab === "subscribed" ? "bg-white dark:bg-neutral-900 shadow text-orange-600" : "text-neutral-500"}`}
+        >
+          مشترك في جمعية
+        </button>
+        <button
+          onClick={() => { setSubTab("organizing"); setShowForm(false); }}
+          className={`py-2 rounded-lg text-xs font-medium ${subTab === "organizing" ? "bg-white dark:bg-neutral-900 shadow text-orange-600" : "text-neutral-500"}`}
+        >
+          أبدأ جمعية
+        </button>
+        <button
+          onClick={() => { setSubTab("simulate"); setShowForm(false); }}
+          className={`flex items-center justify-center gap-1 py-2 rounded-lg text-xs font-medium ${subTab === "simulate" ? "bg-white dark:bg-neutral-900 shadow text-orange-600" : "text-neutral-500"}`}
+        >
+          <Calculator size={13} /> محاكاة
+        </button>
+      </div>
+
+      {subTab !== "simulate" && (
+        <div className="flex justify-end">
+          <button onClick={() => { setFormType(subTab); setShowForm((s) => !s); }} className="flex items-center gap-1 text-xs bg-orange-600 text-white rounded-full px-3 py-1.5">
+            <Plus size={14} /> {subTab === "subscribed" ? "اشترك في جمعية جديدة" : "ابدأ جمعية جديدة"}
           </button>
         </div>
-      </div>
+      )}
+
+      {subTab === "simulate" && (
+        <Card className="space-y-3">
+          <SimulatorPanel kind="gam3eya" />
+        </Card>
+      )}
 
       {showForm && (
         <Card className="space-y-3">
@@ -897,40 +938,48 @@ function Gam3eyaTab({
                           onChange={async (e) => { const f = e.target.files?.[0]; if (f) update({ id_photo_front: await shrinkImage(f) }); }}
                         />
                       </label>
+                      <PaymentAccountsEditor dense accounts={p.payment_accounts} setAccounts={(a) => update({ payment_accounts: a })} />
                     </div>
                   );
                 })}
               </div>
-              <button onClick={() => setOrgParticipants([...orgParticipants, { name: "", phone: "", account_number: "", payment_method: "bank", address: "", id_photo_front: "" }])} className="text-xs text-orange-600 dark:text-orange-400 font-medium">+ إضافة فرد</button>
+              <button onClick={() => setOrgParticipants([...orgParticipants, emptyNewParticipant()])} className="text-xs text-orange-600 dark:text-orange-400 font-medium">+ إضافة فرد</button>
               <button disabled={busy} onClick={submitOrganizing} className="w-full bg-orange-600 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-60">حفظ الجمعية</button>
             </div>
           )}
         </Card>
       )}
 
-      <div className="space-y-2">
-        {gam3eyat.map((g) => (
-          <Gam3eyaCard
-            key={g.id}
-            g={g}
-            isOpen={expanded === g.id}
-            onToggle={() => setExpanded(expanded === g.id ? null : g.id)}
-            onDelete={() => setConfirmDelete(g)}
-            onMarkPaid={(paymentId) => markPaid(g, paymentId)}
-            onRate={(participantId, rating) => rateParticipant(g, participantId, rating)}
-            busy={busy}
-            swapMode={swapMode === g.id}
-            swapFirst={swapFirst}
-            onToggleSwapMode={() => { setSwapMode(swapMode === g.id ? null : g.id); setSwapFirst(null); }}
-            onPickSwap={(pid) => pickForSwap(g, pid)}
-            onRequestSwap={(a, b) => requestSwap(g, a, b)}
-            onOpenVerify={(pid) => setVerifyPanel({ gam3eyaId: g.id, participantId: pid })}
-            onAddedParticipant={reload}
-            showMsg={showMsg}
-          />
-        ))}
-        {gam3eyat.length === 0 && <p className="text-center text-sm text-neutral-400 py-6">لسه مفيش جمعيات مسجلة.</p>}
-      </div>
+      {subTab !== "simulate" && (
+        <div className="space-y-2">
+          {visibleList.map((g) => (
+            <Gam3eyaCard
+              key={g.id}
+              g={g}
+              isOpen={expanded === g.id}
+              onToggle={() => setExpanded(expanded === g.id ? null : g.id)}
+              onDelete={() => setConfirmDelete(g)}
+              onMarkPaid={(paymentId) => markPaid(g, paymentId)}
+              onRate={(participantId, rating) => rateParticipant(g, participantId, rating)}
+              onSaved={reload}
+              busy={busy}
+              swapMode={swapMode === g.id}
+              swapFirst={swapFirst}
+              onToggleSwapMode={() => { setSwapMode(swapMode === g.id ? null : g.id); setSwapFirst(null); }}
+              onPickSwap={(pid) => pickForSwap(g, pid)}
+              onRequestSwap={(a, b) => requestSwap(g, a, b)}
+              onOpenVerify={(pid) => setVerifyPanel({ gam3eyaId: g.id, participantId: pid })}
+              onAddedParticipant={reload}
+              showMsg={showMsg}
+            />
+          ))}
+          {visibleList.length === 0 && (
+            <p className="text-center text-sm text-neutral-400 py-6">
+              {subTab === "subscribed" ? "لسه مفيش جمعيات مشترك فيها." : "لسه مفيش جمعيات بتديرها."}
+            </p>
+          )}
+        </div>
+      )}
 
       {confirmDelete && (
         <DeleteConfirmModal
@@ -963,25 +1012,22 @@ function Gam3eyaTab({
         />
       )}
 
-      {showSimulator && (
-        <SimulatorModal onClose={() => setShowSimulator(false)} kind="gam3eya" />
-      )}
     </div>
   );
 }
 
 function Gam3eyaCard({
-  g, isOpen, onToggle, onDelete, onMarkPaid, onRate, busy, swapMode, swapFirst, onToggleSwapMode, onPickSwap, onRequestSwap, onOpenVerify, onAddedParticipant, showMsg,
+  g, isOpen, onToggle, onDelete, onMarkPaid, onRate, onSaved, busy, swapMode, swapFirst, onToggleSwapMode, onPickSwap, onRequestSwap, onOpenVerify, onAddedParticipant, showMsg,
 }: {
   g: Gam3eya; isOpen: boolean; onToggle: () => void; onDelete: () => void; onMarkPaid: (paymentId: string) => void;
-  onRate: (participantId: string, rating: number) => void; busy: boolean;
+  onRate: (participantId: string, rating: number) => void; onSaved: () => void; busy: boolean;
   swapMode: boolean; swapFirst: string | null; onToggleSwapMode: () => void; onPickSwap: (pid: string) => void;
   onRequestSwap: (a: string, b: string) => void;
   onOpenVerify: (pid: string) => void; onAddedParticipant: () => void; showMsg: (t: string, e?: boolean) => void;
 }) {
   const today = todayISO();
   const [addingParticipant, setAddingParticipant] = useState(false);
-  const [newParticipant, setNewParticipant] = useState<NewParticipant>({ name: "", phone: "", account_number: "", payment_method: "bank", address: "", id_photo_front: "" });
+  const [newParticipant, setNewParticipant] = useState<NewParticipant>(emptyNewParticipant());
   const [addBusy, setAddBusy] = useState(false);
   const [detailParticipant, setDetailParticipant] = useState<Gam3eyaParticipant | null>(null);
   const [swapA, setSwapA] = useState("");
@@ -996,6 +1042,7 @@ function Gam3eyaCard({
   const [exportIncludeRating, setExportIncludeRating] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState("");
+  const [editingInfo, setEditingInfo] = useState(false);
 
   const checkPhoneHistory = async (phone: string) => {
     if (!phone.trim()) return;
@@ -1022,7 +1069,7 @@ function Gam3eyaCard({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { showMsg(data.error || "حصل خطأ ومتضافش الفرد", true); return; }
-      setNewParticipant({ name: "", phone: "", account_number: "", payment_method: "bank", address: "", id_photo_front: "" });
+      setNewParticipant(emptyNewParticipant());
       setAddingParticipant(false);
       onAddedParticipant();
     } finally {
@@ -1044,9 +1091,10 @@ function Gam3eyaCard({
     const payoutRow = g.gam3eya_payments.find((p) => p.month_index === g.my_payout_month);
     return (
       <Card className="!p-3 space-y-2">
+        <span className="inline-block text-[9px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400">🙋 جمعية مشترك فيها</span>
         <div className="flex items-center justify-between cursor-pointer" onClick={onToggle}>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium">{g.name || "جمعية (مشترك فيها)"}</p>
+            <p className="text-sm font-medium" onClick={(e) => { e.stopPropagation(); setEditingInfo(true); }}>{g.name || "جمعية (مشترك فيها)"}</p>
             <p className="text-[11px] text-neutral-400">
               {fmt(g.monthly_amount, g.currency)}/شهر · {paidCount}/{g.months_count} اتدفعوا · هتقبض في الشهر {g.my_payout_month}
               {g.status === "completed" && " · خلصت ✅"}
@@ -1204,9 +1252,10 @@ function Gam3eyaCard({
 
   return (
     <Card className="!p-3 space-y-2">
+      <span className="inline-block text-[9px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400">🗂️ جمعية أنشأتها انت</span>
       <div className="flex items-center justify-between cursor-pointer" onClick={onToggle}>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium">{g.name || "جمعية (بتديرها)"}</p>
+          <p className="text-sm font-medium" onClick={(e) => { e.stopPropagation(); setEditingInfo(true); }}>{g.name || "جمعية (بتديرها)"}</p>
           <p className="text-[11px] text-neutral-400">
             {fmt(g.monthly_amount, g.currency)}/فرد شهريًا · {g.participants_count} فرد
             {g.status === "completed" && " · خلصت ✅"}
@@ -1293,6 +1342,7 @@ function Gam3eyaCard({
                   onChange={async (e) => { const f = e.target.files?.[0]; if (f) setNewParticipant({ ...newParticipant, id_photo_front: await shrinkImage(f) }); }}
                 />
               </label>
+              <PaymentAccountsEditor dense accounts={newParticipant.payment_accounts} setAccounts={(a) => setNewParticipant({ ...newParticipant, payment_accounts: a })} />
               {phoneHistoryBusy && <p className="text-[10px] text-neutral-400">جاري البحث عن تاريخه...</p>}
               {phoneHistory && (
                 phoneHistory.gam3eyat_count > 0 ? (
@@ -1397,7 +1447,63 @@ function Gam3eyaCard({
           <button onClick={() => { setShowExport(false); setExportError(""); }} disabled={exporting} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 py-2 text-sm disabled:opacity-60">إلغاء</button>
         </Modal>
       )}
+      {editingInfo && (
+        <EditGam3eyaInfoModal g={g} onClose={() => setEditingInfo(false)} onSaved={() => { setEditingInfo(false); onSaved(); }} showMsg={showMsg} />
+      )}
     </Card>
+  );
+}
+
+// "الضغط على اسم الجمعية يفتح تعديلها" — تعديل الحقول الآمنة بس (الاسم،
+// المبلغ الشهري، تاريخ البداية)؛ عدد الأفراد/الشهور مش قابل للتعديل هنا لأنه
+// مربوط بجدول الدفعات بالكامل. لو المبلغ الشهري اتغيّر، كل الدفعات اللي لسه
+// "pending" بتتحدّث لنفس المبلغ الجديد (API-side) عشان الإجمالي يفضل متسق.
+function EditGam3eyaInfoModal({
+  g, onClose, onSaved, showMsg,
+}: { g: Gam3eya; onClose: () => void; onSaved: () => void; showMsg: (t: string, e?: boolean) => void }) {
+  const [name, setName] = useState(g.name || "");
+  const [monthlyAmount, setMonthlyAmount] = useState(String(g.monthly_amount));
+  const [startDate, setStartDate] = useState(g.start_date);
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    if (!(parseFloat(monthlyAmount) > 0)) { showMsg("المبلغ الشهري لازم يكون رقم أكبر من صفر", true); return; }
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/gam3eya/${g.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name || null, monthly_amount: parseFloat(monthlyAmount), start_date: startDate }),
+      });
+      if (!res.ok) { showMsg("حصل خطأ ومتحفظش التعديل", true); return; }
+      showMsg("✅ اتحفظ التعديل");
+      onSaved();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal onClose={onClose}>
+      <p className="font-semibold text-sm">تعديل بيانات الجمعية</p>
+      <div>
+        <label className="text-[10px] text-neutral-400">اسم الجمعية</label>
+        <input value={name} onChange={(e) => setName(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+      </div>
+      <div>
+        <label className="text-[10px] text-neutral-400">المبلغ الشهري {g.type === "organizing" ? "لكل فرد" : ""}</label>
+        <input type="number" value={monthlyAmount} onChange={(e) => setMonthlyAmount(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+        <p className="text-[10px] text-neutral-400 mt-0.5">لو غيّرت المبلغ، كل الدفعات اللي لسه ماتدفعتش هتتحدّث للمبلغ الجديد — اللي اتدفع بالفعل مش هيتغير.</p>
+      </div>
+      <div>
+        <label className="text-[10px] text-neutral-400">تاريخ البداية</label>
+        <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+      </div>
+      <div className="flex gap-2">
+        <button onClick={onClose} className="flex-1 rounded-lg border border-neutral-300 dark:border-neutral-700 py-2 text-sm">إلغاء</button>
+        <button disabled={saving} onClick={save} className="flex-1 bg-orange-600 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-60">{saving ? "جاري الحفظ..." : "حفظ التعديل"}</button>
+      </div>
+    </Modal>
   );
 }
 
@@ -1417,6 +1523,9 @@ function ParticipantDetailModal({
   const [paymentMethod, setPaymentMethod] = useState<"bank" | "insta" | "wallet">(participant.payment_method || "bank");
   const [address, setAddress] = useState(participant.address || "");
   const [idPhoto, setIdPhoto] = useState(participant.id_photo_front || "");
+  const [accounts, setAccounts] = useState<PaymentAccount[]>(
+    participant.payment_accounts && participant.payment_accounts.length ? participant.payment_accounts.map((a) => ({ ...a })) : legacyToAccounts(participant.account_number, participant.payment_method)
+  );
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
@@ -1427,7 +1536,10 @@ function ParticipantDetailModal({
       const res = await fetch(`/api/gam3eya/${gam3eyaId}/participants/${participant.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, phone: phone || null, account_number: accountNumber || null, payment_method: paymentMethod, address: address || null, id_photo_front: idPhoto || null }),
+        body: JSON.stringify({
+          name, phone: phone || null, account_number: accountNumber || null, payment_method: paymentMethod, address: address || null, id_photo_front: idPhoto || null,
+          payment_accounts: accounts.filter((a) => a.account_number.trim()).map((a) => ({ ...a, label: a.label?.trim() || undefined })),
+        }),
       });
       if (!res.ok) { showMsg("حصل خطأ ومتحفظش التعديل", true); return; }
       showMsg("✅ اتحفظ التعديل");
@@ -1488,6 +1600,8 @@ function ParticipantDetailModal({
         <label className="text-[10px] text-neutral-400">العنوان</label>
         <input value={address} onChange={(e) => setAddress(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
       </div>
+
+      <PaymentAccountsEditor accounts={accounts} setAccounts={setAccounts} />
 
       <button disabled={saving || busy} onClick={save} className="w-full bg-orange-600 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-60">حفظ التعديل</button>
       <button onClick={onOpenVerify} className="w-full flex items-center justify-center gap-1 rounded-lg border border-neutral-300 dark:border-neutral-700 py-2 text-sm">
@@ -1571,12 +1685,24 @@ interface BudgetSnapshot {
   activeInstallmentsMonthly: number; activeGam3eyaMonthly: number; outstandingDebts: number;
 }
 
-// محاكاة عامة — بتتفتح من "محاكاة" في تبويب الجمعيات (لجمعية جديدة) أو من
-// "راجع أقساطك مع ميزانيتك" في تبويب الأقساط (لقسط جديد). بتجيب التزاماتك
-// الحقيقية المسجلة في البرنامج (مصاريف ثابتة متكررة + أقساط شغالة + جمعيات
-// مشترك فيها + ديون متبقية) ودخلك التقديري من حركات الدخل الفعلية بدل ما
-// تدخلهم بإيدك، وتوريك الموقف مع المبلغ الجديد.
+// محاكاة عامة — الآن تبويب كامل "محاكاة" جوّه الجمعيات (round 25، كان زرار
+// بيفتح مودال) أو من "راجع أقساطك مع ميزانيتك" في تبويب الأقساط (لسه مودال
+// هناك لأن مفيش تبويبات جاهزة في InstallmentsTab). بتجيب التزاماتك الحقيقية
+// المسجلة في البرنامج (مصاريف ثابتة متكررة + أقساط شغالة + جمعيات مشترك
+// فيها + ديون متبقية) ودخلك التقديري من حركات الدخل الفعلية بدل ما تدخلهم
+// بإيدك، وتوريك الموقف مع المبلغ الجديد. `SimulatorPanel` هو المحتوى الفعلي
+// (قابل للتضمين مباشر في تبويب)؛ `SimulatorModal` بس بيلفه في `<Modal>` للي
+// لسه محتاجينه كنافذة منبثقة.
 function SimulatorModal({ onClose, kind = "gam3eya" }: { onClose: () => void; kind?: "gam3eya" | "installment" }) {
+  return (
+    <Modal onClose={onClose}>
+      <SimulatorPanel kind={kind} />
+      <button onClick={onClose} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 py-2 text-sm">قفل</button>
+    </Modal>
+  );
+}
+
+function SimulatorPanel({ kind = "gam3eya" }: { kind?: "gam3eya" | "installment" }) {
   const [amount, setAmount] = useState("");
   const [income, setIncome] = useState("");
   const [snapshot, setSnapshot] = useState<BudgetSnapshot | null>(null);
@@ -1602,7 +1728,7 @@ function SimulatorModal({ onClose, kind = "gam3eya" }: { onClose: () => void; ki
   const newAmountLabel = kind === "installment" ? "القسط الشهري الجديد" : "المبلغ الشهري للجمعية الجديدة";
 
   return (
-    <Modal onClose={onClose}>
+    <div className="space-y-3">
       <p className="font-semibold text-sm">{kind === "installment" ? "راجع القسط مع ميزانيتك" : "محاكاة جمعية جديدة"}</p>
       <p className="text-[11px] text-neutral-400">
         {kind === "installment" ? "قبل ما تدخل في قسط جديد" : "قبل ما تدخل جمعية جديدة"}، شوف هل ميزانيتك هتستحمله مع كل التزاماتك الحالية المسجلة في البرنامج.
@@ -1641,8 +1767,6 @@ function SimulatorModal({ onClose, kind = "gam3eya" }: { onClose: () => void; ki
           )}
         </>
       )}
-
-      <button onClick={onClose} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 py-2 text-sm">قفل</button>
-    </Modal>
+    </div>
   );
 }

@@ -27,16 +27,15 @@ export async function GET() {
   const myPhone = (meRow?.phone || "").trim();
   const debtRequestItems: { label: string; href: string }[] = [];
   if (myPhone) {
-    const { data: witnessLinks } = await supabaseAdmin
-      .from("debt_links")
-      .select("token, debts(title), debt_witnesses!inner(phone)")
-      .eq("role", "witness")
-      .eq("debt_witnesses.phone", myPhone)
-      .is("acknowledged_at", null)
-      .is("revoked_at", null);
-    for (const l of (witnessLinks || []) as any[]) {
-      debtRequestItems.push({ label: `طلب شهادة على دين "${l.debts?.title || ""}"`, href: `/debt/${l.token}` });
-    }
+    // Round 25 — witnesses no longer have a phone on file until they open
+    // their own link and fill it in themselves (see /debt/[token] +
+    // /api/debt-link/[token]/acknowledge), at which point they immediately
+    // acknowledge in the same step — so there's no more "pre-fill invite"
+    // moment to detect by phone for witnesses the way there is for the
+    // debtor/creditor_view link below (whose phone the creditor still
+    // enters up front). The witness-phone bell check was removed here for
+    // that reason; witnesses are reached by the creditor sharing their link
+    // directly, not by an in-app match.
 
     const { data: otherLinks } = await supabaseAdmin
       .from("debt_links")

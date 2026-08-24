@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
   let query = supabaseAdmin
     .from("debts")
     .select(
-      "*, people(name, phone), debt_payments(id, amount, paid_at, receipt_url, note), debt_witnesses(id, slot_index, name, phone, address, id_photo_front), debt_links(id, token, role, witness_id, viewed_at, acknowledged_at, revoked_at), debt_events(event_type, description, actor_role, actor_name, created_at)"
+      "*, people(name, phone, address, id_photo_front), debt_payments(id, amount, paid_at, receipt_url, note), debt_witnesses(id, slot_index, name, phone, address, id_photo_front), debt_links(id, token, role, witness_id, viewed_at, acknowledged_at, revoked_at), debt_events(event_type, description, actor_role, actor_name, created_at)"
     )
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
@@ -23,12 +23,20 @@ export async function GET(req: NextRequest) {
   const { data, error } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
+  // the app owner's own name — used to label "الدائن"/"المدين" correctly
+  // regardless of which side of the debt they're on, same as the public
+  // /debt/[token] page does for the other party.
+  const { data: me } = await supabaseAdmin.from("app_users").select("name").eq("id", userId).single();
+  const myName = me?.name || "أنا";
+
   // add the shareable URL to each link here (server-side, same base-URL
   // resolution the initial creation used) rather than making the client
   // reconstruct it.
   const { debtLinkUrl } = await import("@/lib/debtLinks");
   const debts = (data || []).map((d: any) => ({
     ...d,
+    creditor_name: d.direction === "owed_to_me" ? myName : d.people?.name || "الدائن",
+    debtor_name: d.direction === "owed_to_me" ? d.people?.name || "المدين" : myName,
     debt_witnesses: (d.debt_witnesses || []).sort((a: any, b: any) => a.slot_index - b.slot_index),
     debt_links: (d.debt_links || []).map((l: any) => ({ ...l, url: debtLinkUrl(l.token) })),
     debt_events: (d.debt_events || []).sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()),
