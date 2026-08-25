@@ -12,6 +12,9 @@ import { BadgeCheck } from "lucide-react";
 // نظريًا lazy.
 const DEFAULT_GEMINI_MODEL = "gemini-3.6-flash";
 
+// Round 32 — نص التحميل الموحّد لأي عملية بتكلّم Gemini في التطبيق كله.
+const AI_LOADING_TEXT = "جاري الاتصال بخوادم IDEA...";
+
 interface AdminUser {
   id: string;
   name: string;
@@ -84,6 +87,8 @@ export default function AdminPage() {
   const [geminiBusy, setGeminiBusy] = useState(false);
   const [geminiTestResult, setGeminiTestResult] = useState<any>(null);
   const [geminiMsg, setGeminiMsg] = useState("");
+  const [geminiStatusLoading, setGeminiStatusLoading] = useState(false);
+  const [geminiStatusError, setGeminiStatusError] = useState("");
   const [locked, setLocked] = useState(false);
   const [checkedAccess, setCheckedAccess] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -138,11 +143,28 @@ export default function AdminPage() {
   // عن الظهور (رسالة "the page failed to load" اللي واجهها المستخدم). القاعدة:
   // كل الـ hooks (useState/useEffect) لازم تتنادى دايمًا بنفس الترتيب في كل
   // render — أي return مبكر لازم يكون بعد كل الـ hooks، مش قبلهم.
+  // Round 32 — كان هنا bug إن الدالة دي متعملهاش لا res.ok check ولا try/catch،
+  // فأي فشل (401، مشكلة شبكة، رد مش JSON) كان بيسيب geminiStatus فاضي من غير
+  // ما المستخدم يعرف ليه — وده كان بيظهر كـ "التحقق بالذكاء الاصطناعي مش
+  // سحاب المفتاح من فيرسل" مع إن المفتاح ممكن يكون موجود فعلاً وبس التحميل فشل.
+  // دلوقتي بنفرّق بين 3 حالات: بيحمّل / فشل التحميل (مع سبب) / محمّل بنجاح.
   const loadGeminiStatus = async () => {
-    const res = await fetch("/api/admin/gemini-settings");
-    const data = await res.json();
-    setGeminiStatus(data);
-    setGeminiModelInput(data.dbModelOverride || "");
+    setGeminiStatusLoading(true);
+    setGeminiStatusError("");
+    try {
+      const res = await fetch("/api/admin/gemini-settings");
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data) {
+        setGeminiStatusError((data && data.error) || `تعذر تحميل حالة الذكاء الاصطناعي (${res.status})`);
+        return;
+      }
+      setGeminiStatus(data);
+      setGeminiModelInput(data.dbModelOverride || "");
+    } catch {
+      setGeminiStatusError("تعذر الاتصال بخوادم IDEA لتحميل حالة الذكاء الاصطناعي.");
+    } finally {
+      setGeminiStatusLoading(false);
+    }
   };
   useEffect(() => { if (!locked && checkedAccess) loadGeminiStatus(); }, [locked, checkedAccess]);
 
@@ -189,15 +211,22 @@ export default function AdminPage() {
     }
   };
 
+  // Round 32 — كانت الدالة دي والي تحتها من غير catch حوالين الـ fetch/json،
+  // فأي exception (شبكة، رد مش JSON) كان بيوقف التنفيذ بصمت — الـ finally كان
+  // لسه بيشتغل (يقفل geminiBusy) بس من غير أي رسالة تتقال للمستخدم، فكان
+  // حاسس إن الزرار "صامت". دلوقتي أي فشل بأي شكل بيظهر رسالة واضحة.
   const saveGeminiSettings = async (patch: Record<string, any>) => {
     setGeminiBusy(true);
     setGeminiMsg("");
     try {
       const res = await fetch("/api/admin/gemini-settings", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
-      if (!res.ok) { setGeminiMsg("حصل خطأ ومتحفظش"); return; }
+      const data = await res.json().catch(() => null);
+      if (!res.ok) { setGeminiMsg((data && data.error) || `حصل خطأ ومتحفظش (${res.status})`); return; }
       setGeminiMsg("اتحفظ ✅");
       setGeminiKeyInput("");
       await loadGeminiStatus();
+    } catch {
+      setGeminiMsg("تعذر الاتصال بخوادم IDEA — اتأكد من النت وجرب تاني.");
     } finally {
       setGeminiBusy(false);
     }
@@ -206,10 +235,17 @@ export default function AdminPage() {
   const testGemini = async () => {
     setGeminiBusy(true);
     setGeminiTestResult(null);
+    setGeminiMsg("");
     try {
       const res = await fetch("/api/admin/gemini-settings/test", { method: "POST" });
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data) {
+        setGeminiTestResult({ ok: false, error: (data && data.error) || `تعذر تشغيل الاختبار (${res.status})` });
+        return;
+      }
       setGeminiTestResult(data);
+    } catch {
+      setGeminiTestResult({ ok: false, error: "تعذر الاتصال بخوادم IDEA." });
     } finally {
       setGeminiBusy(false);
     }
@@ -445,7 +481,16 @@ export default function AdminPage() {
         <p className="text-xs text-neutral-500 leading-relaxed">
           المفتاح والموديل بييجوا افتراضيًا من <code className="bg-neutral-100 dark:bg-neutral-800 px-1 rounded">GEMINI_API_KEY</code>/<code className="bg-neutral-100 dark:bg-neutral-800 px-1 rounded">GEMINI_MODEL</code> في Vercel، لكن تقدر تغيّرهم من هنا مباشرة من غير ما تحتاج ريدبلوي — اللي تحفظه هنا بيبقى له الأولوية.
         </p>
-        {geminiStatus && (
+        {geminiStatusLoading && (
+          <p className="text-xs text-center text-neutral-400">{AI_LOADING_TEXT}</p>
+        )}
+        {!geminiStatusLoading && geminiStatusError && (
+          <div className="text-xs rounded-lg p-2 space-y-1 bg-red-50 dark:bg-red-950 text-red-600 dark:text-red-400">
+            <p>{geminiStatusError}</p>
+            <button type="button" onClick={loadGeminiStatus} className="underline">جرب تاني</button>
+          </div>
+        )}
+        {!geminiStatusLoading && !geminiStatusError && geminiStatus && (
           <div className={`text-xs rounded-lg p-2 space-y-1 ${geminiStatus.hasKey ? "bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300" : "bg-red-50 dark:bg-red-950 text-red-600 dark:text-red-400"}`}>
             <p>المفتاح: {geminiStatus.hasKey ? `متسجل ✅ (${geminiStatus.keySource === "db" ? "من هنا" : "من Vercel"})` : "مش متسجل خالص ⚠️"}</p>
             <p>الموديل الفعلي دلوقتي: <code className="break-all">{geminiStatus.effectiveModel}</code></p>
@@ -480,7 +525,7 @@ export default function AdminPage() {
             احفظ
           </button>
           <button type="button" disabled={geminiBusy} onClick={testGemini} className="flex-1 border border-neutral-300 dark:border-neutral-700 rounded-lg py-1.5 text-xs disabled:opacity-50">
-            {geminiBusy ? "جاري الاختبار..." : "اختبر النموذج"}
+            {geminiBusy ? AI_LOADING_TEXT : "اختبر النموذج"}
           </button>
         </div>
         {geminiMsg && <p className="text-xs text-center text-neutral-500">{geminiMsg}</p>}

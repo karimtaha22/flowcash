@@ -5,13 +5,39 @@ import Switch from "@/components/Switch";
 import { shrinkImage } from "@/lib/image";
 import { shareFile } from "@/lib/shareFile";
 import { MEAL_TIMING_LABELS, MEDICATION_FORM_LABELS, SCHEDULE_TYPE_LABELS } from "@/lib/medicationSchedule";
-import { Trash2, Camera, Loader2, Sparkles, FileDown, CheckCircle2, Pill, Pencil, X } from "lucide-react";
+import { Trash2, Camera, Loader2, Sparkles, FileDown, CheckCircle2, Pill, Pencil, X, Upload, Image as ImageIcon } from "lucide-react";
 
 type Tab = "grocery" | "general" | "medications" | "utility";
 
 const inputCls = "w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm";
 const btnPrimary = "bg-orange-500 hover:bg-orange-600 text-white rounded-lg px-3 py-2 text-sm font-medium disabled:opacity-50";
 const btnGhost = "border border-neutral-300 dark:border-neutral-700 rounded-lg px-3 py-2 text-sm";
+
+// النص الموحّد لأي عملية بتستنى رد من الذكاء الاصطناعي في التطبيق كله —
+// طلب صريح من المستخدم (Round 32) إن أي نتيجة/بحث بالذكاء الاصطناعي يوضح
+// إنه بيكلم خوادم IDEA بدل نص عام زي "جاري التحميل".
+const AI_LOADING_TEXT = "جاري الاتصال بخوادم IDEA...";
+
+// "رفع او تصوير" (Round 32) — زرارين منفصلين بدل زرار واحد: واحد بيفتح
+// الكاميرا مباشرة (capture="environment")، والتاني بيفتح معرض الصور العادي
+// (من غير capture عشان بعض المتصفحات بتقفل اختيار المعرض لما capture متحطة).
+function PhotoCaptureRow({ onPick }: { onPick: (dataUrl: string) => void }) {
+  const handle = async (f: File | undefined) => {
+    if (f) onPick(await shrinkImage(f));
+  };
+  return (
+    <div className="flex gap-2">
+      <label className={`${btnGhost} flex-1 flex items-center justify-center gap-1 cursor-pointer`}>
+        <Camera size={14} /> تصوير
+        <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handle(e.target.files?.[0])} />
+      </label>
+      <label className={`${btnGhost} flex-1 flex items-center justify-center gap-1 cursor-pointer`}>
+        <Upload size={14} /> رفع من المعرض
+        <input type="file" accept="image/*" className="hidden" onChange={(e) => handle(e.target.files?.[0])} />
+      </label>
+    </div>
+  );
+}
 
 export default function RemindersPage() {
   const [tab, setTab] = useState<Tab>("grocery");
@@ -310,7 +336,7 @@ function GroceryTab() {
     setListName(sl.name || "");
     setReplacingListId(sl.id);
     setLines([]);
-    setMsg('اتحمّلت القائمة فوق — دوس "دوّر على الأسعار" وكمّل منها.');
+    setMsg('اتحمّلت القائمة فوق — دوس "إنشاء القائمة" وكمّل منها.');
   };
 
   // "تصدير" — rasterizes the current (in-progress or saved) list as a
@@ -399,7 +425,7 @@ function GroceryTab() {
         <p className="text-xs text-neutral-400">اكتب كل صنف في سطر — مثال: لبن، زبادي، بامبرز</p>
         <textarea value={listText} onChange={(e) => setListText(e.target.value)} rows={4} className={inputCls} placeholder={"لبن\nزبادي\nبامبرز"} />
         <button onClick={runMatch} disabled={matching} className={btnPrimary}>
-          {matching ? <Loader2 size={14} className="animate-spin inline" /> : "دوّر على الأسعار"}
+          {matching ? <Loader2 size={14} className="animate-spin inline" /> : "إنشاء القائمة"}
         </button>
         {msg && <p className="text-xs text-orange-600">{msg}</p>}
       </Card>
@@ -454,6 +480,7 @@ function GroceryTab() {
               !l.loadingAi && l.raw_text.trim() && <p className="text-xs text-neutral-400">مفيش سعر مسجل للصنف ده لسه.</p>
             )}
 
+            {l.loadingAi && <p className="text-xs text-orange-500 flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> {AI_LOADING_TEXT}</p>}
             {l.aiMessage && <p className="text-xs text-orange-500">{l.aiMessage}</p>}
 
             <button onClick={() => updateLine(l.id, { manualOpen: !l.manualOpen })} className={btnGhost}>
@@ -717,13 +744,62 @@ function MedicationsTab() {
   });
   const [savingAppt, setSavingAppt] = useState(false);
   const [apptError, setApptError] = useState("");
+  const [apptExtracting, setApptExtracting] = useState(false);
+  const [apptExtractMsg, setApptExtractMsg] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [exportingImg, setExportingImg] = useState(false);
   const [editingMedId, setEditingMedId] = useState<string | null>(null);
   const [editMedForm, setEditMedForm] = useState<any>(null);
   const [editMedSaving, setEditMedSaving] = useState(false);
   const [editingApptId, setEditingApptId] = useState<string | null>(null);
   const [editApptForm, setEditApptForm] = useState<any>(null);
   const [editApptSaving, setEditApptSaving] = useState(false);
+  const [editApptExtracting, setEditApptExtracting] = useState(false);
+  const [editApptExtractMsg, setEditApptExtractMsg] = useState("");
+
+  // "استخراج اسم الدكتور و التخصص و العنوان بالذكاء الاصطناعي" (Round 32) —
+  // بيتنادى تلقائيًا أول ما صورة الروشتة تتحط (تصوير أو رفع)، وبيملى بس
+  // الحقول اللي لسه فاضية عشان منكتبش فوق حاجة المستخدم كتبها بإيده.
+  const extractDoctorInfo = async (dataUrl: string, isEdit: boolean) => {
+    (isEdit ? setEditApptExtracting : setApptExtracting)(true);
+    (isEdit ? setEditApptExtractMsg : setApptExtractMsg)("");
+    try {
+      const res = await fetch("/api/reminders/appointments/extract-doctor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: dataUrl }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        (isEdit ? setEditApptExtractMsg : setApptExtractMsg)(data.error || "تعذر استخراج بيانات الطبيب من الصورة");
+        return;
+      }
+      if (isEdit) {
+        setEditApptForm((f: any) => ({
+          ...f,
+          doctor_name: f.doctor_name || data.doctor_name || f.doctor_name,
+          doctor_specialty: f.doctor_specialty || data.doctor_specialty || f.doctor_specialty,
+          doctor_address: f.doctor_address || data.doctor_address || f.doctor_address,
+        }));
+      } else {
+        setApptForm((f: any) => ({
+          ...f,
+          doctor_name: f.doctor_name || data.doctor_name || f.doctor_name,
+          doctor_specialty: f.doctor_specialty || data.doctor_specialty || f.doctor_specialty,
+          doctor_address: f.doctor_address || data.doctor_address || f.doctor_address,
+        }));
+      }
+      if (data.doctor_name || data.doctor_specialty || data.doctor_address) {
+        (isEdit ? setEditApptExtractMsg : setApptExtractMsg)("تم استخراج بيانات الطبيب من الصورة — راجعها قبل الحفظ ✅");
+      } else {
+        (isEdit ? setEditApptExtractMsg : setApptExtractMsg)("معرفناش نستخرج بيانات طبيب واضحة من الصورة دي — اكتبها يدويًا.");
+      }
+    } catch {
+      (isEdit ? setEditApptExtractMsg : setApptExtractMsg)("تعذر الاتصال بخوادم IDEA للاستخراج.");
+    } finally {
+      (isEdit ? setEditApptExtracting : setApptExtracting)(false);
+    }
+  };
 
   const loadMeds = () => fetch("/api/reminders/medications").then((r) => r.json()).then((d) => setMeds(d.medications || []));
   const loadAppts = () => fetch("/api/reminders/appointments").then((r) => r.json()).then((d) => setAppts(d.appointments || []));
@@ -931,55 +1007,100 @@ function MedicationsTab() {
     }
   };
 
-  // export the medication + appointment schedule as a shareable PDF —
+  // export the medication + appointment schedule as a shareable PDF/image —
   // exact rasterize-off-screen-HTML pattern used in app/(protected)/export/page.tsx
   // (jsPDF's built-in fonts can't shape Arabic text at all).
+  //
+  // Round 32 postmortem — "التنسيق بايظ" complaint: الجدولين هنا كانوا من غير
+  // <thead>/<th> عناوين أعمدة (كل عمود كان مجرد <td> من غير أي عنوان فوقه)،
+  // على عكس النمط اللي شغال صح في app/(protected)/export/page.tsx — فكان
+  // الجدول بيطلع كأعمدة مبهمة من غير سياق. اتصلح بإضافة <thead> لكل الجداول،
+  // وبعد كده ضفنا بيانات الطبيب (اللي اتضافت للـ schema في Round 30) لصف
+  // المواعيد اللي كانت بتتجاهله تمامًا.
+  const buildScheduleNode = () => {
+    const node = document.createElement("div");
+    node.style.position = "fixed";
+    node.style.left = "-9999px";
+    node.style.top = "0";
+    node.style.width = "700px";
+    node.style.background = "#ffffff";
+    node.style.padding = "24px";
+    node.style.fontFamily = "Cairo, sans-serif";
+    node.style.direction = "rtl";
+    node.style.color = "#111827";
+    const medRows = meds
+      .map(
+        (m) => `<tr>
+          <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:12px;">${FORM_EMOJI[m.form] || ""} ${m.name}</td>
+          <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;">${medScheduleLabel(m)}</td>
+          <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;">${m.remaining_doses ?? "-"} / ${m.pack_size ?? "-"}</td>
+        </tr>`
+      )
+      .join("");
+    const apptRows = appts
+      .map((a) => {
+        const doctor = [
+          a.doctor_name ? `د. ${a.doctor_name}` : "",
+          a.doctor_specialty || "",
+          a.doctor_address || "",
+        ]
+          .filter(Boolean)
+          .join(" — ");
+        return `<tr>
+          <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:12px;">${a.kind === "consultation" ? "استشارة" : "كشف"}${a.title ? " — " + a.title : ""}</td>
+          <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;">${new Date(a.appointment_at).toLocaleString("ar-EG")}</td>
+          <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:10px;color:#6b7280;">${doctor || "-"}</td>
+        </tr>`;
+      })
+      .join("");
+    node.innerHTML = `
+      <div style="text-align:center;margin-bottom:16px;">
+        <p style="font-size:12px;color:#ea580c;font-weight:700;">FlowCash</p>
+        <h2 style="font-size:17px;margin:6px 0 2px;">جدول الأدوية والمواعيد الطبية</h2>
+      </div>
+      <p style="font-size:13px;font-weight:700;margin:10px 0 4px;">الأدوية</p>
+      <table style="width:100%;border-collapse:collapse;">
+        <thead>
+          <tr style="background:#f9fafb;">
+            <th style="padding:6px 4px;font-size:11px;text-align:right;">الدواء</th>
+            <th style="padding:6px 4px;font-size:11px;text-align:right;">الجرعات</th>
+            <th style="padding:6px 4px;font-size:11px;text-align:right;">المتبقي / العبوة</th>
+          </tr>
+        </thead>
+        <tbody>${medRows || '<tr><td colspan="3" style="font-size:11px;color:#9ca3af;padding:6px 4px;">لا يوجد</td></tr>'}</tbody>
+      </table>
+      <p style="font-size:13px;font-weight:700;margin:14px 0 4px;">المواعيد الطبية</p>
+      <table style="width:100%;border-collapse:collapse;">
+        <thead>
+          <tr style="background:#f9fafb;">
+            <th style="padding:6px 4px;font-size:11px;text-align:right;">النوع</th>
+            <th style="padding:6px 4px;font-size:11px;text-align:right;">الميعاد</th>
+            <th style="padding:6px 4px;font-size:11px;text-align:right;">الطبيب</th>
+          </tr>
+        </thead>
+        <tbody>${apptRows || '<tr><td colspan="3" style="font-size:11px;color:#9ca3af;padding:6px 4px;">لا يوجد</td></tr>'}</tbody>
+      </table>
+      <div style="border-top:1px solid #e5e7eb;margin-top:16px;padding-top:10px;text-align:center;">
+        <p style="font-size:10px;color:#9ca3af;margin:0;">تم الإنشاء بواسطة FlowCash — ${new Date().toLocaleDateString("ar-EG")}</p>
+      </div>`;
+    return node;
+  };
+
+  const rasterizeSchedule = async () => {
+    const node = buildScheduleNode();
+    document.body.appendChild(node);
+    try {
+      const html2canvas = (await import("html2canvas-pro")).default;
+      return await html2canvas(node, { scale: 2, backgroundColor: "#ffffff" });
+    } finally {
+      document.body.removeChild(node);
+    }
+  };
+
   const exportSchedule = async () => {
     setExporting(true);
     try {
-      const node = document.createElement("div");
-      node.style.position = "fixed";
-      node.style.left = "-9999px";
-      node.style.top = "0";
-      node.style.width = "700px";
-      node.style.background = "#ffffff";
-      node.style.padding = "24px";
-      node.style.fontFamily = "Cairo, sans-serif";
-      node.style.direction = "rtl";
-      node.style.color = "#111827";
-      const medRows = meds
-        .map(
-          (m) => `<tr>
-            <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:12px;">${FORM_EMOJI[m.form] || ""} ${m.name}</td>
-            <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;">${medScheduleLabel(m)}</td>
-            <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;">${m.remaining_doses ?? "-"} / ${m.pack_size ?? "-"}</td>
-          </tr>`
-        )
-        .join("");
-      const apptRows = appts
-        .map(
-          (a) => `<tr>
-            <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:12px;">${a.kind === "consultation" ? "استشارة" : "كشف"}${a.title ? " — " + a.title : ""}</td>
-            <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;">${new Date(a.appointment_at).toLocaleString("ar-EG")}</td>
-          </tr>`
-        )
-        .join("");
-      node.innerHTML = `
-        <div style="text-align:center;margin-bottom:16px;">
-          <p style="font-size:12px;color:#ea580c;font-weight:700;">FlowCash</p>
-          <h2 style="font-size:17px;margin:6px 0 2px;">جدول الأدوية والمواعيد الطبية</h2>
-        </div>
-        <p style="font-size:13px;font-weight:700;margin:10px 0 4px;">الأدوية</p>
-        <table style="width:100%;border-collapse:collapse;"><tbody>${medRows || '<tr><td style="font-size:11px;color:#9ca3af;padding:6px 4px;">لا يوجد</td></tr>'}</tbody></table>
-        <p style="font-size:13px;font-weight:700;margin:14px 0 4px;">المواعيد الطبية</p>
-        <table style="width:100%;border-collapse:collapse;"><tbody>${apptRows || '<tr><td style="font-size:11px;color:#9ca3af;padding:6px 4px;">لا يوجد</td></tr>'}</tbody></table>
-        <div style="border-top:1px solid #e5e7eb;margin-top:16px;padding-top:10px;text-align:center;">
-          <p style="font-size:10px;color:#9ca3af;margin:0;">تم الإنشاء بواسطة FlowCash — ${new Date().toLocaleDateString("ar-EG")}</p>
-        </div>`;
-      document.body.appendChild(node);
-      const html2canvas = (await import("html2canvas-pro")).default;
-      const canvas = await html2canvas(node, { scale: 2, backgroundColor: "#ffffff" });
-      document.body.removeChild(node);
+      const canvas = await rasterizeSchedule();
       const { jsPDF } = await import("jspdf");
       const w = canvas.width / 2;
       const h = canvas.height / 2;
@@ -988,6 +1109,18 @@ function MedicationsTab() {
       await shareFile(pdf.output("dataurlstring"), "جدول-الأدوية.pdf", "application/pdf");
     } finally {
       setExporting(false);
+    }
+  };
+
+  // Round 32 — "ضيف تصدير صوره كمان": نفس الرسم بالظبط، بس من غير لف الصورة
+  // في PDF — بنشارك canvas.toDataURL مباشرة كـ PNG.
+  const exportScheduleImage = async () => {
+    setExportingImg(true);
+    try {
+      const canvas = await rasterizeSchedule();
+      await shareFile(canvas.toDataURL("image/png"), "جدول-الأدوية.png", "image/png");
+    } finally {
+      setExportingImg(false);
     }
   };
 
@@ -1062,9 +1195,14 @@ function MedicationsTab() {
       <div className="flex items-center justify-between">
         <p className="text-sm font-medium">الأدوية المسجلة</p>
         {(meds.length > 0 || appts.length > 0) && (
-          <button onClick={exportSchedule} disabled={exporting} className={`${btnGhost} flex items-center gap-1`}>
-            <FileDown size={12} /> تصدير الجدول
-          </button>
+          <div className="flex items-center gap-1">
+            <button onClick={exportSchedule} disabled={exporting || exportingImg} className={`${btnGhost} flex items-center gap-1`}>
+              {exporting ? <Loader2 size={12} className="animate-spin" /> : <FileDown size={12} />} تصدير PDF
+            </button>
+            <button onClick={exportScheduleImage} disabled={exporting || exportingImg} className={`${btnGhost} flex items-center gap-1`}>
+              {exportingImg ? <Loader2 size={12} className="animate-spin" /> : <ImageIcon size={12} />} تصدير صورة
+            </button>
+          </div>
         )}
       </div>
       <div className="space-y-2">
@@ -1194,11 +1332,13 @@ function MedicationsTab() {
             ))}
           </select>
         )}
-        <label className={`${btnGhost} flex items-center justify-center gap-1 cursor-pointer`}>
-          <Camera size={14} /> {apptForm.prescription_image ? "تغيير صورة الروشتة" : "إرفاق صورة الروشتة"}
-          <input type="file" accept="image/*" capture="environment" className="hidden" onChange={async (e) => { const f = e.target.files?.[0]; if (f) setApptForm({ ...apptForm, prescription_image: await shrinkImage(f) }); }} />
-        </label>
+        <div className="space-y-1">
+          <p className="text-xs text-neutral-400">صورة الروشتة (اختياري) — بنستخرج بيانات الطبيب منها تلقائيًا بالذكاء الاصطناعي</p>
+          <PhotoCaptureRow onPick={(dataUrl) => { setApptForm({ ...apptForm, prescription_image: dataUrl }); extractDoctorInfo(dataUrl, false); }} />
+        </div>
         {apptForm.prescription_image && <img src={apptForm.prescription_image} alt="روشتة" className="rounded-lg max-h-32 mx-auto" />}
+        {apptExtracting && <p className="text-xs text-orange-500 flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> {AI_LOADING_TEXT}</p>}
+        {apptExtractMsg && !apptExtracting && <p className="text-xs text-orange-500">{apptExtractMsg}</p>}
         <p className="text-xs text-neutral-400">هيتبعتلك تذكير قبلها بيوم، وتاني قبلها بـ 3 ساعات.</p>
         {apptError && <p className="text-xs text-red-500">{apptError}</p>}
         <button onClick={submitAppt} disabled={savingAppt} className={btnPrimary}>
@@ -1225,11 +1365,10 @@ function MedicationsTab() {
               </div>
               <input placeholder="رقم الهاتف" value={editApptForm.doctor_phone} onChange={(e) => setEditApptForm({ ...editApptForm, doctor_phone: e.target.value })} className={inputCls} />
               <input placeholder="عنوان العيادة" value={editApptForm.doctor_address} onChange={(e) => setEditApptForm({ ...editApptForm, doctor_address: e.target.value })} className={inputCls} />
-              <label className={`${btnGhost} flex items-center justify-center gap-1 cursor-pointer`}>
-                <Camera size={14} /> {editApptForm.prescription_image ? "تغيير صورة الروشتة" : "إرفاق صورة الروشتة"}
-                <input type="file" accept="image/*" capture="environment" className="hidden" onChange={async (e) => { const f = e.target.files?.[0]; if (f) setEditApptForm({ ...editApptForm, prescription_image: await shrinkImage(f) }); }} />
-              </label>
+              <PhotoCaptureRow onPick={(dataUrl) => { setEditApptForm({ ...editApptForm, prescription_image: dataUrl }); extractDoctorInfo(dataUrl, true); }} />
               {editApptForm.prescription_image && <img src={editApptForm.prescription_image} alt="روشتة" className="rounded-lg max-h-32 mx-auto" />}
+              {editApptExtracting && <p className="text-xs text-orange-500 flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> {AI_LOADING_TEXT}</p>}
+              {editApptExtractMsg && !editApptExtracting && <p className="text-xs text-orange-500">{editApptExtractMsg}</p>}
               <div className="flex items-center gap-2">
                 <button onClick={() => saveEditAppt(a.id)} disabled={editApptSaving} className={btnPrimary}>
                   {editApptSaving ? <Loader2 size={14} className="animate-spin inline" /> : "حفظ"}
@@ -1286,6 +1425,10 @@ function UtilityTab() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<any>(null);
   const [editSaving, setEditSaving] = useState(false);
+  const [extracting, setExtracting] = useState(false);
+  const [extractMsg, setExtractMsg] = useState("");
+  const [editExtracting, setEditExtracting] = useState(false);
+  const [editExtractMsg, setEditExtractMsg] = useState("");
 
   const load = () => {
     fetch("/api/reminders/utility-meters").then((r) => r.json()).then((d) => setReadings(d.readings || []));
@@ -1294,6 +1437,35 @@ function UtilityTab() {
   useEffect(() => {
     load();
   }, []);
+
+  // "استخراج القراة بالذكاء الاصطناعي" (Round 32) — بيتنادى تلقائيًا أول ما
+  // صورة العداد تتحط، وبيملى خانة القراءة بالرقم اللي اتقرا (المستخدم لسه
+  // يقدر يعدلها قبل الحفظ لو مش مضبوطة).
+  const extractReading = async (dataUrl: string, type: string, isEdit: boolean) => {
+    (isEdit ? setEditExtracting : setExtracting)(true);
+    (isEdit ? setEditExtractMsg : setExtractMsg)("");
+    try {
+      const res = await fetch("/api/reminders/utility-meters/extract-reading", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: dataUrl, meter_type: type }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        (isEdit ? setEditExtractMsg : setExtractMsg)(data.error || "تعذر قراءة العداد من الصورة");
+        return;
+      }
+      if (data.reading_value != null) {
+        if (isEdit) setEditForm((f: any) => ({ ...f, reading_value: String(data.reading_value) }));
+        else setReadingValue(String(data.reading_value));
+        (isEdit ? setEditExtractMsg : setExtractMsg)(`اتقرأت القراءة: ${data.reading_value} — راجعها قبل الحفظ ✅`);
+      }
+    } catch {
+      (isEdit ? setEditExtractMsg : setExtractMsg)("تعذر الاتصال بخوادم IDEA للاستخراج.");
+    } finally {
+      (isEdit ? setEditExtracting : setExtracting)(false);
+    }
+  };
 
   const submit = async () => {
     if (!(Number(readingValue) >= 0)) return;
@@ -1349,11 +1521,13 @@ function UtilityTab() {
         </div>
         <input type="number" placeholder="قيمة القراءة" value={readingValue} onChange={(e) => setReadingValue(e.target.value)} className={inputCls} />
         <input type="date" value={readingDate} onChange={(e) => setReadingDate(e.target.value)} className={inputCls} />
-        <label className={`${btnGhost} flex items-center justify-center gap-1 cursor-pointer`}>
-          <Camera size={14} /> {photo ? "تغيير صورة العداد" : "صوّر العداد (اختياري)"}
-          <input type="file" accept="image/*" capture="environment" className="hidden" onChange={async (e) => { const f = e.target.files?.[0]; if (f) setPhoto(await shrinkImage(f)); }} />
-        </label>
+        <div className="space-y-1">
+          <p className="text-xs text-neutral-400">صورة العداد (اختياري) — بنقرا القراءة منها تلقائيًا بالذكاء الاصطناعي</p>
+          <PhotoCaptureRow onPick={(dataUrl) => { setPhoto(dataUrl); extractReading(dataUrl, meterType, false); }} />
+        </div>
         {photo && <img src={photo} alt="العداد" className="rounded-lg max-h-32 mx-auto" />}
+        {extracting && <p className="text-xs text-orange-500 flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> {AI_LOADING_TEXT}</p>}
+        {extractMsg && !extracting && <p className="text-xs text-orange-500">{extractMsg}</p>}
         <button onClick={submit} disabled={saving} className={btnPrimary}>
           {saving ? <Loader2 size={14} className="animate-spin inline" /> : "تسجيل القراءة"}
         </button>
@@ -1385,11 +1559,10 @@ function UtilityTab() {
               </div>
               <input type="number" placeholder="قيمة القراءة" value={editForm.reading_value} onChange={(e) => setEditForm({ ...editForm, reading_value: e.target.value })} className={inputCls} />
               <input type="date" value={editForm.reading_date} onChange={(e) => setEditForm({ ...editForm, reading_date: e.target.value })} className={inputCls} />
-              <label className={`${btnGhost} flex items-center justify-center gap-1 cursor-pointer`}>
-                <Camera size={14} /> {editForm.photo ? "تغيير صورة العداد" : "صوّر العداد (اختياري)"}
-                <input type="file" accept="image/*" capture="environment" className="hidden" onChange={async (e) => { const f = e.target.files?.[0]; if (f) setEditForm({ ...editForm, photo: await shrinkImage(f) }); }} />
-              </label>
+              <PhotoCaptureRow onPick={(dataUrl) => { setEditForm({ ...editForm, photo: dataUrl }); extractReading(dataUrl, editForm.meter_type, true); }} />
               {editForm.photo && <img src={editForm.photo} alt="العداد" className="rounded-lg max-h-32 mx-auto" />}
+              {editExtracting && <p className="text-xs text-orange-500 flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> {AI_LOADING_TEXT}</p>}
+              {editExtractMsg && !editExtracting && <p className="text-xs text-orange-500">{editExtractMsg}</p>}
               <div className="flex items-center gap-2">
                 <button onClick={() => saveEdit(r.id)} disabled={editSaving} className={btnPrimary}>
                   {editSaving ? <Loader2 size={14} className="animate-spin inline" /> : "حفظ"}

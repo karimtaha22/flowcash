@@ -11,6 +11,9 @@ import { isValidPhone } from "@/lib/phone";
 import { shrinkImage } from "@/lib/image";
 import { Moon, Sun, LogOut, ShieldCheck, ShieldAlert, Plane, Fingerprint, TimerOff, Coins, Tags, Users, ChevronDown, Type, CalendarClock, Minus, Plus, Send, BellRing, Camera, BadgeCheck } from "lucide-react";
 
+// Round 32 — نص التحميل الموحّد لأي عملية بتكلّم Gemini في التطبيق كله.
+const AI_LOADING_TEXT = "جاري الاتصال بخوادم IDEA...";
+
 // نفس نمط الـ Modal المحلي المستخدم في installments/page.tsx — مفيش
 // Modal مشترك في المشروع، كل صفحة بتعرّف نسختها الصغيرة.
 function Modal({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
@@ -48,6 +51,8 @@ function SelfVerifyModal({ onClose, onDone, showMsg }: { onClose: () => void; on
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { showMsg(data.error || "حصل خطأ في التوثيق", true); return; }
       setResult(data.result);
+    } catch {
+      showMsg("تعذر الاتصال بخوادم IDEA — اتأكد من النت وجرب تاني.", true);
     } finally {
       setBusy(false);
     }
@@ -83,7 +88,7 @@ function SelfVerifyModal({ onClose, onDone, showMsg }: { onClose: () => void; on
 
       <div className="flex gap-2">
         <button onClick={onDone} className="flex-1 rounded-lg border border-neutral-300 dark:border-neutral-700 py-2 text-sm">قفل</button>
-        <button disabled={busy} onClick={submit} className="flex-1 bg-orange-600 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-60">{busy ? "جاري التحقق..." : "ابدأ التحقق"}</button>
+        <button disabled={busy} onClick={submit} className="flex-1 bg-orange-600 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-60">{busy ? AI_LOADING_TEXT : "ابدأ التحقق"}</button>
       </div>
     </Modal>
   );

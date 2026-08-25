@@ -211,6 +211,127 @@ export async function extractIdFields(idFrontDataUrl: string): Promise<IdExtract
   }
 }
 
+// Round 32 — "استخراج اسم الدكتور و التخصص و العنوان بالذكاء الاصطناعي" من
+// صورة روشتة/كشف طبي. زي extractIdFields بالظبط بس على حقول مختلفة، وبترجع
+// حقول فاضية (مش تخمين) لو الصورة مش واضحة أو مفيهاش البيانات دي أصلاً.
+export interface DoctorExtractionResult {
+  ok: boolean;
+  doctor_name: string;
+  doctor_specialty: string;
+  doctor_address: string;
+  error?: string;
+}
+
+const DOCTOR_EXTRACT_SCHEMA = {
+  type: "object",
+  properties: {
+    doctor_name: { type: "string", description: "اسم الطبيب المعالج زي ما هو مكتوب، أو فاضي لو مش موجود/مش واضح" },
+    doctor_specialty: { type: "string", description: "تخصص الطبيب (مثلاً: باطنة، عظام، أطفال)، أو فاضي لو مش موجود" },
+    doctor_address: { type: "string", description: "عنوان العيادة/المستشفى زي ما هو مكتوب، أو فاضي لو مش موجود" },
+  },
+  required: ["doctor_name", "doctor_specialty", "doctor_address"],
+};
+
+export async function extractDoctorFields(imageDataUrl: string): Promise<DoctorExtractionResult> {
+  const { apiKey, model } = await resolveGeminiConfig();
+  const fallback = (over: Partial<DoctorExtractionResult>): DoctorExtractionResult => ({
+    ok: false, doctor_name: "", doctor_specialty: "", doctor_address: "", ...over,
+  });
+  if (!apiKey) return fallback({ error: "GEMINI_API_KEY مش متسجل — لا في Vercel ولا من إعدادات التوثيق في /admin." });
+
+  const part = dataUrlToInlinePart(imageDataUrl);
+  if (!part) return fallback({ error: "الصورة وصلت بصيغة غير متوقعة." });
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: "user",
+            parts: [
+              { text: "دي صورة روشتة أو ورقة كشف طبي. استخرج اسم الطبيب المعالج، تخصصه، وعنوان العيادة/المستشفى زي ما هما مكتوبين بالظبط. لو أي حقل مش موجود أو مش واضح، سيبه فاضي — ممنوع تخمين. رجّع JSON بس زي الـ schema." },
+              { inline_data: part },
+            ],
+          },
+        ],
+        generationConfig: { responseMimeType: "application/json", responseSchema: DOCTOR_EXTRACT_SCHEMA, temperature: 0.1 },
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) return fallback({ error: data?.error?.message || `Gemini API error (${res.status})` });
+    const text: string | undefined = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) return fallback({ error: "مفيش رد واضح من نظام الاستخراج، حاول تاني." });
+    const parsed = JSON.parse(text);
+    return { ok: true, doctor_name: parsed.doctor_name || "", doctor_specialty: parsed.doctor_specialty || "", doctor_address: parsed.doctor_address || "" };
+  } catch (e: any) {
+    return fallback({ error: e?.message || "حصل خطأ ومقدرناش نقرأ الصورة، حاول تاني." });
+  }
+}
+
+// Round 32 — "استخراج القراءة بالذكاء الاصطناعي" من صورة عداد كهرباء/غاز/مياه.
+// برضو بترجع فاضي (مش تخمين) لو الرقم مش واضح في الصورة.
+export interface MeterExtractionResult {
+  ok: boolean;
+  reading_value: number | null;
+  is_legible: boolean;
+  error?: string;
+}
+
+const METER_EXTRACT_SCHEMA = {
+  type: "object",
+  properties: {
+    is_legible: { type: "boolean", description: "أرقام العداد واضحة ومقروءة في الصورة" },
+    reading_value: { type: "number", description: "قراءة العداد الحالية كرقم فقط (من غير وحدة)، أو 0 لو مش واضحة" },
+  },
+  required: ["is_legible", "reading_value"],
+};
+
+const METER_TYPE_LABEL: Record<string, string> = { electricity: "كهرباء", gas: "غاز", water: "مياه" };
+
+export async function extractMeterReading(imageDataUrl: string, meterType?: string | null): Promise<MeterExtractionResult> {
+  const { apiKey, model } = await resolveGeminiConfig();
+  const fallback = (over: Partial<MeterExtractionResult>): MeterExtractionResult => ({
+    ok: false, reading_value: null, is_legible: false, ...over,
+  });
+  if (!apiKey) return fallback({ error: "GEMINI_API_KEY مش متسجل — لا في Vercel ولا من إعدادات التوثيق في /admin." });
+
+  const part = dataUrlToInlinePart(imageDataUrl);
+  if (!part) return fallback({ error: "الصورة وصلت بصيغة غير متوقعة." });
+
+  const typeLabel = (meterType && METER_TYPE_LABEL[meterType]) || "";
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: "user",
+            parts: [
+              { text: `دي صورة عداد ${typeLabel || "(كهرباء/غاز/مياه)"}. اقرأ الرقم الحالي المعروض على العداد بالظبط (الأرقام الرئيسية بس، من غير أي وحدة أو فاصلة عشرية زايدة لو مش موجودة في الصورة). لو الرقم مش واضح خالص، رجّع is_legible=false وreading_value=0. رجّع JSON بس زي الـ schema.` },
+              { inline_data: part },
+            ],
+          },
+        ],
+        generationConfig: { responseMimeType: "application/json", responseSchema: METER_EXTRACT_SCHEMA, temperature: 0.1 },
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) return fallback({ error: data?.error?.message || `Gemini API error (${res.status})` });
+    const text: string | undefined = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) return fallback({ error: "مفيش رد واضح من نظام الاستخراج، حاول تاني." });
+    const parsed = JSON.parse(text);
+    if (!parsed.is_legible) return fallback({ is_legible: false, error: "مقدرناش نقرأ رقم العداد بوضوح من الصورة — اكتبه يدويًا." });
+    return { ok: true, is_legible: true, reading_value: typeof parsed.reading_value === "number" ? parsed.reading_value : null };
+  } catch (e: any) {
+    return fallback({ error: e?.message || "حصل خطأ ومقدرناش نقرأ الصورة، حاول تاني." });
+  }
+}
+
 // "AI يتأكد إنها صورة بطاقة فعلا مش أي صورة ويطابق الاسم" — يتفرق عن
 // verifyIdAgainstSelfie: هنا مفيش سيلفي، بس بنتأكد (أ) إن الصورة فعلاً بطاقة
 // هوية واضحة و(ب) إن الاسم المكتوب على البطاقة يطابق الاسم اللي المستخدم
