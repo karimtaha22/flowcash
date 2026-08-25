@@ -29,6 +29,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if ("status" in body && ["active", "completed", "cancelled"].includes(body.status)) update.status = body.status;
   if ("note" in body) update.note = body.note || null;
   if ("course_duration_days" in body) update.course_duration_days = body.course_duration_days ? Number(body.course_duration_days) : null;
+  if ("group_id" in body) update.group_id = body.group_id || null;
 
   const SCHEDULE_TYPES = ["meal", "interval", "daily", "weekly", "monthly"];
   const scheduleChanged = "schedule_type" in body || "meal_timing" in body || "interval_hours" in body || "first_dose_at" in body;

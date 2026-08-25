@@ -10,8 +10,9 @@
 // per-user URL segment).
 import { supabaseAdmin } from "./supabaseAdmin";
 import { sendText, tgCall, MAIN_KEYBOARD, CANCEL_KEYBOARD, CANCEL_TEXT, BRAND_FOOTER } from "./telegram";
-import { getSession, setSession, clearSession, accountsKeyboard, yesNoKeyboard, parseAmount } from "./botHelpers";
+import { getSession, setSession, clearSession, accountsKeyboard, accountsKeyboardWithCash, yesNoKeyboard, parseAmount } from "./botHelpers";
 import { createTransaction } from "./transactions";
+import { adjustWallet } from "./wallet";
 import { confirmRecurringItem, isConfirmedForCurrentPeriod } from "./recurringConfirm";
 import { classifyExpense } from "./categories";
 import { toEGP } from "./fx";
@@ -589,9 +590,11 @@ async function continueFlow(userId: string, botToken: string, chatId: string, se
       const guess = classifyExpense(input, cats || []);
       if (guess) payload.category_id = guess;
       const accounts = await getAccounts(userId);
-      if (!accounts.length) return reply(botToken, chatId, "لسه معملتش أي حساب. ضيفه من التطبيق.");
+      // Round 35 — expense (unlike withdrawal/transfer) can also be "كاش" with
+      // no real account touched, so a "لسه معملتش أي حساب" block no longer
+      // applies here even with zero accounts — the cash option always works.
       await setSession(userId, chatId, flow, "await_account", payload);
-      return replyInlineWithCancel(botToken, chatId, "من انهي حساب؟", accountsKeyboard(accounts, "acc"));
+      return replyInlineWithCancel(botToken, chatId, "من انهي حساب؟ (أو دوس كاش لو مفيش حساب اتخصم منه)", accountsKeyboardWithCash(accounts, "acc"));
     }
 
     if (step === "await_source") {
@@ -603,7 +606,7 @@ async function continueFlow(userId: string, botToken: string, chatId: string, se
     }
 
     if (step === "await_account" && cbPrefix === "acc") {
-      payload.account_id = input;
+      payload.account_id = input === "none" ? null : input;
       if (flow === "transfer") {
         const accounts = (await getAccounts(userId)).filter((a) => a.id !== input);
         await setSession(userId, chatId, flow, "await_to_account", payload);
@@ -615,6 +618,28 @@ async function continueFlow(userId: string, botToken: string, chatId: string, se
     if (step === "await_to_account" && cbPrefix === "to") {
       payload.to_account_id = input;
       return finalizeSimpleTx(userId, botToken, chatId, flow, payload);
+    }
+  }
+
+  // ===== WALLET PROMPT (round 35) — "حط الفلوس في محفظتك؟" after a
+  // withdrawal, or "تخصم من المحفظة؟" after a cash-only expense (no account
+  // picked in the step above). Fires as a follow-up AFTER finalizeSimpleTx
+  // already saved the underlying transaction — same shape as the existing
+  // recur_confirm "تخصم من حساب؟" pattern above, just post-save instead of
+  // pre-save since the wallet is independent of the transaction itself.
+  if (flow === "wallet_prompt" && step === "ask" && cbPrefix === "wallet") {
+    if (input !== "yes") {
+      await clearSession(userId, chatId);
+      return reply(botToken, chatId, "تمام، متسجلش في المحفظة.");
+    }
+    try {
+      const delta = payload.kind === "withdrawal" ? Math.abs(payload.amount) : -Math.abs(payload.amount);
+      const newBalance = await adjustWallet(userId, payload.currency, delta, payload.kind, "bot");
+      await setSession(userId, chatId, null, null, { last_tx_id: payload.last_tx_id });
+      return reply(botToken, chatId, `تم ✅ محفظتك دلوقتي: ${newBalance.toLocaleString()} ${payload.currency}`);
+    } catch (e: any) {
+      await clearSession(userId, chatId);
+      return reply(botToken, chatId, `في مشكلة: ${e.message}`);
     }
   }
 }
@@ -632,8 +657,24 @@ async function finalizeSimpleTx(userId: string, botToken: string, chatId: string
       category_id: payload.category_id,
       source: "bot",
     });
-    await setSession(userId, chatId, null, null, { last_tx_id: tx.id });
     const labels: Record<string, string> = { expense: "المصروف", withdrawal: "السحب", income: "الفلوس", transfer: "التحويل" };
+    // Round 35 — "المحفظة الشخصية": a withdrawal always offers to add the
+    // cash to the wallet; an expense saved with no account (the "كاش" option
+    // added above, or the app's own optional-account expense) offers to
+    // deduct it instead. Both other flows (income/transfer) leave the
+    // session cleared exactly as before.
+    const walletKind: "withdrawal" | "cash_expense" | null =
+      flow === "withdrawal" ? "withdrawal" : flow === "expense" && !payload.account_id ? "cash_expense" : null;
+    if (walletKind) {
+      await setSession(userId, chatId, "wallet_prompt", "ask", { kind: walletKind, amount: Math.abs(payload.amount), currency: tx.currency, last_tx_id: tx.id });
+      await reply(botToken, chatId, `تم تسجيل ${labels[flow]} ✅ (${payload.amount})`, CANCEL_KEYBOARD);
+      return tgCall(botToken, "sendMessage", {
+        chat_id: chatId,
+        text: walletKind === "withdrawal" ? "👛 حط الفلوس دي في محفظتك؟" : "👛 تخصم المبلغ ده من محفظتك؟",
+        reply_markup: yesNoKeyboard("wallet"),
+      });
+    }
+    await setSession(userId, chatId, null, null, { last_tx_id: tx.id });
     return reply(
       botToken,
       chatId,

@@ -19,7 +19,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!(await ownsGam3eya(userId, id))) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   const body = await req.json();
-  const allowed = ["name", "phone", "account_number", "payment_method", "address", "id_photo_front", "rating", "payment_accounts"];
+  const allowed = ["name", "phone", "account_number", "payment_method", "address", "id_photo_front", "rating", "payment_accounts", "split_with_name"];
   const update: Record<string, any> = {};
   for (const k of allowed) if (k in body) update[k] = body[k];
   if ("phone" in update && update.phone && !isValidPhone(update.phone)) {

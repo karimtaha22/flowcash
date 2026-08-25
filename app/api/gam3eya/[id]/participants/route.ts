@@ -19,7 +19,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
   const body = await req.json();
-  const { name, phone, account_number, payment_method, address, id_photo_front, payment_accounts } = body;
+  const { name, phone, account_number, payment_method, address, id_photo_front, payment_accounts, split_with_name } = body;
   if (!name) return NextResponse.json({ error: "اسم الفرد لازم يتملى" }, { status: 400 });
   if (phone && !isValidPhone(phone)) return NextResponse.json({ error: "رقم موبايل غير صالح" }, { status: 400 });
 
@@ -32,7 +32,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const { data: participant, error } = await supabaseAdmin
     .from("gam3eya_participants")
-    .insert({ gam3eya_id: id, name, phone: phone || null, account_number: account_number || null, payment_method: payment_method || "bank", address: address || null, id_photo_front: id_photo_front || null, payment_accounts: Array.isArray(payment_accounts) ? payment_accounts : [], payout_order: nextOrder })
+    .insert({ gam3eya_id: id, name, phone: phone || null, account_number: account_number || null, payment_method: payment_method || "bank", address: address || null, id_photo_front: id_photo_front || null, payment_accounts: Array.isArray(payment_accounts) ? payment_accounts : [], payout_order: nextOrder, split_with_name: split_with_name?.trim() || null })
     .select()
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

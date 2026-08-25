@@ -45,6 +45,9 @@ interface Gam3eyaParticipant {
   // الموبايل بتاع الفرد مع أي حساب FlowCash موثّق (app_users.is_verified).
   // منفصلة تمامًا عن `verified` اللي فوق (ده توثيق محلي بواسطة المنظّم نفسه).
   account_verified?: boolean;
+  // Round 34 — لو متملي، الدور/الدفعات دي متقسمة بين الفرد ده وشريك تاني
+  // بنفس الاسم ده (عرض/تصدير بس).
+  split_with_name?: string | null;
 }
 
 const PAYMENT_METHOD_LABEL: Record<string, string> = { bank: "حساب بنكي", insta: "إنستا باي", wallet: "محفظة إلكترونية" };
@@ -675,8 +678,12 @@ function StarPicker({ value, onChange, readOnly = false }: { value: number | nul
 }
 
 // ===================== جمعيات =====================
-type NewParticipant = { name: string; phone: string; account_number: string; payment_method: "bank" | "insta" | "wallet"; address: string; id_photo_front: string; payment_accounts: PaymentAccount[] };
-const emptyNewParticipant = (): NewParticipant => ({ name: "", phone: "", account_number: "", payment_method: "bank", address: "", id_photo_front: "", payment_accounts: [] });
+// Round 34 — "فرد يتقسم علي 2": علم split_with_name اختياري، لو متملي
+// معناه إن الدور/الدفعات ده متقسم بين اسمين (شريكين) بدل شخص واحد —
+// نفس الصف/نفس جدول الدفعات، بس بيتعرض ويتصدّر باسمين. `split` نفسها
+// حقل واجهة بس (بتتحكم في إظهار خانة الاسم التاني) ومش بتتبعت للسيرفر.
+type NewParticipant = { name: string; phone: string; account_number: string; payment_method: "bank" | "insta" | "wallet"; address: string; id_photo_front: string; payment_accounts: PaymentAccount[]; split: boolean; split_with_name: string };
+const emptyNewParticipant = (): NewParticipant => ({ name: "", phone: "", account_number: "", payment_method: "bank", address: "", id_photo_front: "", payment_accounts: [], split: false, split_with_name: "" });
 
 function Gam3eyaTab({
   gam3eyat, reload, showMsg,
@@ -919,8 +926,18 @@ function Gam3eyaTab({
                       <div className="flex gap-1.5 items-center">
                         <span className="text-[10px] text-neutral-400 w-4 shrink-0">{i + 1}</span>
                         <input placeholder="الاسم" value={p.name} onChange={(e) => update({ name: e.target.value })} className="flex-1 min-w-0 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 text-xs" />
+                        <button
+                          onClick={() => update({ split: !p.split, split_with_name: p.split ? "" : p.split_with_name })}
+                          title="قسّم الدور ده على فردين"
+                          className={`shrink-0 text-[10px] font-semibold rounded-md px-1.5 py-1 ${p.split ? "bg-orange-500 text-white" : "border border-neutral-300 dark:border-neutral-700 text-neutral-400"}`}
+                        >
+                          /٢
+                        </button>
                         <button onClick={() => setOrgParticipants(orgParticipants.filter((_, xi) => xi !== i))} className="text-neutral-400 hover:text-red-600 p-1 shrink-0"><X size={13} /></button>
                       </div>
+                      {p.split && (
+                        <input placeholder="اسم الفرد الشريك في نفس الدور" value={p.split_with_name} onChange={(e) => update({ split_with_name: e.target.value })} className="w-full rounded-lg border border-orange-300 dark:border-orange-800 bg-transparent px-2 py-1.5 text-xs" />
+                      )}
                       <div>
                         <input placeholder="رقم الموبايل" value={p.phone} onChange={(e) => update({ phone: e.target.value })} className={`w-full rounded-lg border bg-transparent px-2 py-1.5 text-xs ${p.phone && !isValidPhone(p.phone) ? "border-red-400 dark:border-red-700" : "border-neutral-300 dark:border-neutral-700"}`} />
                         {p.phone && !isValidPhone(p.phone) && <p className="text-[9px] text-red-500 mt-0.5">رقم موبايل غير صالح</p>}
@@ -1188,7 +1205,7 @@ function Gam3eyaCard({
             <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f3f4f6;${overdueForP ? "background:#fef2f2;" : ""}">
               <div style="display:flex;align-items:center;gap:6px;min-width:0;">
                 ${overdueForP ? '<span style="width:7px;height:7px;border-radius:50%;background:#dc2626;flex-shrink:0;"></span>' : ""}
-                <span style="font-size:12px;font-weight:600;color:${overdueForP ? "#dc2626" : "#111827"};">#${p.payout_order} ${p.name}</span>
+                <span style="font-size:12px;font-weight:600;color:${overdueForP ? "#dc2626" : "#111827"};">#${p.payout_order} ${p.name}${p.split_with_name ? ` / ${p.split_with_name}` : ""}</span>
                 ${stars ? `<span style="font-size:11px;color:#f59e0b;">${stars}</span>` : ""}
               </div>
               <div style="font-size:11px;text-align:left;flex-shrink:0;">
@@ -1342,7 +1359,19 @@ function Gam3eyaCard({
 
           {addingParticipant && (
             <div className="rounded-lg border border-dashed border-neutral-300 dark:border-neutral-700 p-2 space-y-1.5">
-              <input placeholder="اسم الفرد الجديد" value={newParticipant.name} onChange={(e) => setNewParticipant({ ...newParticipant, name: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 text-xs" />
+              <div className="flex gap-1.5 items-center">
+                <input placeholder="اسم الفرد الجديد" value={newParticipant.name} onChange={(e) => setNewParticipant({ ...newParticipant, name: e.target.value })} className="flex-1 min-w-0 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 text-xs" />
+                <button
+                  onClick={() => setNewParticipant({ ...newParticipant, split: !newParticipant.split, split_with_name: newParticipant.split ? "" : newParticipant.split_with_name })}
+                  title="قسّم الدور ده على فردين"
+                  className={`shrink-0 text-[10px] font-semibold rounded-md px-1.5 py-1 ${newParticipant.split ? "bg-orange-500 text-white" : "border border-neutral-300 dark:border-neutral-700 text-neutral-400"}`}
+                >
+                  /٢
+                </button>
+              </div>
+              {newParticipant.split && (
+                <input placeholder="اسم الفرد الشريك في نفس الدور" value={newParticipant.split_with_name} onChange={(e) => setNewParticipant({ ...newParticipant, split_with_name: e.target.value })} className="w-full rounded-lg border border-orange-300 dark:border-orange-800 bg-transparent px-2 py-1.5 text-xs" />
+              )}
               <div>
                 <input placeholder="رقم الموبايل" value={newParticipant.phone} onBlur={(e) => checkPhoneHistory(e.target.value)} onChange={(e) => { setNewParticipant({ ...newParticipant, phone: e.target.value }); setPhoneHistory(null); }} className={`w-full rounded-lg border bg-transparent px-2 py-1.5 text-xs ${newParticipant.phone && !isValidPhone(newParticipant.phone) ? "border-red-400 dark:border-red-700" : "border-neutral-300 dark:border-neutral-700"}`} />
                 {newParticipant.phone && !isValidPhone(newParticipant.phone) && <p className="text-[9px] text-red-500 mt-0.5">رقم موبايل غير صالح</p>}
@@ -1392,7 +1421,8 @@ function Gam3eyaCard({
                     className="flex items-center gap-1.5 flex-1 min-w-0 text-right"
                   >
                     <span className="text-neutral-400 shrink-0">#{p.payout_order}</span>
-                    <span className={`font-medium truncate ${overdueForP ? "text-red-500" : ""}`}>{p.name}</span>
+                    <span className={`font-medium truncate ${overdueForP ? "text-red-500" : ""}`}>{p.name}{p.split_with_name ? ` / ${p.split_with_name}` : ""}</span>
+                    {p.split_with_name && <span className="text-[9px] font-semibold text-orange-600 shrink-0" title={`مقسومة بين ${p.name} و${p.split_with_name}`}>÷٢</span>}
                     {overdueForP && <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" title="متأخر عن السداد" />}
                     {isCollectorNow && <span className="text-[10px] shrink-0">🎁 بيقبض الشهر ده</span>}
                     {p.account_verified && <span title="شخص موثّق (حساب FlowCash موثّق بنفس رقم الموبايل)"><BadgeCheck size={13} className="text-blue-500 shrink-0" /></span>}
@@ -1539,6 +1569,7 @@ function ParticipantDetailModal({
   onSaved: () => void; onOpenVerify: () => void; showMsg: (t: string, e?: boolean) => void;
 }) {
   const [name, setName] = useState(participant.name);
+  const [splitWithName, setSplitWithName] = useState(participant.split_with_name || "");
   const [phone, setPhone] = useState(participant.phone || "");
   const [accountNumber, setAccountNumber] = useState(participant.account_number || "");
   const [paymentMethod, setPaymentMethod] = useState<"bank" | "insta" | "wallet">(participant.payment_method || "bank");
@@ -1560,6 +1591,7 @@ function ParticipantDetailModal({
         body: JSON.stringify({
           name, phone: phone || null, account_number: accountNumber || null, payment_method: paymentMethod, address: address || null, id_photo_front: idPhoto || null,
           payment_accounts: accounts.filter((a) => a.account_number.trim()).map((a) => ({ ...a, label: a.label?.trim() || undefined })),
+          split_with_name: splitWithName.trim() || null,
         }),
       });
       if (!res.ok) { showMsg("حصل خطأ ومتحفظش التعديل", true); return; }
@@ -1599,6 +1631,10 @@ function ParticipantDetailModal({
       <div>
         <label className="text-[10px] text-neutral-400">الاسم</label>
         <input value={name} onChange={(e) => setName(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+      </div>
+      <div>
+        <label className="text-[10px] text-neutral-400">فرد شريك في نفس الدور (اختياري — لو الدور ده مقسوم على فردين)</label>
+        <input placeholder="مثلاً: اسم شريك الدور" value={splitWithName} onChange={(e) => setSplitWithName(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
       </div>
       <div>
         <label className="text-[10px] text-neutral-400">رقم الموبايل</label>

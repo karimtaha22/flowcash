@@ -4,7 +4,7 @@ import { useSearchParams } from "next/navigation";
 import Card from "@/components/Card";
 import { fmt } from "@/lib/format";
 import { toEGP, fromEGP, type FxRates } from "@/lib/fx";
-import { Plus, Landmark, Smartphone, ChevronDown, Trash2, CornerDownLeft, RefreshCcw } from "lucide-react";
+import { Plus, Landmark, Smartphone, ChevronDown, Trash2, CornerDownLeft, RefreshCcw, Wallet, X } from "lucide-react";
 
 const CURRENCIES = [
   { code: "EGP", label: "جنيه مصري" },
@@ -23,7 +23,7 @@ interface Account {
   include_in_net_worth?: boolean;
 }
 
-const emptyForm = { name: "", type: "bank", account_number: "", currency: "EGP", balance: "" };
+const emptyForm = { name: "", type: "bank", account_number: "", currency: "EGP", balance: "", include_in_net_worth: true };
 
 function AccountsInner() {
   const searchParams = useSearchParams();
@@ -43,6 +43,15 @@ function AccountsInner() {
   const [baseCurrency, setBaseCurrency] = useState("EGP");
   const [rates, setRates] = useState<FxRates | null>(null);
 
+  // Round 35 — "المحفظة الشخصية" (pocket cash): a separate box, never folded
+  // into totalByCurrency/net worth. See lib/wallet.ts for why it's a
+  // dedicated table instead of an accounts row.
+  const [walletBalances, setWalletBalances] = useState<{ currency: string; balance: number }[]>([]);
+  const [walletModalOpen, setWalletModalOpen] = useState(false);
+  const [walletCurrency, setWalletCurrency] = useState("EGP");
+  const [walletAmount, setWalletAmount] = useState("");
+  const [walletSaving, setWalletSaving] = useState(false);
+
   const showMsg = (text: string, isError = false) => {
     setMsg(text);
     setMsgIsError(isError);
@@ -50,11 +59,35 @@ function AccountsInner() {
   };
 
   const load = () => fetch("/api/accounts").then((r) => r.json()).then((d) => setAccounts(d.accounts || []));
+  const loadWallet = () => fetch("/api/wallet").then((r) => r.json()).then((d) => setWalletBalances(d.balances || [])).catch(() => {});
   useEffect(() => {
     load();
+    loadWallet();
     fetch("/api/me").then((r) => r.json()).then((d) => setBaseCurrency(d?.user?.base_currency || "EGP")).catch(() => {});
     fetch("/api/fx").then((r) => r.json()).then((d) => setRates(d.rates || null)).catch(() => {});
   }, []);
+
+  const submitWallet = async (sign: 1 | -1) => {
+    const amt = parseFloat(walletAmount);
+    if (!(amt > 0)) return;
+    setWalletSaving(true);
+    try {
+      const res = await fetch("/api/wallet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currency: walletCurrency, amount: amt * sign }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { showMsg(data.error || "حصل خطأ في المحفظة، حاول تاني", true); return; }
+      setWalletAmount("");
+      loadWallet();
+      showMsg(sign === 1 ? "تم الإضافة للمحفظة ✅" : "تم الخصم من المحفظة ✅");
+    } catch {
+      showMsg("مفيش اتصال بالإنترنت، حاول تاني", true);
+    } finally {
+      setWalletSaving(false);
+    }
+  };
 
   // convert an account's balance into the app's base currency — via EGP,
   // since rates are all EGP-relative (see lib/fx.ts).
@@ -193,9 +226,14 @@ function AccountsInner() {
   // never touched the base-currency figure at all, so toggling the switch
   // visibly changed nothing on this page (only the Dashboard's separate net
   // worth figure moved).
+  // Round 35 fix — the switch used to only suppress the CONVERTED cross-
+  // currency contribution; an excluded account's own-currency bucket still
+  // counted it unconditionally. Now include_in_net_worth===false skips the
+  // account everywhere in this sum, not just in the converted total.
   const totalByCurrency = accounts.reduce((acc: Record<string, number>, a) => {
+    if (a.include_in_net_worth === false) return acc;
     acc[a.currency] = (acc[a.currency] || 0) + Number(a.balance);
-    if (a.currency !== baseCurrency && a.include_in_net_worth !== false) {
+    if (a.currency !== baseCurrency) {
       const converted = toBaseCurrency(Number(a.balance), a.currency);
       if (converted !== null) acc[baseCurrency] = (acc[baseCurrency] || 0) + converted;
     }
@@ -219,23 +257,23 @@ function AccountsInner() {
         </div>
         <input placeholder="رقم الحساب/المحفظة" value={e.account_number || ""} onChange={(ev) => setEditing({ ...editing, [a.id]: { ...e, account_number: ev.target.value } })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
         <input type="number" placeholder="الرصيد" value={e.balance} onChange={(ev) => setEditing({ ...editing, [a.id]: { ...e, balance: ev.target.value } })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
-        {e.currency && e.currency !== baseCurrency && (
-          <div className="rounded-lg bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-700 px-3 py-2 space-y-1.5">
-            <label className="flex items-center justify-between text-xs text-neutral-700 dark:text-neutral-300">
-              <span>احسب المبلغ المحوّل من الحساب ده ضمن صافي الثروة</span>
-              <button
-                type="button"
-                onClick={() => setEditing({ ...editing, [a.id]: { ...e, include_in_net_worth: !e.include_in_net_worth } })}
-                className={`w-11 h-6 rounded-full transition shrink-0 ${e.include_in_net_worth ? "bg-orange-600" : "bg-neutral-300 dark:bg-neutral-600"}`}
-              >
-                <span className={`block w-5 h-5 bg-white rounded-full shadow transition ${e.include_in_net_worth ? "translate-x-[-22px]" : "translate-x-[-2px]"}`} />
-              </button>
-            </label>
-            <p className="text-[10px] leading-relaxed text-neutral-500">
-              المبلغ اللي في الحساب ده متحسوب بعملة {e.currency}، ومضاف له معادله بالعملة الرئيسية ({baseCurrency}) عشان يدخل في حساب صافي الثروة. اقفل السويتش لو مش عايز المبلغ ده يتحسب ضمن صافي ثروتك.
-            </p>
-          </div>
-        )}
+        <div className="rounded-lg bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-700 px-3 py-2 space-y-1.5">
+          <label className="flex items-center justify-between text-xs text-neutral-700 dark:text-neutral-300">
+            <span>احسب الحساب ده ضمن إجمالي الحسابات وصافي الثروة</span>
+            <button
+              type="button"
+              onClick={() => setEditing({ ...editing, [a.id]: { ...e, include_in_net_worth: !e.include_in_net_worth } })}
+              className={`w-11 h-6 rounded-full transition shrink-0 ${e.include_in_net_worth ? "bg-orange-600" : "bg-neutral-300 dark:bg-neutral-600"}`}
+            >
+              <span className={`block w-5 h-5 bg-white rounded-full shadow transition ${e.include_in_net_worth ? "translate-x-[-22px]" : "translate-x-[-2px]"}`} />
+            </button>
+          </label>
+          <p className="text-[10px] leading-relaxed text-neutral-500">
+            {e.currency && e.currency !== baseCurrency
+              ? `المبلغ اللي في الحساب ده بعملة ${e.currency}، ومضاف له معادله بالعملة الرئيسية (${baseCurrency}). اقفل السويتش لو مش عايز الحساب ده يدخل في إجمالي حساباتك ولا صافي ثروتك.`
+              : "اقفل السويتش لو مش عايز الحساب ده يدخل في إجمالي حساباتك ولا صافي ثروتك — يفضل متسجل عندك بس من غير ما يتحسب في أي إجمالي."}
+          </p>
+        </div>
         <div className="flex gap-2">
           <button disabled={saving} onClick={() => saveEdit(a.id)} className="flex-1 bg-orange-600 text-white rounded-lg py-2 text-sm font-medium">حفظ التعديلات</button>
           <button onClick={() => setConfirmDelete(a)} className="px-3 rounded-lg bg-red-50 dark:bg-red-950 text-red-600 dark:text-red-400"><Trash2 size={16} /></button>
@@ -272,6 +310,9 @@ function AccountsInner() {
                 ≈ {fmt(converted, baseCurrency)}
                 {a.include_in_net_worth === false ? " (مش محسوبة في صافي الثروة)" : " ✓ متحسوبة في الإجمالي"}
               </p>
+            )}
+            {converted === null && a.include_in_net_worth === false && (
+              <p className="text-[10px] text-neutral-400">مش محسوبة في الإجمالي</p>
             )}
           </div>
           <ChevronDown size={16} className={`shrink-0 text-neutral-400 transition-transform ${expanded === a.id ? "rotate-180" : ""}`} />
@@ -326,6 +367,16 @@ function AccountsInner() {
           </div>
           <input placeholder="رقم الحساب/المحفظة (اختياري)" value={form.account_number} onChange={(e) => setForm({ ...form, account_number: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
           <input placeholder="الرصيد الحالي" type="number" value={form.balance} onChange={(e) => setForm({ ...form, balance: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+          <label className="flex items-center justify-between text-xs text-neutral-700 dark:text-neutral-300 px-1">
+            <span>احسب الحساب ده ضمن إجمالي الحسابات وصافي الثروة</span>
+            <button
+              type="button"
+              onClick={() => setForm({ ...form, include_in_net_worth: !form.include_in_net_worth })}
+              className={`w-11 h-6 rounded-full transition shrink-0 ${form.include_in_net_worth ? "bg-orange-600" : "bg-neutral-300 dark:bg-neutral-600"}`}
+            >
+              <span className={`block w-5 h-5 bg-white rounded-full shadow transition ${form.include_in_net_worth ? "translate-x-[-22px]" : "translate-x-[-2px]"}`} />
+            </button>
+          </label>
           <button disabled={saving} onClick={submit} className="w-full bg-orange-600 text-white rounded-lg py-2 text-sm font-medium">
             {saving ? "جاري الحفظ..." : "حفظ الحساب"}
           </button>
@@ -342,6 +393,26 @@ function AccountsInner() {
             )}
           </Card>
         ))}
+
+        {/* Round 35 — "المحفظة الشخصية": الفلوس الكاش اللي في جيبك، منفصلة
+            تمامًا عن totalByCurrency فوق — مش بتتحسب ضمن إجمالي الحسابات ولا
+            صافي الثروة في أي مكان في التطبيق (دا الفرق الجوهري بينها وبين
+            حساب عادي مقفول عليه السويتش). */}
+        <button onClick={() => setWalletModalOpen(true)} className="text-right">
+          <Card className="text-center bg-gradient-to-br from-amber-50 to-orange-100 dark:from-amber-950/40 dark:to-orange-950/40 border-amber-200 dark:border-amber-900 h-full">
+            <p className="text-xs text-amber-700 dark:text-amber-400 flex items-center justify-center gap-1"><Wallet size={13} /> محفظتك</p>
+            {walletBalances.length === 0 ? (
+              <p className="text-lg font-bold mt-1 text-amber-700 dark:text-amber-400">0</p>
+            ) : (
+              <div className="mt-1 space-y-0.5">
+                {walletBalances.map((w) => (
+                  <p key={w.currency} className="text-sm font-bold text-amber-700 dark:text-amber-400">{fmt(w.balance, w.currency)}</p>
+                ))}
+              </div>
+            )}
+            <p className="text-[10px] text-amber-600/80 dark:text-amber-500/70 mt-1">كاش — مش محسوبة في أي إجمالي</p>
+          </Card>
+        </button>
       </div>
 
       <div className="space-y-3">
@@ -381,6 +452,40 @@ function AccountsInner() {
           </div>
         )}
       </Card>
+
+      {walletModalOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50" onClick={() => setWalletModalOpen(false)}>
+          <div className="bg-white dark:bg-neutral-900 rounded-t-2xl sm:rounded-2xl w-full max-w-sm p-4 space-y-3" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <p className="font-semibold text-sm flex items-center gap-1.5"><Wallet size={16} className="text-amber-600" /> محفظتك الشخصية</p>
+              <button onClick={() => setWalletModalOpen(false)}><X size={18} className="text-neutral-400" /></button>
+            </div>
+            <p className="text-[11px] text-neutral-400 leading-relaxed">
+              الكاش اللي في جيبك فعليًا — منفصلة تمامًا عن حساباتك، ومش بتتحسب في إجمالي الحسابات ولا صافي الثروة ولا أي مكان تاني في التطبيق. تقدر تحط فيها أكتر من عملة في نفس الوقت.
+            </p>
+            {walletBalances.length > 0 && (
+              <div className="rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 p-2 space-y-1">
+                {walletBalances.map((w) => (
+                  <div key={w.currency} className="flex justify-between text-sm">
+                    <span className="text-neutral-500">{w.currency}</span>
+                    <span className="font-bold text-amber-700 dark:text-amber-400">{fmt(w.balance, w.currency)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-2">
+              <select value={walletCurrency} onChange={(e) => setWalletCurrency(e.target.value)} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm">
+                {CURRENCIES.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}
+              </select>
+              <input type="number" placeholder="المبلغ" value={walletAmount} onChange={(e) => setWalletAmount(e.target.value)} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+            </div>
+            <div className="flex gap-2">
+              <button disabled={walletSaving} onClick={() => submitWallet(1)} className="flex-1 bg-orange-600 text-white rounded-lg py-2 text-sm font-medium">إضافة للمحفظة</button>
+              <button disabled={walletSaving} onClick={() => submitWallet(-1)} className="flex-1 border border-neutral-300 dark:border-neutral-700 rounded-lg py-2 text-sm font-medium">خصم من المحفظة</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {confirmDelete && (
         <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50" onClick={() => setConfirmDelete(null)}>

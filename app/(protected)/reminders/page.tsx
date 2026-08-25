@@ -19,6 +19,26 @@ const btnGhost = "border border-neutral-300 dark:border-neutral-700 rounded-lg p
 // إنه بيكلم خوادم IDEA بدل نص عام زي "جاري التحميل".
 const AI_LOADING_TEXT = "جاري الاتصال بخوادم IDEA...";
 
+// Round 34 postmortem — "تصدير قائمة السوبر ماركت لسه بايظ": مش نفس باج
+// الـ bidi بتاع Round 33 (اللي كان في الـ EGP/USD)، ده باج تاني خالص — صنف
+// واحد بس باسم طويل من غير مسافات (زي اسم منتج ملزوق من متجر) كان بيخلي
+// عرض الـ <table> يتمدد لعرض النص كامل (table-layout: auto الافتراضي)
+// وياخد الـ node كله معاه لبره حدوده الثابتة (700px)، فـ html2canvas بيقص
+// أي حاجة طلعت برة الصندوق — يعني عمود الكمية والسعر بيختفوا تمامًا من كل
+// الصفوف مش بس الصف الطويل. الحل: عرض أعمدة ثابت (table-layout: fixed) +
+// word-break على أي عمود نص حر (اسم الصنف/التفاصيل) عشان الاسم الطويل
+// ينزل سطر جديد جوه عموده بدل ما يمدد الجدول كله. + escapeHtml لأي نص حر
+// (بيتحط في innerHTML مباشرة) عشان علامات زي < أو & متكسرش الرسم.
+function escapeHtml(s: string): string {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
+}
+// أي رقم/نص لاتيني لازم يتلف جوه سياق RTL (زي "×2" أو "12 / 20") بيتقلب
+// بصريًا بخوارزمية bidi بتاعة المتصفح لو اتكتب خام — بنعزله جوه span بـ
+// unicode-bidi: isolate + direction: ltr عشان يفضل بترتيبه الصح.
+function ltrIsolate(s: string): string {
+  return `<span dir="ltr" style="unicode-bidi:isolate;">${s}</span>`;
+}
+
 // "رفع او تصوير" (Round 32) — زرارين منفصلين بدل زرار واحد: واحد بيفتح
 // الكاميرا مباشرة (capture="environment")، والتاني بيفتح معرض الصور العادي
 // (من غير capture عشان بعض المتصفحات بتقفل اختيار المعرض لما capture متحطة).
@@ -97,6 +117,11 @@ interface LineState {
   options: OptionRow[];
   selectedOptionId: string | null;
   quantity: number;
+  // Round 35 — "وزن حر جرام" لأصناف الكيلو: لو متسجل، بيبقى هو المرجّح
+  // الفعلي للسعر بدل quantity (grams/1000)، بيسمح بوزن دقيق زي 750 جرام
+  // بدل ما المستخدم يقرّب لأقرب نص/ربع كيلو. null = مفيش وزن حر متسجل،
+  // quantity هو اللي بيتحسب بيه زي العادي.
+  grams: number | null;
   loadingAi: boolean;
   aiMessage: string | null;
   manualOpen: boolean;
@@ -115,6 +140,7 @@ function blankRow(id: number): LineState {
     options: [],
     selectedOptionId: null,
     quantity: 1,
+    grams: null,
     loadingAi: false,
     aiMessage: null,
     manualOpen: false,
@@ -122,6 +148,59 @@ function blankRow(id: number): LineState {
     manualBrand: "",
     manualPrice: "",
   };
+}
+
+// effective multiplier for price math: a free-form gram weight (كيلو items
+// only) overrides the plain quantity count when set.
+const effQty = (quantity: number, grams: number | null | undefined) =>
+  grams && grams > 0 ? grams / 1000 : quantity;
+
+// Round 35 — "خلي البرنامج يفهم" quantity words in a free-typed grocery line
+// ("كيلو لبن"، "نص كيلو أرز"، "٢كيلو طماطم"، "صندوق مياه"، "ثمن بن") and pull
+// them out into quantity+unit, leaving a clean item name for catalog/price
+// matching. Deliberately a local regex parser, not a Gemini call — this
+// deployment currently has no live GEMINI_API_KEY configured anywhere (see
+// lib/groceryPricing.ts's header comment), so anything AI-dependent here
+// would silently do nothing; these phrasing patterns are well-defined enough
+// for a plain parser to handle instantly and offline.
+const ARABIC_DIGITS: Record<string, string> = { "٠": "0", "١": "1", "٢": "2", "٣": "3", "٤": "4", "٥": "5", "٦": "6", "٧": "7", "٨": "8", "٩": "9" };
+const toLatinDigits = (s: string) => s.replace(/[٠-٩]/g, (d) => ARABIC_DIGITS[d] || d);
+const FRACTION_WORDS: Record<string, number> = { "نص": 0.5, "نصف": 0.5, "ربع": 0.25, "تمن": 0.125, "ثمن": 0.125 };
+const UNIT_WORD_MAP: Record<string, string> = {
+  "كيلو": "كيلو", "كجم": "كيلو", "كج": "كيلو",
+  "كيس": "كيس",
+  "علبة": "علبة", "علبه": "علبة",
+  "زجاجة": "زجاجة", "زجاجه": "زجاجة",
+  "صندوق": "صندوق كامل", "كرتونة": "صندوق كامل", "كرتونه": "صندوق كامل",
+};
+const UNIT_WORD_ALT = "كيلو|كجم|كج|كيس|علبة|علبه|زجاجة|زجاجه|صندوق|كرتونة|كرتونه";
+
+function parseQuantityLine(raw: string): { name: string; quantity: number; unit: string } {
+  let text = toLatinDigits(raw.trim());
+  let quantity = 1;
+  let unit = "";
+
+  const fractionMatch = text.match(new RegExp(`^(نص|نصف|ربع|تمن|ثمن)\\s*(${UNIT_WORD_ALT})?\\s*`));
+  if (fractionMatch) {
+    quantity = FRACTION_WORDS[fractionMatch[1]] || 1;
+    unit = "كيلو"; // fraction words (نص/ربع/تمن) are always kilo-based here
+    text = text.slice(fractionMatch[0].length).trim();
+  } else {
+    const numMatch = text.match(new RegExp(`^(\\d+(?:\\.\\d+)?)\\s*(${UNIT_WORD_ALT})?\\s*`));
+    if (numMatch) {
+      quantity = parseFloat(numMatch[1]) || 1;
+      if (numMatch[2]) unit = UNIT_WORD_MAP[numMatch[2]] || "";
+      text = text.slice(numMatch[0].length).trim();
+    } else {
+      const unitOnlyMatch = text.match(new RegExp(`^(${UNIT_WORD_ALT})\\s*`));
+      if (unitOnlyMatch) {
+        unit = UNIT_WORD_MAP[unitOnlyMatch[1]] || "";
+        text = text.slice(unitOnlyMatch[0].length).trim();
+      }
+    }
+  }
+
+  return { name: text || raw.trim(), quantity, unit };
 }
 
 function GroceryTab() {
@@ -151,7 +230,7 @@ function GroceryTab() {
   // previous quantity/unit/selected-option per raw_text, carried over from
   // the list being edited so re-matching doesn't silently reset choices the
   // user already made — consumed (and cleared) the next time runMatch resolves.
-  const [pendingEntries, setPendingEntries] = useState<Record<string, { quantity: number; unit: string; selected_option_id: string | null }> | null>(null);
+  const [pendingEntries, setPendingEntries] = useState<Record<string, { quantity: number; unit: string; selected_option_id: string | null; grams: number | null }> | null>(null);
 
   const nextIdRef = useRef(1);
   // per-row debounce timers (name typed → catalog check) and the shared
@@ -254,7 +333,7 @@ function GroceryTab() {
   // القائمه الكامله مش القائمة السريعه علشان يعدل سعر كميه").
   const matchLines = async (
     rawLines: string[],
-    pending: Record<string, { quantity: number; unit: string; selected_option_id: string | null }> | null
+    pending: Record<string, { quantity: number; unit: string; selected_option_id: string | null; grams: number | null }> | null
   ): Promise<LineState[]> => {
     const res = await fetch("/api/reminders/grocery/match", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines: rawLines }) });
     const data = await res.json();
@@ -272,6 +351,7 @@ function GroceryTab() {
         options: m.options || [],
         selectedOptionId: prevOptionStillValid ? prev!.selected_option_id : m.options?.[0]?.id || null,
         quantity: prev?.quantity || 1,
+        grams: prev?.grams || null,
       };
     });
   };
@@ -279,12 +359,26 @@ function GroceryTab() {
   // "قائمة سريعة" — paste several items at once (one per line). Each becomes
   // a row exactly like a manually-added one: instant catalog check, then an
   // automatic (batched) AI lookup for anything not already in the catalog.
+  //
+  // Round 35 — each line is first run through parseQuantityLine so a phrase
+  // like "٢كيلو طماطم" splits into quantity=2/unit=كيلو/name="طماطم" before
+  // catalog matching even happens (cleaner name → better catalog hit rate
+  // too), instead of quantity always defaulting to 1 and the whole phrase
+  // being used as the item name.
   const runMatch = async () => {
     const raw = listText.split("\n").map((l) => l.trim()).filter(Boolean);
     if (!raw.length) return;
     setMatching(true);
     try {
-      const newRows = await matchLines(raw, pendingEntries);
+      const parsed = raw.map(parseQuantityLine);
+      const names = parsed.map((p) => p.name);
+      const matchedRows = await matchLines(names, pendingEntries);
+      const newRows = matchedRows.map((row, i) => {
+        // a carried-over pending entry (from "تعديل القائمة") already set its
+        // own quantity/unit — don't let the parser override a real edit.
+        if (pendingEntries?.[row.raw_text]) return row;
+        return { ...row, quantity: parsed[i]?.quantity || row.quantity, unit: parsed[i]?.unit || row.unit };
+      });
       setLines((prevLines) => [...prevLines, ...newRows]);
       setPendingEntries(null);
       setListText("");
@@ -311,7 +405,7 @@ function GroceryTab() {
 
   const total = lines.reduce((sum, l) => {
     const opt = l.options.find((o) => o.id === l.selectedOptionId);
-    return opt ? sum + opt.price * l.quantity : sum;
+    return opt ? sum + opt.price * effQty(l.quantity, l.grams) : sum;
   }, 0);
 
   const saveList = async () => {
@@ -324,7 +418,7 @@ function GroceryTab() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: listName || null,
-          entries: usable.map((l) => ({ raw_text: l.raw_text, item_id: l.item_id, selected_option_id: l.selectedOptionId, quantity: l.quantity, unit: l.unit || null })),
+          entries: usable.map((l) => ({ raw_text: l.raw_text, item_id: l.item_id, selected_option_id: l.selectedOptionId, quantity: l.quantity, unit: l.unit || null, grams: l.grams || null })),
         }),
       });
       const data = await res.json();
@@ -357,8 +451,8 @@ function GroceryTab() {
   const continueList = async (sl: any) => {
     const entries = sl.grocery_list_entries || [];
     const rawLines = entries.map((e: any) => e.raw_text);
-    const pending: Record<string, { quantity: number; unit: string; selected_option_id: string | null }> = {};
-    for (const e of entries) pending[e.raw_text] = { quantity: e.quantity || 1, unit: e.unit || "", selected_option_id: e.selected_option_id || null };
+    const pending: Record<string, { quantity: number; unit: string; selected_option_id: string | null; grams: number | null }> = {};
+    for (const e of entries) pending[e.raw_text] = { quantity: e.quantity || 1, unit: e.unit || "", selected_option_id: e.selected_option_id || null, grams: e.grams || null };
     setListName(sl.name || "");
     setReplacingListId(sl.id);
     setLines([]);
@@ -384,7 +478,7 @@ function GroceryTab() {
   // عربي فيطلع معكوس "EGP 123" بدل "123 EGP". اتأكد الفرض ده برندر فعلي
   // للـ HTML بمتصفح Chromium وتصويره — الفرق واضح لما نستخدم fmt() (بترجع
   // رمز عملة عربي "ج.م" بدل الحروف اللاتينية) بدل التركيب اليدوي.
-  const rasterizeRows = async (rows: { label: string; optionLabel: string; price: number; currency: string; qty: number }[], total: number, title: string) => {
+  const rasterizeRows = async (rows: { label: string; optionLabel: string; price: number; currency: string; qty: number; qtyLabel?: string }[], total: number, title: string) => {
     const node = document.createElement("div");
     node.style.position = "fixed";
     node.style.left = "-9999px";
@@ -395,12 +489,13 @@ function GroceryTab() {
     node.style.fontFamily = "Cairo, sans-serif";
     node.style.direction = "rtl";
     node.style.color = "#111827";
+    const cellWrap = "word-break:break-word;overflow-wrap:anywhere;";
     const rowsHtml = rows
       .map(
         (r) => `<tr>
-          <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:12px;">${r.label}</td>
-          <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;color:#6b7280;">${r.optionLabel}</td>
-          <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;">×${r.qty}</td>
+          <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:12px;${cellWrap}">${escapeHtml(r.label)}</td>
+          <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;color:#6b7280;${cellWrap}">${escapeHtml(r.optionLabel)}</td>
+          <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;">${ltrIsolate(r.qtyLabel || `×${r.qty}`)}</td>
           <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:12px;font-weight:600;white-space:nowrap;">${fmt(r.price * r.qty, r.currency)}</td>
         </tr>`
       )
@@ -408,9 +503,10 @@ function GroceryTab() {
     node.innerHTML = `
       <div style="text-align:center;margin-bottom:16px;">
         <p style="font-size:12px;color:#ea580c;font-weight:700;">FlowCash</p>
-        <h2 style="font-size:17px;margin:6px 0 2px;">${title}</h2>
+        <h2 style="font-size:17px;margin:6px 0 2px;">${escapeHtml(title)}</h2>
       </div>
-      <table style="width:100%;border-collapse:collapse;">
+      <table style="width:100%;border-collapse:collapse;table-layout:fixed;">
+        <colgroup><col style="width:34%;"/><col style="width:30%;"/><col style="width:12%;"/><col style="width:24%;"/></colgroup>
         <thead><tr style="background:#f9fafb;"><th style="padding:6px 4px;font-size:11px;text-align:right;">الصنف</th><th style="padding:6px 4px;font-size:11px;text-align:right;">التفاصيل</th><th style="padding:6px 4px;font-size:11px;text-align:right;">الكمية</th><th style="padding:6px 4px;font-size:11px;text-align:right;">السعر</th></tr></thead>
         <tbody>${rowsHtml || '<tr><td colspan="4" style="font-size:11px;color:#9ca3af;padding:6px 4px;">لا يوجد</td></tr>'}</tbody>
       </table>
@@ -424,6 +520,7 @@ function GroceryTab() {
     document.body.appendChild(node);
     try {
       const html2canvas = (await import("html2canvas-pro")).default;
+      if (document.fonts?.ready) await document.fonts.ready;
       return await html2canvas(node, { scale: 2, backgroundColor: "#ffffff" });
     } finally {
       document.body.removeChild(node);
@@ -460,7 +557,14 @@ function GroceryTab() {
   const currentListRows = () =>
     lines.map((l) => {
       const opt = l.options.find((o) => o.id === l.selectedOptionId);
-      return { label: l.raw_text, optionLabel: opt ? `${opt.brand ? opt.brand + " — " : ""}${opt.store_name || ""}` : "بدون سعر", price: opt?.price || 0, currency: opt?.currency || "EGP", qty: l.quantity };
+      return {
+        label: l.raw_text,
+        optionLabel: opt ? `${opt.brand ? opt.brand + " — " : ""}${opt.store_name || ""}` : "بدون سعر",
+        price: opt?.price || 0,
+        currency: opt?.currency || "EGP",
+        qty: effQty(l.quantity, l.grams),
+        qtyLabel: l.grams ? `${l.grams} جم` : undefined,
+      };
     });
   const exportCurrentList = () => exportRows(currentListRows(), total, `قائمة سوبر ماركت${listName ? " — " + listName : ""}`);
   const exportCurrentListImage = () => exportRowsImage(currentListRows(), total, `قائمة سوبر ماركت${listName ? " — " + listName : ""}`);
@@ -472,7 +576,8 @@ function GroceryTab() {
       optionLabel: e.grocery_item_options ? `${e.grocery_item_options.brand ? e.grocery_item_options.brand + " — " : ""}${e.grocery_item_options.store_name || ""}` : "بدون سعر",
       price: e.grocery_item_options?.price || 0,
       currency: e.grocery_item_options?.currency || "EGP",
-      qty: e.quantity || 1,
+      qty: effQty(e.quantity || 1, e.grams),
+      qtyLabel: e.grams ? `${e.grams} جم` : undefined,
     }));
     const listTotal = rows.reduce((s: number, r: any) => s + r.price * r.qty, 0);
     return { rows, listTotal };
@@ -490,10 +595,10 @@ function GroceryTab() {
     <div className="space-y-4">
       <Card className="space-y-2">
         <p className="text-sm font-medium">قائمة سريعة</p>
-        <p className="text-xs text-neutral-400">اكتب كل صنف في سطر — مثال: لبن، زبادي، بامبرز</p>
-        <textarea value={listText} onChange={(e) => setListText(e.target.value)} rows={4} className={inputCls} placeholder={"لبن\nزبادي\nبامبرز"} />
+        <p className="text-xs text-neutral-400">اكتب كل صنف في سطر، وتقدر تكتب الكمية معاه — مثال: كيلو لبن، نص كيلو أرز، ٢كيلو طماطم، صندوق مياه</p>
+        <textarea value={listText} onChange={(e) => setListText(e.target.value)} rows={4} className={inputCls} placeholder={"كيلو لبن\nنص كيلو أرز\n٢كيلو طماطم\nصندوق مياه"} />
         <button onClick={runMatch} disabled={matching} className={btnPrimary}>
-          {matching ? <Loader2 size={14} className="animate-spin inline" /> : "إنشاء القائمة"}
+          {matching ? <Loader2 size={14} className="animate-spin inline" /> : "أنشأ قائمة تسوق سريعة"}
         </button>
         {msg && <p className="text-xs text-orange-600">{msg}</p>}
       </Card>
@@ -545,7 +650,7 @@ function GroceryTab() {
               </button>
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <select value={l.unit} onChange={(e) => updateLine(l.id, { unit: e.target.value })} className={inputCls}>
+              <select value={l.unit} onChange={(e) => updateLine(l.id, { unit: e.target.value, grams: e.target.value === "كيلو" ? l.grams : null })} className={inputCls}>
                 <option value="">الكمية / العبوة</option>
                 {GROCERY_UNITS.map((u) => (
                   <option key={u} value={u}>{u}</option>
@@ -553,13 +658,39 @@ function GroceryTab() {
               </select>
               <input
                 type="number"
-                min={1}
+                min={0.125}
+                step={0.125}
                 value={l.quantity}
-                onChange={(e) => updateLine(l.id, { quantity: Math.max(1, Number(e.target.value) || 1) })}
+                onChange={(e) => updateLine(l.id, { quantity: Math.max(0.125, Number(e.target.value) || 1), grams: null })}
                 className={`${inputCls} text-center`}
                 placeholder="العدد"
               />
             </div>
+
+            {l.unit === "كيلو" && (
+              <div className="rounded-lg bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-700 p-2 space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    placeholder="وزن حر بالجرام (اختياري — بيلغي العدد فوق)"
+                    value={l.grams ?? ""}
+                    onChange={(e) => updateLine(l.id, { grams: e.target.value ? Math.max(1, Number(e.target.value)) : null })}
+                    className={`${inputCls} flex-1`}
+                  />
+                  <span className="text-xs text-neutral-400 shrink-0">جرام</span>
+                </div>
+                {(() => {
+                  const opt = l.options.find((o) => o.id === l.selectedOptionId);
+                  if (!opt) return <p className="text-[11px] text-neutral-400">اختار سعر تحت الأول عشان تشوف حساب النص/الربع/الثمن.</p>;
+                  return (
+                    <p className="text-[11px] text-neutral-500">
+                      سعر الكيلو {fmt(opt.price, opt.currency)} — نص: {fmt(opt.price / 2, opt.currency)} · ربع: {fmt(opt.price / 4, opt.currency)} · ثمن: {fmt(opt.price / 8, opt.currency)}
+                    </p>
+                  );
+                })()}
+              </div>
+            )}
 
             {l.options.length > 0 ? (
               <div className="space-y-1">
@@ -636,7 +767,7 @@ function GroceryTab() {
           <p className="text-sm font-medium">قوائم محفوظة</p>
           {savedLists.map((sl) => {
             const entries = sl.grocery_list_entries || [];
-            const listTotal = entries.reduce((s: number, e: any) => s + (e.grocery_item_options?.price || 0) * (e.quantity || 1), 0);
+            const listTotal = entries.reduce((s: number, e: any) => s + (e.grocery_item_options?.price || 0) * effQty(e.quantity || 1, e.grams), 0);
             const done = sl.status === "done";
             return (
               <Card key={sl.id} className="space-y-1">
@@ -786,7 +917,7 @@ function ShoppingModeModal({ list, onClose, onFinished }: { list: any; onClose: 
             <label key={e.id} className="flex items-center gap-2 py-1.5 border-b border-neutral-100 dark:border-neutral-800 last:border-0">
               <input type="checkbox" checked={!!picked[e.id]} onChange={() => togglePick(e.id)} className="shrink-0" />
               <span className={`flex-1 text-sm ${picked[e.id] ? "line-through text-neutral-400" : ""}`}>
-                {e.raw_text}{e.quantity && e.quantity > 1 ? ` ×${e.quantity}` : ""}{e.unit ? ` (${e.unit})` : ""}
+                {e.raw_text}{e.grams ? ` ${e.grams}جم` : e.quantity && e.quantity !== 1 ? ` ×${e.quantity}` : ""}{e.unit ? ` (${e.unit})` : ""}
               </span>
             </label>
           ))}
@@ -962,6 +1093,11 @@ function medScheduleLabel(m: any) {
 function MedicationsTab() {
   const [meds, setMeds] = useState<any[]>([]);
   const [appts, setAppts] = useState<any[]>([]);
+  // Round 34 — "قسم الادويه في مجموعات ... دواء حر ولا مجموعه": groups
+  // (medication_groups) كل واحدة فيها بيانات طبيب، وكذا دواء ممكن ينضم
+  // لنفس المجموعة عشان نطلع كشف واحد ليها كلها.
+  const [groups, setGroups] = useState<any[]>([]);
+  const [exportingGroupId, setExportingGroupId] = useState<string | null>(null);
   const [form, setForm] = useState<any>({
     name: "",
     formType: "tablet",
@@ -974,6 +1110,13 @@ function MedicationsTab() {
     reminder_enabled: true,
     remind_before_minutes: "15",
     low_stock_threshold: "2",
+    kind: "free", // "free" | "group"
+    group_id: "",
+    new_group_name: "",
+    new_group_doctor_name: "",
+    new_group_doctor_phone: "",
+    new_group_doctor_address: "",
+    new_group_doctor_specialty: "",
   });
   const [saving, setSaving] = useState(false);
   const [medError, setMedError] = useState("");
@@ -1000,6 +1143,7 @@ function MedicationsTab() {
   const [editMedForm, setEditMedForm] = useState<any>(null);
   const [editMedSaving, setEditMedSaving] = useState(false);
   const [editingApptId, setEditingApptId] = useState<string | null>(null);
+  const [doctorCardAppt, setDoctorCardAppt] = useState<any>(null);
   const [editApptForm, setEditApptForm] = useState<any>(null);
   const [editApptSaving, setEditApptSaving] = useState(false);
   const [editApptExtracting, setEditApptExtracting] = useState(false);
@@ -1051,9 +1195,11 @@ function MedicationsTab() {
 
   const loadMeds = () => fetch("/api/reminders/medications").then((r) => r.json()).then((d) => setMeds(d.medications || []));
   const loadAppts = () => fetch("/api/reminders/appointments").then((r) => r.json()).then((d) => setAppts(d.appointments || []));
+  const loadGroups = () => fetch("/api/reminders/medications/groups").then((r) => r.json()).then((d) => setGroups(d.groups || []));
   useEffect(() => {
     loadMeds();
     loadAppts();
+    loadGroups();
   }, []);
 
   // "إضافة دواء مش بينزل" (Round 30 postmortem): the old submitMed never
@@ -1063,9 +1209,34 @@ function MedicationsTab() {
   // and surfaces the real error message instead.
   const submitMed = async () => {
     if (!form.name.trim()) { setMedError("اسم الدواء مطلوب"); return; }
+    if (form.kind === "group" && !form.group_id && !form.new_group_name.trim()) {
+      setMedError("اختار مجموعة موجودة أو اكتب اسم مجموعة جديدة");
+      return;
+    }
     setSaving(true);
     setMedError("");
     try {
+      // Round 34 — "دواء حر ولا مجموعه": لو "مجموعة" واختار إنشاء مجموعة
+      // جديدة (مش من القائمة)، بننشئها الأول (فيها بيانات الطبيب) وناخد
+      // الـ id بتاعها، وبعدين نبعت الدواء نفسه مربوط بيها.
+      let groupId = form.kind === "group" ? form.group_id : null;
+      if (form.kind === "group" && !groupId && form.new_group_name.trim()) {
+        const gRes = await fetch("/api/reminders/medications/groups", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: form.new_group_name,
+            doctor_name: form.new_group_doctor_name || null,
+            doctor_phone: form.new_group_doctor_phone || null,
+            doctor_address: form.new_group_doctor_address || null,
+            doctor_specialty: form.new_group_doctor_specialty || null,
+          }),
+        });
+        const gData = await gRes.json();
+        if (!gRes.ok) { setMedError(gData.error || "حصل خطأ أثناء إنشاء المجموعة"); return; }
+        groupId = gData.group.id;
+      }
+
       const res = await fetch("/api/reminders/medications", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1081,12 +1252,14 @@ function MedicationsTab() {
           reminder_enabled: form.reminder_enabled,
           remind_before_minutes: form.schedule_type === "meal" ? 0 : Number(form.remind_before_minutes) || 0,
           low_stock_threshold: Number(form.low_stock_threshold) || 2,
+          group_id: groupId || null,
         }),
       });
       const data = await res.json();
       if (!res.ok) { setMedError(data.error || "حصل خطأ أثناء إضافة الدواء"); return; }
-      setForm({ ...form, name: "", pack_size: "", first_dose_at: "", course_duration_days: "" });
+      setForm({ ...form, name: "", pack_size: "", first_dose_at: "", course_duration_days: "", new_group_name: "", new_group_doctor_name: "", new_group_doctor_phone: "", new_group_doctor_address: "", new_group_doctor_specialty: "" });
       loadMeds();
+      loadGroups();
     } catch {
       setMedError("تعذر الاتصال بالسيرفر — حاول تاني.");
     } finally {
@@ -1265,6 +1438,14 @@ function MedicationsTab() {
   // الجدول بيطلع كأعمدة مبهمة من غير سياق. اتصلح بإضافة <thead> لكل الجداول،
   // وبعد كده ضفنا بيانات الطبيب (اللي اتضافت للـ schema في Round 30) لصف
   // المواعيد اللي كانت بتتجاهله تمامًا.
+  // Round 34 — "تصدير الادويه بيصدر معاها كشف الدكتور و الاستشاره المفروض
+  // يصدر الجزء بتاع الادويه فقط": شيلنا جدول "المواعيد الطبية" (اللي كان
+  // فيه بيانات الدكتور) من التصدير العام للأدوية خالص — التصدير ده بقى
+  // بيطلع جدول الأدوية بس. تصدير الكشف اللي فيه بيانات الدكتور بقى ليه
+  // زرار منفصل لكل "مجموعة" (exportGroupReferral، تحت) بيتصدّر مخصوص عشان
+  // ياخده المريض للدكتور، مش مبني جوه التصدير العام. نفس إصلاحات الـ Round
+  // 34 لباج التنسيق (table-layout: fixed + word-break + إعزال أرقام
+  // المتبقي/العبوة اللي كانت بتتقلب بصريًا برضو).
   const buildScheduleNode = () => {
     const node = document.createElement("div");
     node.style.position = "fixed";
@@ -1276,38 +1457,23 @@ function MedicationsTab() {
     node.style.fontFamily = "Cairo, sans-serif";
     node.style.direction = "rtl";
     node.style.color = "#111827";
+    const cellWrap = "word-break:break-word;overflow-wrap:anywhere;";
     const medRows = meds
       .map(
         (m) => `<tr>
-          <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:12px;">${FORM_EMOJI[m.form] || ""} ${m.name}</td>
-          <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;">${medScheduleLabel(m)}</td>
-          <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;">${m.remaining_doses ?? "-"} / ${m.pack_size ?? "-"}</td>
+          <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:12px;${cellWrap}">${FORM_EMOJI[m.form] || ""} ${escapeHtml(m.name)}</td>
+          <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;${cellWrap}">${escapeHtml(medScheduleLabel(m))}</td>
+          <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;">${ltrIsolate(`${m.remaining_doses ?? "-"} / ${m.pack_size ?? "-"}`)}</td>
         </tr>`
       )
-      .join("");
-    const apptRows = appts
-      .map((a) => {
-        const doctor = [
-          a.doctor_name ? `د. ${a.doctor_name}` : "",
-          a.doctor_specialty || "",
-          a.doctor_address || "",
-        ]
-          .filter(Boolean)
-          .join(" — ");
-        return `<tr>
-          <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:12px;">${a.kind === "consultation" ? "استشارة" : "كشف"}${a.title ? " — " + a.title : ""}</td>
-          <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;">${new Date(a.appointment_at).toLocaleString("ar-EG")}</td>
-          <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:10px;color:#6b7280;">${doctor || "-"}</td>
-        </tr>`;
-      })
       .join("");
     node.innerHTML = `
       <div style="text-align:center;margin-bottom:16px;">
         <p style="font-size:12px;color:#ea580c;font-weight:700;">FlowCash</p>
-        <h2 style="font-size:17px;margin:6px 0 2px;">جدول الأدوية والمواعيد الطبية</h2>
+        <h2 style="font-size:17px;margin:6px 0 2px;">جدول الأدوية</h2>
       </div>
-      <p style="font-size:13px;font-weight:700;margin:10px 0 4px;">الأدوية</p>
-      <table style="width:100%;border-collapse:collapse;">
+      <table style="width:100%;border-collapse:collapse;table-layout:fixed;">
+        <colgroup><col style="width:44%;"/><col style="width:32%;"/><col style="width:24%;"/></colgroup>
         <thead>
           <tr style="background:#f9fafb;">
             <th style="padding:6px 4px;font-size:11px;text-align:right;">الدواء</th>
@@ -1316,17 +1482,6 @@ function MedicationsTab() {
           </tr>
         </thead>
         <tbody>${medRows || '<tr><td colspan="3" style="font-size:11px;color:#9ca3af;padding:6px 4px;">لا يوجد</td></tr>'}</tbody>
-      </table>
-      <p style="font-size:13px;font-weight:700;margin:14px 0 4px;">المواعيد الطبية</p>
-      <table style="width:100%;border-collapse:collapse;">
-        <thead>
-          <tr style="background:#f9fafb;">
-            <th style="padding:6px 4px;font-size:11px;text-align:right;">النوع</th>
-            <th style="padding:6px 4px;font-size:11px;text-align:right;">الميعاد</th>
-            <th style="padding:6px 4px;font-size:11px;text-align:right;">الطبيب</th>
-          </tr>
-        </thead>
-        <tbody>${apptRows || '<tr><td colspan="3" style="font-size:11px;color:#9ca3af;padding:6px 4px;">لا يوجد</td></tr>'}</tbody>
       </table>
       <div style="border-top:1px solid #e5e7eb;margin-top:16px;padding-top:10px;text-align:center;">
         <p style="font-size:10px;color:#9ca3af;margin:0;">تم الإنشاء بواسطة FlowCash — ${new Date().toLocaleDateString("ar-EG")}</p>
@@ -1339,6 +1494,7 @@ function MedicationsTab() {
     document.body.appendChild(node);
     try {
       const html2canvas = (await import("html2canvas-pro")).default;
+      if (document.fonts?.ready) await document.fonts.ready;
       return await html2canvas(node, { scale: 2, backgroundColor: "#ffffff" });
     } finally {
       document.body.removeChild(node);
@@ -1372,6 +1528,168 @@ function MedicationsTab() {
     }
   };
 
+  // Round 34 — "كشف يروح للدكتور": تصدير مخصوص لمجموعة واحدة — عنوانه
+  // بيانات الطبيب فوق، وتحته بس أدوية المجموعة دي (عكس exportSchedule
+  // العام اللي بقى بيصدّر الأدوية بس من غير أي طبيب).
+  const exportGroupReferral = async (g: any) => {
+    setExportingGroupId(g.id);
+    try {
+      const groupMeds = meds.filter((m) => m.group_id === g.id);
+      const node = document.createElement("div");
+      node.style.position = "fixed";
+      node.style.left = "-9999px";
+      node.style.top = "0";
+      node.style.width = "700px";
+      node.style.background = "#ffffff";
+      node.style.padding = "24px";
+      node.style.fontFamily = "Cairo, sans-serif";
+      node.style.direction = "rtl";
+      node.style.color = "#111827";
+      const cellWrap = "word-break:break-word;overflow-wrap:anywhere;";
+      const rows = groupMeds
+        .map(
+          (m) => `<tr>
+            <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:12px;${cellWrap}">${FORM_EMOJI[m.form] || ""} ${escapeHtml(m.name)}</td>
+            <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;${cellWrap}">${escapeHtml(medScheduleLabel(m))}</td>
+          </tr>`
+        )
+        .join("");
+      const doctorLine = [g.doctor_name ? `د. ${g.doctor_name}` : "", g.doctor_specialty || "", g.doctor_phone || "", g.doctor_address || ""].filter(Boolean).map(escapeHtml).join(" — ");
+      node.innerHTML = `
+        <div style="text-align:center;margin-bottom:16px;">
+          <p style="font-size:12px;color:#ea580c;font-weight:700;">FlowCash</p>
+          <h2 style="font-size:17px;margin:6px 0 2px;">كشف أدوية — ${escapeHtml(g.name)}</h2>
+          ${doctorLine ? `<p style="font-size:12px;color:#6b7280;margin:2px 0 0;">${doctorLine}</p>` : ""}
+        </div>
+        <table style="width:100%;border-collapse:collapse;table-layout:fixed;">
+          <colgroup><col style="width:55%;"/><col style="width:45%;"/></colgroup>
+          <thead><tr style="background:#f9fafb;"><th style="padding:6px 4px;font-size:11px;text-align:right;">الدواء</th><th style="padding:6px 4px;font-size:11px;text-align:right;">الجرعات</th></tr></thead>
+          <tbody>${rows || '<tr><td colspan="2" style="font-size:11px;color:#9ca3af;padding:6px 4px;">لا يوجد</td></tr>'}</tbody>
+        </table>
+        <div style="border-top:1px solid #e5e7eb;margin-top:16px;padding-top:10px;text-align:center;">
+          <p style="font-size:10px;color:#9ca3af;margin:0;">تم الإنشاء بواسطة FlowCash — ${new Date().toLocaleDateString("ar-EG")}</p>
+        </div>`;
+      document.body.appendChild(node);
+      try {
+        const html2canvas = (await import("html2canvas-pro")).default;
+        if (document.fonts?.ready) await document.fonts.ready;
+        const canvas = await html2canvas(node, { scale: 2, backgroundColor: "#ffffff" });
+        const { jsPDF } = await import("jspdf");
+        const w = canvas.width / 2;
+        const h = canvas.height / 2;
+        const pdf = new jsPDF({ unit: "px", format: [w, h] });
+        pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, w, h);
+        await shareFile(pdf.output("dataurlstring"), `كشف-${g.name}.pdf`, "application/pdf");
+      } finally {
+        document.body.removeChild(node);
+      }
+    } finally {
+      setExportingGroupId(null);
+    }
+  };
+
+  // كارت دواء واحد (عرض أو تعديل) — بيستخدم في قسمي "أدوية حرة" وكل
+  // مجموعة على حدة، عشان الكود متكررش (Round 34 restructure).
+  const medCard = (m: any) =>
+    editingMedId === m.id ? (
+      <Card key={m.id} className="space-y-2">
+        <input placeholder="اسم الدواء" value={editMedForm.name} onChange={(e) => setEditMedForm({ ...editMedForm, name: e.target.value })} className={inputCls} />
+        <div className="flex flex-wrap gap-1">
+          {Object.entries(MEDICATION_FORM_LABELS).map(([key, label]) => (
+            <button key={key} onClick={() => setEditMedForm({ ...editMedForm, formType: key })} className={`px-2 py-1 rounded-lg text-xs border ${editMedForm.formType === key ? "bg-orange-500 text-white border-orange-500" : "border-neutral-300 dark:border-neutral-700"}`}>
+              {FORM_EMOJI[key]} {label}
+            </button>
+          ))}
+        </div>
+        <input
+          type="number"
+          placeholder="عدد الحبات داخل العلبة"
+          value={editMedForm.pack_size}
+          onChange={(e) => setEditMedForm({ ...editMedForm, pack_size: e.target.value })}
+          className="w-40 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 text-xs"
+        />
+        <div className="grid grid-cols-3 gap-1 bg-neutral-100 dark:bg-neutral-800 rounded-lg p-1 text-xs">
+          {SCHEDULE_TYPES.map((t) => (
+            <button key={t} onClick={() => setEditMedForm({ ...editMedForm, schedule_type: t })} className={`py-1.5 rounded-md ${editMedForm.schedule_type === t ? "bg-white dark:bg-neutral-900 shadow" : ""}`}>
+              {SCHEDULE_TYPE_LABELS[t]}
+            </button>
+          ))}
+        </div>
+        {editMedForm.schedule_type === "meal" && (
+          <select value={editMedForm.meal_timing} onChange={(e) => setEditMedForm({ ...editMedForm, meal_timing: e.target.value })} className={inputCls}>
+            {Object.entries(MEAL_TIMING_LABELS).map(([key, label]) => (
+              <option key={key} value={key}>{label}</option>
+            ))}
+          </select>
+        )}
+        {editMedForm.schedule_type === "interval" && (
+          <select value={editMedForm.interval_hours} onChange={(e) => setEditMedForm({ ...editMedForm, interval_hours: e.target.value })} className={inputCls}>
+            {[6, 8, 12, 24].map((h) => (
+              <option key={h} value={h}>كل {h} ساعة</option>
+            ))}
+          </select>
+        )}
+        {NEEDS_FIRST_DOSE(editMedForm.schedule_type) && (
+          <div className="space-y-1">
+            <p className="text-xs text-neutral-400">بداية أول جرعة</p>
+            <input type="datetime-local" value={editMedForm.first_dose_at} onChange={(e) => setEditMedForm({ ...editMedForm, first_dose_at: e.target.value })} className={inputCls} />
+          </div>
+        )}
+        <div className="flex items-center justify-between">
+          <p className="text-sm">ذكرني</p>
+          <Switch checked={editMedForm.reminder_enabled} onChange={(v) => setEditMedForm({ ...editMedForm, reminder_enabled: v })} />
+        </div>
+        {editMedForm.reminder_enabled && (
+          editMedForm.schedule_type === "meal" ? (
+            <p className="text-xs text-neutral-400">هيتبعتلك تذكير في معاد الوجبة نفسه تلقائيًا.</p>
+          ) : (
+            <div>
+              <p className="text-xs text-neutral-400 mb-1">تنبيه قبل الموعد بكام دقيقة</p>
+              <input type="number" placeholder="مثلاً 15" value={editMedForm.remind_before_minutes} onChange={(e) => setEditMedForm({ ...editMedForm, remind_before_minutes: e.target.value })} className={inputCls} />
+            </div>
+          )
+        )}
+        <input type="number" placeholder="مدة العلاج بالأيام (اختياري)" value={editMedForm.course_duration_days} onChange={(e) => setEditMedForm({ ...editMedForm, course_duration_days: e.target.value })} className={inputCls} />
+        <div>
+          <p className="text-xs text-neutral-400 mb-1">تنبيه لو باقي كام حبة في العبوة</p>
+          <input type="number" placeholder="مثلاً 2" value={editMedForm.low_stock_threshold} onChange={(e) => setEditMedForm({ ...editMedForm, low_stock_threshold: e.target.value })} className={inputCls} />
+        </div>
+        {medError && <p className="text-xs text-red-500">{medError}</p>}
+        <div className="flex items-center gap-2">
+          <button onClick={() => saveEditMed(m.id)} disabled={editMedSaving} className={btnPrimary}>
+            {editMedSaving ? <Loader2 size={14} className="animate-spin inline" /> : "حفظ"}
+          </button>
+          <button onClick={() => { setEditingMedId(null); setMedError(""); }} className={btnGhost}>إلغاء</button>
+        </div>
+      </Card>
+    ) : (
+      <Card key={m.id} className="space-y-1">
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-medium">{FORM_EMOJI[m.form] || <Pill size={14} className="inline" />} {m.name}{m.source === "telegram" ? " (تليجرام)" : ""}</p>
+          <Switch checked={m.reminder_enabled} onChange={(v) => toggleReminder(m.id, v)} />
+        </div>
+        <p className="text-xs text-neutral-400">
+          {medScheduleLabel(m)}
+          {m.next_dose_at ? ` — الجرعة الجاية: ${new Date(m.next_dose_at).toLocaleString("ar-EG")}` : ""}
+        </p>
+        {m.course_duration_days != null && (
+          <p className="text-xs text-neutral-400">مدة العلاج: {m.course_duration_days} يوم</p>
+        )}
+        {m.pack_size != null && (
+          <p className={`text-xs ${m.remaining_doses <= m.low_stock_threshold ? "text-red-500 font-medium" : "text-neutral-400"}`}>
+            باقي {m.remaining_doses} من {m.pack_size}
+          </p>
+        )}
+        <div className="flex items-center gap-2">
+          <button onClick={() => logDose(m.id)} className={`${btnGhost} flex items-center gap-1`}>
+            <CheckCircle2 size={12} /> سجّل جرعة اتاخدت
+          </button>
+          <button onClick={() => startEditMed(m)} className="text-neutral-400 hover:text-orange-600 p-1"><Pencil size={14} /></button>
+          <button onClick={() => delMed(m.id)} className="text-red-500 p-1"><Trash2 size={14} /></button>
+        </div>
+      </Card>
+    );
+
   return (
     <div className="space-y-4">
       <Card className="space-y-2">
@@ -1391,6 +1709,43 @@ function MedicationsTab() {
           onChange={(e) => setForm({ ...form, pack_size: e.target.value })}
           className="w-40 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 text-xs"
         />
+
+        {/* Round 34 — "دواء حر ولا مجموعه": دواء حر (زي مسكن/أنسولين) من
+            غير ربط بطبيب، أو دواء ضمن مجموعة مرتبطة بطبيب معين — كذا دواء
+            ممكن ينضموا لنفس المجموعة عشان ياخدوا كشف واحد يروح للدكتور. */}
+        <div className="space-y-2 rounded-lg border border-dashed border-neutral-300 dark:border-neutral-700 p-2">
+          <div className="grid grid-cols-2 gap-1 bg-neutral-100 dark:bg-neutral-800 rounded-lg p-1 text-xs">
+            <button onClick={() => setForm({ ...form, kind: "free" })} className={`py-1.5 rounded-md ${form.kind === "free" ? "bg-white dark:bg-neutral-900 shadow" : ""}`}>دواء حر</button>
+            <button onClick={() => setForm({ ...form, kind: "group" })} className={`py-1.5 rounded-md ${form.kind === "group" ? "bg-white dark:bg-neutral-900 shadow" : ""}`}>مرتبط بطبيب (مجموعة)</button>
+          </div>
+          {form.kind === "group" && (
+            <div className="space-y-2">
+              {groups.length > 0 && (
+                <select
+                  value={form.group_id}
+                  onChange={(e) => setForm({ ...form, group_id: e.target.value })}
+                  className={inputCls}
+                >
+                  <option value="">+ مجموعة جديدة</option>
+                  {groups.map((g) => (
+                    <option key={g.id} value={g.id}>{g.name}{g.doctor_name ? ` — د. ${g.doctor_name}` : ""}</option>
+                  ))}
+                </select>
+              )}
+              {!form.group_id && (
+                <div className="space-y-1.5 rounded-lg bg-neutral-50 dark:bg-neutral-800/50 p-2">
+                  <input placeholder="اسم المجموعة (مثلاً: علاج الضغط)" value={form.new_group_name} onChange={(e) => setForm({ ...form, new_group_name: e.target.value })} className={inputCls} />
+                  <input placeholder="اسم الطبيب المعالج" value={form.new_group_doctor_name} onChange={(e) => setForm({ ...form, new_group_doctor_name: e.target.value })} className={inputCls} />
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <input placeholder="التخصص" value={form.new_group_doctor_specialty} onChange={(e) => setForm({ ...form, new_group_doctor_specialty: e.target.value })} className={inputCls} />
+                    <input placeholder="رقم الهاتف" value={form.new_group_doctor_phone} onChange={(e) => setForm({ ...form, new_group_doctor_phone: e.target.value })} className={inputCls} />
+                  </div>
+                  <input placeholder="عنوان العيادة" value={form.new_group_doctor_address} onChange={(e) => setForm({ ...form, new_group_doctor_address: e.target.value })} className={inputCls} />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
         <div className="grid grid-cols-3 gap-1 bg-neutral-100 dark:bg-neutral-800 rounded-lg p-1 text-xs">
           {SCHEDULE_TYPES.map((t) => (
@@ -1428,11 +1783,17 @@ function MedicationsTab() {
           form.schedule_type === "meal" ? (
             <p className="text-xs text-neutral-400">هيتبعتلك تذكير في معاد الوجبة نفسه تلقائيًا.</p>
           ) : (
-            <input type="number" placeholder="تنبيه قبل الموعد بكام دقيقة" value={form.remind_before_minutes} onChange={(e) => setForm({ ...form, remind_before_minutes: e.target.value })} className={inputCls} />
+            <div>
+              <p className="text-xs text-neutral-400 mb-1">تنبيه قبل الموعد بكام دقيقة</p>
+              <input type="number" placeholder="مثلاً 15" value={form.remind_before_minutes} onChange={(e) => setForm({ ...form, remind_before_minutes: e.target.value })} className={inputCls} />
+            </div>
           )
         )}
         <input type="number" placeholder="مدة العلاج بالأيام (اختياري) — يتقفل تلقائي بعدها" value={form.course_duration_days} onChange={(e) => setForm({ ...form, course_duration_days: e.target.value })} className={inputCls} />
-        <input type="number" placeholder="تنبيه لو باقي كام حبة (نفاد المخزون)" value={form.low_stock_threshold} onChange={(e) => setForm({ ...form, low_stock_threshold: e.target.value })} className={inputCls} />
+        <div>
+          <p className="text-xs text-neutral-400 mb-1">تنبيه لو باقي كام حبة في العبوة (نفاد المخزون)</p>
+          <input type="number" placeholder="مثلاً 2" value={form.low_stock_threshold} onChange={(e) => setForm({ ...form, low_stock_threshold: e.target.value })} className={inputCls} />
+        </div>
 
         {medError && <p className="text-xs text-red-500">{medError}</p>}
         <button onClick={submitMed} disabled={saving} className={btnPrimary}>
@@ -1453,101 +1814,31 @@ function MedicationsTab() {
           </div>
         )}
       </div>
-      <div className="space-y-2">
-        {meds.map((m) =>
-          editingMedId === m.id ? (
-            <Card key={m.id} className="space-y-2">
-              <input placeholder="اسم الدواء" value={editMedForm.name} onChange={(e) => setEditMedForm({ ...editMedForm, name: e.target.value })} className={inputCls} />
-              <div className="flex flex-wrap gap-1">
-                {Object.entries(MEDICATION_FORM_LABELS).map(([key, label]) => (
-                  <button key={key} onClick={() => setEditMedForm({ ...editMedForm, formType: key })} className={`px-2 py-1 rounded-lg text-xs border ${editMedForm.formType === key ? "bg-orange-500 text-white border-orange-500" : "border-neutral-300 dark:border-neutral-700"}`}>
-                    {FORM_EMOJI[key]} {label}
-                  </button>
-                ))}
-              </div>
-              <input
-                type="number"
-                placeholder="عدد الحبات داخل العلبة"
-                value={editMedForm.pack_size}
-                onChange={(e) => setEditMedForm({ ...editMedForm, pack_size: e.target.value })}
-                className="w-40 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 text-xs"
-              />
-              <div className="grid grid-cols-3 gap-1 bg-neutral-100 dark:bg-neutral-800 rounded-lg p-1 text-xs">
-                {SCHEDULE_TYPES.map((t) => (
-                  <button key={t} onClick={() => setEditMedForm({ ...editMedForm, schedule_type: t })} className={`py-1.5 rounded-md ${editMedForm.schedule_type === t ? "bg-white dark:bg-neutral-900 shadow" : ""}`}>
-                    {SCHEDULE_TYPE_LABELS[t]}
-                  </button>
-                ))}
-              </div>
-              {editMedForm.schedule_type === "meal" && (
-                <select value={editMedForm.meal_timing} onChange={(e) => setEditMedForm({ ...editMedForm, meal_timing: e.target.value })} className={inputCls}>
-                  {Object.entries(MEAL_TIMING_LABELS).map(([key, label]) => (
-                    <option key={key} value={key}>{label}</option>
-                  ))}
-                </select>
-              )}
-              {editMedForm.schedule_type === "interval" && (
-                <select value={editMedForm.interval_hours} onChange={(e) => setEditMedForm({ ...editMedForm, interval_hours: e.target.value })} className={inputCls}>
-                  {[6, 8, 12, 24].map((h) => (
-                    <option key={h} value={h}>كل {h} ساعة</option>
-                  ))}
-                </select>
-              )}
-              {NEEDS_FIRST_DOSE(editMedForm.schedule_type) && (
-                <div className="space-y-1">
-                  <p className="text-xs text-neutral-400">بداية أول جرعة</p>
-                  <input type="datetime-local" value={editMedForm.first_dose_at} onChange={(e) => setEditMedForm({ ...editMedForm, first_dose_at: e.target.value })} className={inputCls} />
-                </div>
-              )}
-              <div className="flex items-center justify-between">
-                <p className="text-sm">ذكرني</p>
-                <Switch checked={editMedForm.reminder_enabled} onChange={(v) => setEditMedForm({ ...editMedForm, reminder_enabled: v })} />
-              </div>
-              {editMedForm.reminder_enabled && (
-                editMedForm.schedule_type === "meal" ? (
-                  <p className="text-xs text-neutral-400">هيتبعتلك تذكير في معاد الوجبة نفسه تلقائيًا.</p>
-                ) : (
-                  <input type="number" placeholder="تنبيه قبل الموعد بكام دقيقة" value={editMedForm.remind_before_minutes} onChange={(e) => setEditMedForm({ ...editMedForm, remind_before_minutes: e.target.value })} className={inputCls} />
-                )
-              )}
-              <input type="number" placeholder="مدة العلاج بالأيام (اختياري)" value={editMedForm.course_duration_days} onChange={(e) => setEditMedForm({ ...editMedForm, course_duration_days: e.target.value })} className={inputCls} />
-              <input type="number" placeholder="تنبيه لو باقي كام حبة" value={editMedForm.low_stock_threshold} onChange={(e) => setEditMedForm({ ...editMedForm, low_stock_threshold: e.target.value })} className={inputCls} />
-              {medError && <p className="text-xs text-red-500">{medError}</p>}
-              <div className="flex items-center gap-2">
-                <button onClick={() => saveEditMed(m.id)} disabled={editMedSaving} className={btnPrimary}>
-                  {editMedSaving ? <Loader2 size={14} className="animate-spin inline" /> : "حفظ"}
-                </button>
-                <button onClick={() => { setEditingMedId(null); setMedError(""); }} className={btnGhost}>إلغاء</button>
-              </div>
-            </Card>
-          ) : (
-            <Card key={m.id} className="space-y-1">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-medium">{FORM_EMOJI[m.form] || <Pill size={14} className="inline" />} {m.name}{m.source === "telegram" ? " (تليجرام)" : ""}</p>
-                <Switch checked={m.reminder_enabled} onChange={(v) => toggleReminder(m.id, v)} />
-              </div>
-              <p className="text-xs text-neutral-400">
-                {medScheduleLabel(m)}
-                {m.next_dose_at ? ` — الجرعة الجاية: ${new Date(m.next_dose_at).toLocaleString("ar-EG")}` : ""}
-              </p>
-              {m.course_duration_days != null && (
-                <p className="text-xs text-neutral-400">مدة العلاج: {m.course_duration_days} يوم</p>
-              )}
-              {m.pack_size != null && (
-                <p className={`text-xs ${m.remaining_doses <= m.low_stock_threshold ? "text-red-500 font-medium" : "text-neutral-400"}`}>
-                  باقي {m.remaining_doses} من {m.pack_size}
-                </p>
-              )}
-              <div className="flex items-center gap-2">
-                <button onClick={() => logDose(m.id)} className={`${btnGhost} flex items-center gap-1`}>
-                  <CheckCircle2 size={12} /> سجّل جرعة اتاخدت
-                </button>
-                <button onClick={() => startEditMed(m)} className="text-neutral-400 hover:text-orange-600 p-1"><Pencil size={14} /></button>
-                <button onClick={() => delMed(m.id)} className="text-red-500 p-1"><Trash2 size={14} /></button>
-              </div>
-            </Card>
-          )
+      {/* Round 34 — "قسم الادويه في مجموعات": أدوية حرة (من غير مجموعة)
+          في قسم منفصل، وكل مجموعة (مرتبطة بطبيب) في قسمها بعنوانها وزرار
+          "تصدير كشف للدكتور" الخاص بيها. */}
+      <div className="space-y-4">
+        {meds.filter((m) => !m.group_id).length > 0 && (
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-neutral-500">💊 أدوية حرة</p>
+            {meds.filter((m) => !m.group_id).map(medCard)}
+          </div>
         )}
+        {groups.map((g) => {
+          const groupMeds = meds.filter((m) => m.group_id === g.id);
+          if (!groupMeds.length) return null;
+          return (
+            <div key={g.id} className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-medium text-neutral-500 truncate">📋 {g.name}{g.doctor_name ? ` — د. ${g.doctor_name}` : ""}</p>
+                <button onClick={() => exportGroupReferral(g)} disabled={exportingGroupId === g.id} className={`${btnGhost} flex items-center gap-1 text-[10px] shrink-0`}>
+                  {exportingGroupId === g.id ? <Loader2 size={11} className="animate-spin" /> : <FileDown size={11} />} تصدير كشف للدكتور
+                </button>
+              </div>
+              {groupMeds.map(medCard)}
+            </div>
+          );
+        })}
         {!meds.length && <p className="text-sm text-neutral-400 text-center py-4">مفيش أدوية مسجلة</p>}
       </div>
 
@@ -1626,18 +1917,21 @@ function MedicationsTab() {
             </Card>
           ) : (
             <Card key={a.id} className="space-y-1">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-medium">{a.kind === "consultation" ? "استشارة طبية" : "كشف طبي"}{a.title ? ` — ${a.title}` : ""}</p>
-                {a.status === "upcoming" && (
-                  <button onClick={() => markApptDone(a.id)} className="text-xs text-blue-600">تم ✓</button>
+              <div
+                className={(a.doctor_name || a.doctor_specialty || a.doctor_phone || a.doctor_address) ? "space-y-1 cursor-pointer" : "space-y-1"}
+                onClick={() => { if (a.doctor_name || a.doctor_specialty || a.doctor_phone || a.doctor_address) setDoctorCardAppt(a); }}
+              >
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium">{a.kind === "consultation" ? "استشارة طبية" : "كشف طبي"}{a.title ? ` — ${a.title}` : ""}</p>
+                  {a.status === "upcoming" && (
+                    <button onClick={(e) => { e.stopPropagation(); markApptDone(a.id); }} className="text-xs text-blue-600">تم ✓</button>
+                  )}
+                </div>
+                <p className="text-xs text-neutral-400">{new Date(a.appointment_at).toLocaleString("ar-EG")}{a.medications?.name ? ` — ${a.medications.name}` : ""}</p>
+                {(a.doctor_name || a.doctor_specialty || a.doctor_phone || a.doctor_address) && (
+                  <p className="text-xs text-orange-600">👨‍⚕️ بيانات الطبيب — اضغط للتفاصيل</p>
                 )}
               </div>
-              <p className="text-xs text-neutral-400">{new Date(a.appointment_at).toLocaleString("ar-EG")}{a.medications?.name ? ` — ${a.medications.name}` : ""}</p>
-              {(a.doctor_name || a.doctor_specialty || a.doctor_phone || a.doctor_address) && (
-                <p className="text-xs text-neutral-400">
-                  {a.doctor_name ? `د. ${a.doctor_name}` : ""}{a.doctor_specialty ? ` (${a.doctor_specialty})` : ""}{a.doctor_phone ? ` — ${a.doctor_phone}` : ""}{a.doctor_address ? ` — ${a.doctor_address}` : ""}
-                </p>
-              )}
               {parent && <p className="text-xs text-orange-500">متابعة لكشف: {parent.title || new Date(parent.appointment_at).toLocaleDateString("ar-EG")}</p>}
               {followUp && <p className="text-xs text-orange-500">فيه استشارة متابعة يوم {new Date(followUp.appointment_at).toLocaleString("ar-EG")}</p>}
               {a.prescription_image && <img src={a.prescription_image} alt="روشتة" className="rounded-lg max-h-24" />}
@@ -1653,7 +1947,225 @@ function MedicationsTab() {
         })}
         {!appts.length && <p className="text-sm text-neutral-400 text-center py-4">مفيش مواعيد مسجلة</p>}
       </div>
+
+      {/* Round 34 — "نحط قياس سكر قياس ضغط ... وتحته مكان رفع صورة نتائج
+          تحاليل": جوه نفس تبويب الأدوية زي ما طلب المستخدم بالظبط. */}
+      <HealthSection groups={groups} />
+
+      {/* Round 34 — "لنا أدوس علي كشف لو استشاره يطلع كارت فيه بيانات
+          الدكتور": بطاقة منبثقة بس لبيانات الطبيب، بعيدة تمامًا عن أزرار
+          التعديل/المسح (اللي فضلت برة الكارت زي ما هي). */}
+      {doctorCardAppt && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setDoctorCardAppt(null)}>
+          <div
+            className="max-w-sm w-full space-y-2 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4 shadow-sm"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium">بيانات الطبيب</p>
+              <button onClick={() => setDoctorCardAppt(null)} className="text-neutral-400 p-1"><X size={16} /></button>
+            </div>
+            <p className="text-base font-semibold">{doctorCardAppt.doctor_name ? `د. ${doctorCardAppt.doctor_name}` : "بدون اسم"}</p>
+            {doctorCardAppt.doctor_specialty && <p className="text-sm text-neutral-500">التخصص: {doctorCardAppt.doctor_specialty}</p>}
+            {doctorCardAppt.doctor_phone && <p className="text-sm text-neutral-500">الهاتف: {doctorCardAppt.doctor_phone}</p>}
+            {doctorCardAppt.doctor_address && <p className="text-sm text-neutral-500">العنوان: {doctorCardAppt.doctor_address}</p>}
+          </div>
+        </div>
+      )}
     </div>
+  );
+}
+
+/* ============================= قياس سكر/ضغط + نتائج التحاليل (Round 34) ============================= */
+
+const HEALTH_KIND_LABELS: Record<string, string> = { blood_sugar: "قياس سكر", blood_pressure: "قياس ضغط" };
+const HEALTH_KIND_EMOJI: Record<string, string> = { blood_sugar: "🩸", blood_pressure: "❤️" };
+
+function nowLocalInputValue() {
+  const d = new Date();
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 16);
+}
+
+// "قياس سكر قياس ضغط و يتربط بمعاد وتاريخ كل تسجيل، و تحته مكان رفع صورة
+// نتائج تحاليل وممكن ربطه مع دكتور وتصدير صورة و PDF" — قسمين داخل نفس
+// الكارت: قياسات (health_measurements) وتحاليل مرفوعة كصور (lab_results).
+function HealthSection({ groups }: { groups: any[] }) {
+  const [measurements, setMeasurements] = useState<any[]>([]);
+  const [kind, setKind] = useState<"blood_sugar" | "blood_pressure">("blood_sugar");
+  const [value1, setValue1] = useState("");
+  const [value2, setValue2] = useState("");
+  const [measuredAt, setMeasuredAt] = useState(nowLocalInputValue());
+  const [savingMeasure, setSavingMeasure] = useState(false);
+  const [measureError, setMeasureError] = useState("");
+
+  const [labs, setLabs] = useState<any[]>([]);
+  const [labImage, setLabImage] = useState("");
+  const [labGroupId, setLabGroupId] = useState("");
+  const [savingLab, setSavingLab] = useState(false);
+  const [labError, setLabError] = useState("");
+  const [exportingLabId, setExportingLabId] = useState<string | null>(null);
+  const [exportingLabImgId, setExportingLabImgId] = useState<string | null>(null);
+
+  const loadMeasurements = () => fetch("/api/reminders/health/measurements").then((r) => r.json()).then((d) => setMeasurements(d.measurements || []));
+  const loadLabs = () => fetch("/api/reminders/health/labs").then((r) => r.json()).then((d) => setLabs(d.labs || []));
+  useEffect(() => {
+    loadMeasurements();
+    loadLabs();
+  }, []);
+
+  const submitMeasurement = async () => {
+    if (!(Number(value1) >= 0)) { setMeasureError("القيمة مطلوبة"); return; }
+    if (kind === "blood_pressure" && !(Number(value2) >= 0)) { setMeasureError("قياس الضغط محتاج الانقباضي والانبساطي"); return; }
+    setSavingMeasure(true);
+    setMeasureError("");
+    try {
+      const res = await fetch("/api/reminders/health/measurements", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind, value1: Number(value1), value2: kind === "blood_pressure" ? Number(value2) : null, measured_at: new Date(measuredAt).toISOString() }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMeasureError(data.error || "حصل خطأ ومتسجلش القياس"); return; }
+      setValue1("");
+      setValue2("");
+      setMeasuredAt(nowLocalInputValue());
+      loadMeasurements();
+    } finally {
+      setSavingMeasure(false);
+    }
+  };
+  const delMeasurement = async (id: string) => {
+    await fetch(`/api/reminders/health/measurements/${id}`, { method: "DELETE" });
+    loadMeasurements();
+  };
+
+  const submitLab = async () => {
+    if (!labImage) { setLabError("صورة نتيجة التحليل مطلوبة"); return; }
+    setSavingLab(true);
+    setLabError("");
+    try {
+      const res = await fetch("/api/reminders/health/labs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: labImage, group_id: labGroupId || null }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setLabError(data.error || "حصل خطأ ومترفعتش الصورة"); return; }
+      setLabImage("");
+      setLabGroupId("");
+      loadLabs();
+    } finally {
+      setSavingLab(false);
+    }
+  };
+  const delLab = async (id: string) => {
+    await fetch(`/api/reminders/health/labs/${id}`, { method: "DELETE" });
+    loadLabs();
+  };
+
+  const exportLabImage = async (lab: any) => {
+    setExportingLabImgId(lab.id);
+    try {
+      await shareFile(lab.image, `تحليل-${lab.id.slice(0, 8)}.jpg`, "image/jpeg");
+    } finally {
+      setExportingLabImgId(null);
+    }
+  };
+  const exportLabPdf = async (lab: any) => {
+    setExportingLabId(lab.id);
+    try {
+      const dims = await new Promise<{ w: number; h: number }>((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve({ w: img.width, h: img.height });
+        img.onerror = reject;
+        img.src = lab.image;
+      });
+      const { jsPDF } = await import("jspdf");
+      const pdf = new jsPDF({ unit: "px", format: [dims.w, dims.h] });
+      pdf.addImage(lab.image, "JPEG", 0, 0, dims.w, dims.h);
+      await shareFile(pdf.output("dataurlstring"), `تحليل-${lab.id.slice(0, 8)}.pdf`, "application/pdf");
+    } finally {
+      setExportingLabId(null);
+    }
+  };
+
+  return (
+    <Card className="space-y-4">
+      <p className="text-sm font-medium">القياسات ونتائج التحاليل</p>
+
+      <div className="space-y-2">
+        <div className="grid grid-cols-2 gap-1 bg-neutral-100 dark:bg-neutral-800 rounded-lg p-1 text-xs">
+          <button onClick={() => setKind("blood_sugar")} className={`py-1.5 rounded-md ${kind === "blood_sugar" ? "bg-white dark:bg-neutral-900 shadow" : ""}`}>🩸 قياس سكر</button>
+          <button onClick={() => setKind("blood_pressure")} className={`py-1.5 rounded-md ${kind === "blood_pressure" ? "bg-white dark:bg-neutral-900 shadow" : ""}`}>❤️ قياس ضغط</button>
+        </div>
+        {kind === "blood_sugar" ? (
+          <input type="number" placeholder="قراءة السكر" value={value1} onChange={(e) => setValue1(e.target.value)} className={inputCls} />
+        ) : (
+          <div className="grid grid-cols-2 gap-2">
+            <input type="number" placeholder="الانقباضي (العلوي)" value={value1} onChange={(e) => setValue1(e.target.value)} className={inputCls} />
+            <input type="number" placeholder="الانبساطي (السفلي)" value={value2} onChange={(e) => setValue2(e.target.value)} className={inputCls} />
+          </div>
+        )}
+        <input type="datetime-local" value={measuredAt} onChange={(e) => setMeasuredAt(e.target.value)} className={inputCls} />
+        {measureError && <p className="text-xs text-red-500">{measureError}</p>}
+        <button onClick={submitMeasurement} disabled={savingMeasure} className={btnPrimary}>
+          {savingMeasure ? <Loader2 size={14} className="animate-spin inline" /> : "تسجيل القياس"}
+        </button>
+      </div>
+
+      <div className="space-y-1.5">
+        {measurements.slice(0, 8).map((m) => (
+          <div key={m.id} className="flex items-center justify-between rounded-lg bg-neutral-50 dark:bg-neutral-800/50 px-2.5 py-1.5 text-xs">
+            <span>{HEALTH_KIND_EMOJI[m.kind]} {m.kind === "blood_pressure" ? `${m.value1}/${m.value2}` : m.value1} — {new Date(m.measured_at).toLocaleString("ar-EG")}</span>
+            <button onClick={() => delMeasurement(m.id)} className="text-red-500 p-1"><Trash2 size={12} /></button>
+          </div>
+        ))}
+        {!measurements.length && <p className="text-xs text-neutral-400 text-center py-2">مفيش قياسات مسجلة</p>}
+      </div>
+
+      <div className="border-t border-neutral-100 dark:border-neutral-800 pt-3 space-y-2">
+        <p className="text-sm font-medium">نتائج التحاليل</p>
+        <PhotoCaptureRow onPick={(dataUrl) => setLabImage(dataUrl)} />
+        {labImage && <img src={labImage} alt="نتيجة التحليل" className="rounded-lg max-h-32 mx-auto" />}
+        {groups.length > 0 && (
+          <select value={labGroupId} onChange={(e) => setLabGroupId(e.target.value)} className={inputCls}>
+            <option value="">بدون ربط بطبيب</option>
+            {groups.map((g) => (
+              <option key={g.id} value={g.id}>{g.name}{g.doctor_name ? ` — د. ${g.doctor_name}` : ""}</option>
+            ))}
+          </select>
+        )}
+        {labError && <p className="text-xs text-red-500">{labError}</p>}
+        <button onClick={submitLab} disabled={savingLab} className={btnPrimary}>
+          {savingLab ? <Loader2 size={14} className="animate-spin inline" /> : "رفع نتيجة التحليل"}
+        </button>
+      </div>
+
+      <div className="space-y-2">
+        {labs.map((l) => (
+          <div key={l.id} className="rounded-lg bg-neutral-50 dark:bg-neutral-800/50 p-2 space-y-1.5">
+            <div className="flex items-center gap-2">
+              <img src={l.image} alt="تحليل" className="w-14 h-14 object-cover rounded-lg shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-neutral-400">{new Date(l.created_at).toLocaleDateString("ar-EG")}</p>
+                {l.medication_groups?.name && <p className="text-xs text-orange-600 truncate">📋 {l.medication_groups.name}</p>}
+              </div>
+              <button onClick={() => delLab(l.id)} className="text-red-500 p-1 shrink-0"><Trash2 size={13} /></button>
+            </div>
+            <div className="flex items-center gap-1">
+              <button onClick={() => exportLabPdf(l)} disabled={exportingLabId === l.id} className={`${btnGhost} flex items-center gap-1 text-[10px]`}>
+                {exportingLabId === l.id ? <Loader2 size={11} className="animate-spin" /> : <FileDown size={11} />} تصدير PDF
+              </button>
+              <button onClick={() => exportLabImage(l)} disabled={exportingLabImgId === l.id} className={`${btnGhost} flex items-center gap-1 text-[10px]`}>
+                {exportingLabImgId === l.id ? <Loader2 size={11} className="animate-spin" /> : <ImageIcon size={11} />} تصدير صورة
+              </button>
+            </div>
+          </div>
+        ))}
+        {!labs.length && <p className="text-xs text-neutral-400 text-center py-2">مفيش نتائج تحاليل مرفوعة</p>}
+      </div>
+    </Card>
   );
 }
 
@@ -1675,8 +2187,10 @@ function UtilityTab() {
   const [editSaving, setEditSaving] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [extractMsg, setExtractMsg] = useState("");
+  const [extractFailed, setExtractFailed] = useState(false);
   const [editExtracting, setEditExtracting] = useState(false);
   const [editExtractMsg, setEditExtractMsg] = useState("");
+  const [editExtractFailed, setEditExtractFailed] = useState(false);
 
   const load = () => {
     fetch("/api/reminders/utility-meters").then((r) => r.json()).then((d) => setReadings(d.readings || []));
@@ -1689,9 +2203,15 @@ function UtilityTab() {
   // "استخراج القراة بالذكاء الاصطناعي" (Round 32) — بيتنادى تلقائيًا أول ما
   // صورة العداد تتحط، وبيملى خانة القراءة بالرقم اللي اتقرا (المستخدم لسه
   // يقدر يعدلها قبل الحفظ لو مش مضبوطة).
+  // Round 34 — "لو مقدرتش تسحب القراءة اكتب فشل القراءة وادخلها يدويًا":
+  // الصورة كانت بتتحفظ دايمًا (زي ما هي، من غير تغيير) بس رسالة الفشل كانت
+  // عامة ومكنش واضح فيها إن المطلوب دلوقتي إدخال يدوي. دلوقتي فيه علم
+  // extractFailed واضح بيحط رسالة "فشل القراءة" صريحة وبيلوّن خانة القراءة
+  // باللون الأحمر تشجيعًا للمستخدم يدخلها بنفسه.
   const extractReading = async (dataUrl: string, type: string, isEdit: boolean) => {
     (isEdit ? setEditExtracting : setExtracting)(true);
     (isEdit ? setEditExtractMsg : setExtractMsg)("");
+    (isEdit ? setEditExtractFailed : setExtractFailed)(false);
     try {
       const res = await fetch("/api/reminders/utility-meters/extract-reading", {
         method: "POST",
@@ -1699,17 +2219,17 @@ function UtilityTab() {
         body: JSON.stringify({ image: dataUrl, meter_type: type }),
       });
       const data = await res.json();
-      if (!res.ok) {
-        (isEdit ? setEditExtractMsg : setExtractMsg)(data.error || "تعذر قراءة العداد من الصورة");
+      if (!res.ok || data.reading_value == null) {
+        (isEdit ? setEditExtractMsg : setExtractMsg)("❌ فشل القراءة تلقائيًا — من فضلك ادخل الرقم يدويًا تحت.");
+        (isEdit ? setEditExtractFailed : setExtractFailed)(true);
         return;
       }
-      if (data.reading_value != null) {
-        if (isEdit) setEditForm((f: any) => ({ ...f, reading_value: String(data.reading_value) }));
-        else setReadingValue(String(data.reading_value));
-        (isEdit ? setEditExtractMsg : setExtractMsg)(`اتقرأت القراءة: ${data.reading_value} — راجعها قبل الحفظ ✅`);
-      }
+      if (isEdit) setEditForm((f: any) => ({ ...f, reading_value: String(data.reading_value) }));
+      else setReadingValue(String(data.reading_value));
+      (isEdit ? setEditExtractMsg : setExtractMsg)(`اتقرأت القراءة: ${data.reading_value} — راجعها قبل الحفظ ✅`);
     } catch {
-      (isEdit ? setEditExtractMsg : setExtractMsg)("تعذر الاتصال بخوادم IDEA للاستخراج.");
+      (isEdit ? setEditExtractMsg : setExtractMsg)("❌ فشل القراءة (تعذر الاتصال بخوادم IDEA) — من فضلك ادخل الرقم يدويًا تحت.");
+      (isEdit ? setEditExtractFailed : setExtractFailed)(true);
     } finally {
       (isEdit ? setEditExtracting : setExtracting)(false);
     }
@@ -1767,7 +2287,7 @@ function UtilityTab() {
             </button>
           ))}
         </div>
-        <input type="number" placeholder="قيمة القراءة" value={readingValue} onChange={(e) => setReadingValue(e.target.value)} className={inputCls} />
+        <input type="number" placeholder={extractFailed ? "فشل القراءة — ادخلها يدويًا" : "قيمة القراءة"} value={readingValue} onChange={(e) => { setReadingValue(e.target.value); if (extractFailed) setExtractFailed(false); }} className={`${inputCls} ${extractFailed ? "border-red-400 dark:border-red-600" : ""}`} />
         <input type="date" value={readingDate} onChange={(e) => setReadingDate(e.target.value)} className={inputCls} />
         <div className="space-y-1">
           <p className="text-xs text-neutral-400">صورة العداد (اختياري) — بنقرا القراءة منها تلقائيًا بالذكاء الاصطناعي</p>
@@ -1775,7 +2295,7 @@ function UtilityTab() {
         </div>
         {photo && <img src={photo} alt="العداد" className="rounded-lg max-h-32 mx-auto" />}
         {extracting && <p className="text-xs text-orange-500 flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> {AI_LOADING_TEXT}</p>}
-        {extractMsg && !extracting && <p className="text-xs text-orange-500">{extractMsg}</p>}
+        {extractMsg && !extracting && <p className={`text-xs ${extractFailed ? "text-red-500" : "text-orange-500"}`}>{extractMsg}</p>}
         <button onClick={submit} disabled={saving} className={btnPrimary}>
           {saving ? <Loader2 size={14} className="animate-spin inline" /> : "تسجيل القراءة"}
         </button>
@@ -1793,44 +2313,56 @@ function UtilityTab() {
         </Card>
       )}
 
-      <div className="space-y-2">
+      {/* Round 34 — "الغاز تحتيه قرائات الغاز و الكهرباء تحتها قرائات
+          الكهرباء": كانت القائمة كلها flat مخلوطة، دلوقتي مقسّمة لقسم منفصل
+          لكل نوع عداد بعنوانه، بنفس ترتيب METER_LABELS. */}
+      <div className="space-y-4">
         <p className="text-sm font-medium">آخر القراءات</p>
-        {readings.map((r) =>
-          editingId === r.id ? (
-            <Card key={r.id} className="space-y-2">
-              <div className="grid grid-cols-3 gap-1 bg-neutral-100 dark:bg-neutral-800 rounded-lg p-1 text-xs">
-                {Object.entries(METER_LABELS).map(([key, label]) => (
-                  <button key={key} onClick={() => setEditForm({ ...editForm, meter_type: key })} className={`py-1.5 rounded-md ${editForm.meter_type === key ? "bg-white dark:bg-neutral-900 shadow" : ""}`}>
-                    {METER_EMOJI[key]} {label}
-                  </button>
-                ))}
-              </div>
-              <input type="number" placeholder="قيمة القراءة" value={editForm.reading_value} onChange={(e) => setEditForm({ ...editForm, reading_value: e.target.value })} className={inputCls} />
-              <input type="date" value={editForm.reading_date} onChange={(e) => setEditForm({ ...editForm, reading_date: e.target.value })} className={inputCls} />
-              <PhotoCaptureRow onPick={(dataUrl) => { setEditForm({ ...editForm, photo: dataUrl }); extractReading(dataUrl, editForm.meter_type, true); }} />
-              {editForm.photo && <img src={editForm.photo} alt="العداد" className="rounded-lg max-h-32 mx-auto" />}
-              {editExtracting && <p className="text-xs text-orange-500 flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> {AI_LOADING_TEXT}</p>}
-              {editExtractMsg && !editExtracting && <p className="text-xs text-orange-500">{editExtractMsg}</p>}
-              <div className="flex items-center gap-2">
-                <button onClick={() => saveEdit(r.id)} disabled={editSaving} className={btnPrimary}>
-                  {editSaving ? <Loader2 size={14} className="animate-spin inline" /> : "حفظ"}
-                </button>
-                <button onClick={() => setEditingId(null)} className={btnGhost}>إلغاء</button>
-              </div>
-            </Card>
-          ) : (
-            <Card key={r.id} className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium">{METER_EMOJI[r.meter_type]} {r.reading_value.toLocaleString()}</p>
-                <p className="text-xs text-neutral-400">{r.reading_date}</p>
-              </div>
-              <div className="flex items-center gap-1">
-                <button onClick={() => startEdit(r)} className="text-neutral-400 hover:text-orange-600 p-1"><Pencil size={14} /></button>
-                <button onClick={() => del(r.id)} className="text-red-500 p-1"><Trash2 size={14} /></button>
-              </div>
-            </Card>
-          )
-        )}
+        {Object.entries(METER_LABELS).map(([typeKey, typeLabel]) => {
+          const group = readings.filter((r) => r.meter_type === typeKey);
+          if (!group.length) return null;
+          return (
+            <div key={typeKey} className="space-y-2">
+              <p className="text-xs font-medium text-neutral-500">{METER_EMOJI[typeKey]} {typeLabel}</p>
+              {group.map((r) =>
+                editingId === r.id ? (
+                  <Card key={r.id} className="space-y-2">
+                    <div className="grid grid-cols-3 gap-1 bg-neutral-100 dark:bg-neutral-800 rounded-lg p-1 text-xs">
+                      {Object.entries(METER_LABELS).map(([key, label]) => (
+                        <button key={key} onClick={() => setEditForm({ ...editForm, meter_type: key })} className={`py-1.5 rounded-md ${editForm.meter_type === key ? "bg-white dark:bg-neutral-900 shadow" : ""}`}>
+                          {METER_EMOJI[key]} {label}
+                        </button>
+                      ))}
+                    </div>
+                    <input type="number" placeholder={editExtractFailed ? "فشل القراءة — ادخلها يدويًا" : "قيمة القراءة"} value={editForm.reading_value} onChange={(e) => { setEditForm({ ...editForm, reading_value: e.target.value }); if (editExtractFailed) setEditExtractFailed(false); }} className={`${inputCls} ${editExtractFailed ? "border-red-400 dark:border-red-600" : ""}`} />
+                    <input type="date" value={editForm.reading_date} onChange={(e) => setEditForm({ ...editForm, reading_date: e.target.value })} className={inputCls} />
+                    <PhotoCaptureRow onPick={(dataUrl) => { setEditForm({ ...editForm, photo: dataUrl }); extractReading(dataUrl, editForm.meter_type, true); }} />
+                    {editForm.photo && <img src={editForm.photo} alt="العداد" className="rounded-lg max-h-32 mx-auto" />}
+                    {editExtracting && <p className="text-xs text-orange-500 flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> {AI_LOADING_TEXT}</p>}
+                    {editExtractMsg && !editExtracting && <p className={`text-xs ${editExtractFailed ? "text-red-500" : "text-orange-500"}`}>{editExtractMsg}</p>}
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => saveEdit(r.id)} disabled={editSaving} className={btnPrimary}>
+                        {editSaving ? <Loader2 size={14} className="animate-spin inline" /> : "حفظ"}
+                      </button>
+                      <button onClick={() => setEditingId(null)} className={btnGhost}>إلغاء</button>
+                    </div>
+                  </Card>
+                ) : (
+                  <Card key={r.id} className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium">{METER_EMOJI[r.meter_type]} {r.reading_value.toLocaleString()}</p>
+                      <p className="text-xs text-neutral-400">{r.reading_date}</p>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => startEdit(r)} className="text-neutral-400 hover:text-orange-600 p-1"><Pencil size={14} /></button>
+                      <button onClick={() => del(r.id)} className="text-red-500 p-1"><Trash2 size={14} /></button>
+                    </div>
+                  </Card>
+                )
+              )}
+            </div>
+          );
+        })}
         {!readings.length && <p className="text-sm text-neutral-400 text-center py-4">مفيش قراءات مسجلة</p>}
       </div>
     </div>

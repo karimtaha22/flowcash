@@ -6,7 +6,11 @@ import { computeNextDoseAt } from "@/lib/medicationSchedule";
 export async function GET() {
   const userId = await getSessionUserId();
   if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const { data, error } = await supabaseAdmin.from("medications").select("*").eq("user_id", userId).order("created_at", { ascending: false });
+  const { data, error } = await supabaseAdmin
+    .from("medications")
+    .select("*, medication_groups(id, name, doctor_name, doctor_phone, doctor_address, doctor_specialty)")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ medications: data });
 }
@@ -44,6 +48,9 @@ export async function POST(req: NextRequest) {
       next_dose_at: nextDoseAt ? nextDoseAt.toISOString() : null,
       source: body.source === "telegram" ? "telegram" : "app",
       note: body.note || null,
+      // Round 34 — "دواء حر ولا مجموعه": group_id فاضي = دواء حر، أو
+      // مرتبط بمجموعة (medication_groups) اللي فيها بيانات الطبيب.
+      group_id: body.group_id || null,
     })
     .select()
     .single();

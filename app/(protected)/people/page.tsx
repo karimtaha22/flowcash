@@ -47,11 +47,11 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
-async function shareText(text: string, title = "FlowCash"): Promise<boolean> {
+async function shareText(text: string, url: string, title = "FlowCash"): Promise<boolean> {
   const nav = navigator as Navigator & { share?: (data: any) => Promise<void> };
   if (!nav.share) return false;
   try {
-    await nav.share({ title, text });
+    await nav.share({ title, text, url });
     return true;
   } catch {
     return false;
@@ -348,14 +348,26 @@ function PeopleInner() {
   // keeping an explicit space (": ") between label and link IN ADDITION TO
   // the newline, so even in the worst case (newline stripped entirely) the
   // link still has a real space right before it and stays clickable.
-  const copyLink = async (l: { url: string }, label: string) => {
-    const ok = await copyText(`${label}: \n${l.url}`);
+  // Round 34 — "لما بنسخه من الويب بيظهر اسم لينك الشاهد فا لازم امسحها ب
+  // أيدي": copyLink/shareLink used to bake the human-readable label
+  // ("رابط شاهد — أحمد: ") directly into the copied/shared STRING. A
+  // native share sheet (mobile) usually shows title/text as a separate
+  // preview line and just hands the receiving app a clean link, so the
+  // label "disappeared" there — but the plain web clipboard fallback
+  // copies that whole string verbatim, so the label landed in the paste
+  // target glued to the URL and had to be deleted by hand. Now copyLink
+  // copies ONLY the bare URL (always paste-clean), and shareLink passes
+  // the label as a separate `text`/`title` field to navigator.share so
+  // richer share targets can still show a friendly label without it ever
+  // being part of the copied/pasted link itself.
+  const copyLink = async (l: { url: string }, _label: string) => {
+    const ok = await copyText(l.url);
     setCopyMsg(ok ? "✅ تم نسخ الرابط" : `تعذّر النسخ التلقائي — الرابط: ${l.url}`);
     setTimeout(() => setCopyMsg(""), ok ? 2500 : 8000);
   };
 
   const shareLink = async (l: { url: string }, label: string) => {
-    const ok = await shareText(`${label}: \n${l.url}`);
+    const ok = await shareText(label, l.url);
     if (!ok) await copyLink(l, label);
   };
 

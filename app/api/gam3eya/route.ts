@@ -103,7 +103,7 @@ export async function POST(req: NextRequest) {
   }
 
   // type === "organizing"
-  const participants: { name: string; phone?: string; account_number?: string; payment_method?: string; address?: string; id_photo_front?: string; payment_accounts?: any[] }[] = body.participants || [];
+  const participants: { name: string; phone?: string; account_number?: string; payment_method?: string; address?: string; id_photo_front?: string; payment_accounts?: any[]; split_with_name?: string }[] = body.participants || [];
   if (!participants.length || participants.some((p) => !p.name)) {
     return NextResponse.json({ error: "لازم تضيف الأفراد كلهم بالاسم على الأقل" }, { status: 400 });
   }
@@ -140,6 +140,10 @@ export async function POST(req: NextRequest) {
     id_photo_front: p.id_photo_front || null,
     payment_accounts: Array.isArray(p.payment_accounts) ? p.payment_accounts : [],
     payout_order: i + 1,
+    // Round 34 — "فرد يتقسم علي 2": نفس الدور/الدفعات، بس متسجل إنه
+    // مقسوم مع اسم تاني (عرض/تصدير بس — القيمة الفعلية لكل شهر متسجلة
+    // زي ما هي فوق gam3eya_payments.amount من غير تغيير).
+    split_with_name: p.split_with_name?.trim() || null,
   }));
   const { data: insertedParticipants, error: partErr } = await supabaseAdmin.from("gam3eya_participants").insert(participantRows).select();
   if (partErr) {

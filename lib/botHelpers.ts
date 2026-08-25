@@ -29,6 +29,17 @@ export function accountsKeyboard(accounts: any[], prefix: string) {
   };
 }
 
+// Round 35 — expense-flow account picker gains an explicit "كاش" option
+// (account_id ends up null, exactly like leaving the account blank in the
+// app's own /add form) so a cash purchase can be recorded from the bot
+// without forcing a real tracked account to be debited — this is also what
+// makes the "تخصم من المحفظة؟" wallet prompt reachable from the bot at all.
+export function accountsKeyboardWithCash(accounts: any[], prefix: string) {
+  const kb = accountsKeyboard(accounts, prefix);
+  kb.inline_keyboard.push([{ text: "🚶 كاش (من غير حساب)", callback_data: `${prefix}:none` }]);
+  return kb;
+}
+
 export function yesNoKeyboard(prefix: string) {
   return {
     inline_keyboard: [

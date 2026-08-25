@@ -28,6 +28,9 @@ export default function CalendarPage() {
   const [snapshot, setSnapshot] = useState<any>(null);
   const [installmentsSummary, setInstallmentsSummary] = useState<{ remainingCount: number; remainingAmount: number } | null>(null);
   const [gam3eyaSummary, setGam3eyaSummary] = useState<{ activeCount: number } | null>(null);
+  // Round 35 — "المحفظة الشخصية" في الداش بورد بتاع التقارير: عرض بس، مش
+  // داخلة في أي حساب/مجموع فوق — نفس النمط في accounts/page.tsx.
+  const [walletBalances, setWalletBalances] = useState<{ currency: string; balance: number }[]>([]);
 
   const loadTxs = () => {
     const from = startOfMonth(month).toISOString();
@@ -45,6 +48,7 @@ export default function CalendarPage() {
     fetch("/api/fx").then((r) => r.json()).then((d) => setRates(d.rates || null)).catch(() => {});
     fetch("/api/debts").then((r) => r.json()).then((d) => setDebts(d.debts || [])).catch(() => {});
     fetch("/api/accounts").then((r) => r.json()).then((d) => setAccounts(d.accounts || [])).catch(() => {});
+    fetch("/api/wallet").then((r) => r.json()).then((d) => setWalletBalances(d.balances || [])).catch(() => {});
     fetch("/api/dashboard").then((r) => r.json()).then((d) => setCategoryBreakdown(d.categoryBreakdown || [])).catch(() => {});
     // ربط الصفحة (دلوقتي "التقارير") بالأقساط والجمعيات والمصاريف الثابتة —
     // budget-snapshot بيرجع كل حاجة محوّلة للعملة الأساسية أصلًا (نفس اللي
@@ -302,6 +306,17 @@ export default function CalendarPage() {
                   ))}
                 </div>
               </div>
+            </Card>
+          )}
+
+          {walletBalances.length > 0 && (
+            <Card className="space-y-1.5">
+              <p className="text-xs font-semibold text-neutral-600 dark:text-neutral-300 flex items-center gap-1.5">
+                <Wallet size={14} /> محفظتك (كاش — مش محسوبة في صافي الثروة)
+              </p>
+              <p className="text-sm font-bold flex flex-wrap gap-x-2">
+                {walletBalances.map((w) => <span key={w.currency}>{fmt(w.balance, w.currency)}</span>)}
+              </p>
             </Card>
           )}
         </div>

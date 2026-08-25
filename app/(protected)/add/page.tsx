@@ -59,6 +59,31 @@ function AddForm() {
     toastTimer.current = setTimeout(() => setToast(""), 3000);
   };
 
+  // Round 35 — "المحفظة الشخصية": after a withdrawal, offer to add the cash
+  // to the wallet; after a cash-purchase expense (no account picked — the
+  // app's existing signal for "this wasn't debited from a tracked account"),
+  // offer to deduct it from the wallet instead.
+  const [walletPrompt, setWalletPrompt] = useState<null | { kind: "withdrawal" | "cash_expense"; amount: number; currency: string }>(null);
+  const [walletBusy, setWalletBusy] = useState(false);
+  const confirmWallet = async (yes: boolean) => {
+    if (!walletPrompt) return;
+    if (!yes) { setWalletPrompt(null); return; }
+    setWalletBusy(true);
+    try {
+      const delta = walletPrompt.kind === "withdrawal" ? Math.abs(walletPrompt.amount) : -Math.abs(walletPrompt.amount);
+      const res = await fetch("/api/wallet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currency: walletPrompt.currency, amount: delta }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) showToast(`تم تحديث المحفظة ✅ (${fmt(data.balance, walletPrompt.currency)})`);
+    } finally {
+      setWalletBusy(false);
+      setWalletPrompt(null);
+    }
+  };
+
   // date of the transaction — a calendar picker next to every entry,
   // defaulting to today unless the user picks a different date.
   const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -219,6 +244,11 @@ function AddForm() {
           toastMsg = `تم السحب من حساب ${fromName || ""}` + (tx?.accountBalanceAfter != null ? `، المتبقي ${fmt(tx.accountBalanceAfter, cur)}` : "");
         }
         if (toastMsg) showToast(toastMsg);
+        if (type === "withdrawal") {
+          setWalletPrompt({ kind: "withdrawal", amount: parseFloat(amount), currency: cur || "EGP" });
+        } else if (type === "expense" && !accountId) {
+          setWalletPrompt({ kind: "cash_expense", amount: parseFloat(amount), currency: cur || "EGP" });
+        }
         setDone(true); reset(); loadHistory(); setTimeout(() => setDone(false), 1800);
       }
     } catch {
@@ -295,6 +325,18 @@ function AddForm() {
 
       {done && <Card className="bg-orange-50 dark:bg-orange-950 border-orange-300 text-orange-700 dark:text-orange-300 text-center text-sm">تم الحفظ ✅</Card>}
       {saveError && <Card className="bg-red-50 dark:bg-red-950 border-red-300 text-red-600 dark:text-red-400 text-center text-sm">{saveError}</Card>}
+
+      {walletPrompt && (
+        <Card className="bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-900 text-center text-sm space-y-2">
+          <p className="text-amber-700 dark:text-amber-400 font-medium">
+            {walletPrompt.kind === "withdrawal" ? "👛 حط الفلوس دي في محفظتك؟" : "👛 تخصم المبلغ ده من محفظتك؟"}
+          </p>
+          <div className="flex gap-2 justify-center">
+            <button disabled={walletBusy} onClick={() => confirmWallet(true)} className="bg-orange-600 text-white rounded-lg px-5 py-1.5 text-sm font-medium">نعم</button>
+            <button disabled={walletBusy} onClick={() => confirmWallet(false)} className="border border-neutral-300 dark:border-neutral-700 rounded-lg px-5 py-1.5 text-sm">لا</button>
+          </div>
+        </Card>
+      )}
 
       {accountsLoadError && (
         <Card className="bg-red-50 dark:bg-red-950 border-red-300 text-red-600 dark:text-red-400 text-sm flex items-start gap-2">
