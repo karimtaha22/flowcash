@@ -129,6 +129,23 @@ export default function AdminPage() {
       .catch(() => { setLocked(true); setCheckedAccess(true); });
   useEffect(() => { load(); }, []);
 
+  // "React error #310" (رصدت ديسمبر — Round 31 postmortem): كان الـ useEffect
+  // ده متعرّف بعد الـ early return statements تحت (`if (!checkedAccess) return`
+  // و`if (locked) return`) — يعني في أول render (قبل ما checkedAccess/locked
+  // يتحددوا) الصفحة كانت بترجع من غير ما توصل للـ hook ده خالص، وفي render
+  // بعد كده لما تعدي العودتين المبكرتين كانت بتسجّله لأول مرة — عدد الـ hooks
+  // بيختلف من render لتاني، وده بالظبط اللي React بيرفضه ويوقّف الصفحة كلها
+  // عن الظهور (رسالة "the page failed to load" اللي واجهها المستخدم). القاعدة:
+  // كل الـ hooks (useState/useEffect) لازم تتنادى دايمًا بنفس الترتيب في كل
+  // render — أي return مبكر لازم يكون بعد كل الـ hooks، مش قبلهم.
+  const loadGeminiStatus = async () => {
+    const res = await fetch("/api/admin/gemini-settings");
+    const data = await res.json();
+    setGeminiStatus(data);
+    setGeminiModelInput(data.dbModelOverride || "");
+  };
+  useEffect(() => { if (!locked && checkedAccess) loadGeminiStatus(); }, [locked, checkedAccess]);
+
   if (!checkedAccess) {
     return <div className="max-w-md mx-auto p-4 pt-16 text-center text-sm text-neutral-400">جاري التحقق...</div>;
   }
@@ -171,14 +188,6 @@ export default function AdminPage() {
       setSharedBotBusy(false);
     }
   };
-
-  const loadGeminiStatus = async () => {
-    const res = await fetch("/api/admin/gemini-settings");
-    const data = await res.json();
-    setGeminiStatus(data);
-    setGeminiModelInput(data.dbModelOverride || "");
-  };
-  useEffect(() => { if (!locked && checkedAccess) loadGeminiStatus(); }, [locked, checkedAccess]);
 
   const saveGeminiSettings = async (patch: Record<string, any>) => {
     setGeminiBusy(true);
