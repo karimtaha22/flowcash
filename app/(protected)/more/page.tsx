@@ -1,6 +1,6 @@
 import Link from "next/link";
 import Card from "@/components/Card";
-import { Search, FileDown, Settings, ChevronLeft, LayoutDashboard } from "lucide-react";
+import { Search, FileDown, Settings, ChevronLeft, LayoutDashboard, Bell } from "lucide-react";
 
 // التخطيط المالي و"أقساط وجمعيات" اتنقلوا للشريط السفلي نفسه (BottomNav) بدل
 // ما يتدوّر عليهم هنا — التقويم (دلوقتي "التقارير") اتنقل هنا بدالهم عشان
@@ -8,9 +8,10 @@ import { Search, FileDown, Settings, ChevronLeft, LayoutDashboard } from "lucide
 // (مش بس تقويم، فيه تحليلات وربط بالأقساط والجمعيات كمان) واتنقل آخر
 // عنصر فوق الإعدادات مباشرة زي ما اتطلب.
 const items = [
-  { href: "/search", label: "البحث", desc: "دور بأي حاجة في حساباتك", icon: Search },
+  { href: "/reminders", label: "التذكيرات", desc: "سوبر ماركت وأسعار، تذكيرات عامة، أدوية ومواعيد طبية، وقراءة العدادات", icon: Bell },
   { href: "/export", label: "تصدير كشف حساب", desc: "PDF أو Excel لأي حساب أو شخص", icon: FileDown },
   { href: "/calendar", label: "التقارير", desc: "تقويم شهري، تحليلات، وربط بالأقساط والجمعيات وكل قرش داخل وخارج", icon: LayoutDashboard },
+  { href: "/search", label: "البحث", desc: "دور بأي حاجة في حساباتك", icon: Search },
   { href: "/settings", label: "الإعدادات", desc: "العملة الأساسية، التصنيفات، الأشخاص، الوضع الليلي", icon: Settings },
 ];
 

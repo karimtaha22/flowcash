@@ -29,7 +29,17 @@ const KEY_MAP: Record<string, string> = {
   "🔍 استعلام عن مصروف": "expense_query",
   "🔔 التنبيهات": "alerts",
   "🔕 كتم/تفعيل تنبيهات البوت": "toggle_mute",
+  "➕ إضافة تذكير": "add_reminder",
 };
+
+// round 27 — "➕ إضافة تذكير": asks which of the 3 reminder kinds, then takes
+// one free-text message and saves it as a minimal record of that kind,
+// tagged source:"telegram" so it's visibly distinguishable in the app (see
+// /reminders' UI — each list badges telegram-sourced rows). Deliberately NOT
+// the full multi-field forms (date/time picker, medication schedule,
+// brand/price picking) — those stay app-only; the bot is a fast capture path
+// ("تكتب و يتسجل") the user can flesh out later in the app if they want to.
+const REMINDER_TYPE_LABELS: Record<string, string> = { general: "تذكير عام", medication: "دواء", grocery: "سوبر ماركت" };
 
 async function getAccounts(userId: string) {
   const { data } = await supabaseAdmin.from("accounts").select("*").eq("user_id", userId).eq("is_archived", false).order("created_at");
@@ -148,6 +158,32 @@ export async function handleTelegramCallback(userId: string, botToken: string, c
     return reply(botToken, chatId, `✅ اتسجل قسط "${(payment as any).installment_plans?.item_name}" مدفوع.`);
   }
 
+  // "✅ اتاخدت" on a medication dose-due reminder — logs the dose exactly
+  // like POST /api/reminders/medications/[id]/dose does for the in-app
+  // button, so both paths share the same next-dose math (lib/medicationSchedule.ts).
+  if (prefix === "dose_taken") {
+    const { data: med } = await supabaseAdmin
+      .from("medications")
+      .select("id,name,remaining_doses,schedule_type,meal_timing,interval_hours")
+      .eq("id", value)
+      .eq("user_id", userId)
+      .single();
+    if (!med) return reply(botToken, chatId, "الدواء ده مش موجود دلوقتي.");
+    const { computeNextDoseAt } = await import("./medicationSchedule");
+    const newRemaining = med.remaining_doses !== null ? Math.max(0, med.remaining_doses - 1) : null;
+    const nextDose = med.schedule_type ? computeNextDoseAt(med.schedule_type, med.meal_timing, med.interval_hours) : null;
+    await supabaseAdmin
+      .from("medications")
+      .update({
+        remaining_doses: newRemaining,
+        last_dose_at: new Date().toISOString(),
+        next_dose_at: nextDose ? nextDose.toISOString() : null,
+        last_dose_reminded_at: null,
+      })
+      .eq("id", value);
+    return reply(botToken, chatId, `✅ اتسجلت جرعة "${med.name}"${newRemaining !== null ? ` — باقي ${newRemaining}` : ""}`);
+  }
+
   if (prefix === "gam3eya_paid") {
     const { data: payment } = await supabaseAdmin
       .from("gam3eya_payments")
@@ -192,6 +228,16 @@ async function startFlow(userId: string, botToken: string, chatId: string, flow:
   if (flow === "expense_query") return expenseQuery(userId, botToken, chatId);
   if (flow === "alerts") return alertsReport(userId, botToken, chatId);
   if (flow === "toggle_mute") return toggleMuteAll(userId, botToken, chatId);
+  if (flow === "add_reminder") {
+    await setSession(userId, chatId, "add_reminder", "await_type", {});
+    return replyInlineWithCancel(botToken, chatId, "هتضيف انهي تذكير؟", {
+      inline_keyboard: [
+        [{ text: "📅 تذكير عام", callback_data: "remtype:general" }],
+        [{ text: "💊 دواء", callback_data: "remtype:medication" }],
+        [{ text: "🛒 سوبر ماركت", callback_data: "remtype:grocery" }],
+      ],
+    });
+  }
   if (flow === "account_statement") {
     const accounts = await getAccounts(userId);
     if (!accounts.length) return reply(botToken, chatId, "لسه معملتش أي حساب. ضيفه من التطبيق الأول.");
@@ -444,6 +490,39 @@ async function continueFlow(userId: string, botToken: string, chatId: string, se
       await clearSession(userId, chatId);
       return reply(botToken, chatId, `في مشكلة: ${e.message}`);
     }
+  }
+
+  // ===== ADD REMINDER (round 27) =====
+  if (flow === "add_reminder" && step === "await_type" && cbPrefix === "remtype") {
+    payload.type = input; // "general" | "medication" | "grocery"
+    await setSession(userId, chatId, "add_reminder", "await_text", payload);
+    const prompts: Record<string, string> = {
+      general: "اكتب التذكير اللي عايزه ✍️",
+      medication: "اكتب اسم الدواء ✍️",
+      grocery: "اكتب اللي عايز تضيفه للسوبر ماركت ✍️",
+    };
+    return reply(botToken, chatId, prompts[input] || "اكتب ✍️", CANCEL_KEYBOARD);
+  }
+
+  if (flow === "add_reminder" && step === "await_text") {
+    const text = input.trim();
+    if (!text) return reply(botToken, chatId, "اكتب نص مش فاضي 🙏");
+    const note = "جاي من تليجرام";
+    try {
+      if (payload.type === "general") {
+        await supabaseAdmin.from("general_reminders").insert({ user_id: userId, title: text, source: "telegram", note });
+      } else if (payload.type === "medication") {
+        await supabaseAdmin.from("medications").insert({ user_id: userId, name: text, source: "telegram", note });
+      } else {
+        const { data: list } = await supabaseAdmin.from("grocery_lists").insert({ user_id: userId, status: "draft", source: "telegram" }).select("id").single();
+        if (list) await supabaseAdmin.from("grocery_list_entries").insert({ list_id: list.id, raw_text: text, note });
+      }
+    } catch (e: any) {
+      await clearSession(userId, chatId);
+      return reply(botToken, chatId, `في مشكلة: ${e.message}`);
+    }
+    await clearSession(userId, chatId);
+    return reply(botToken, chatId, `✅ اتسجل "${text}" كـ ${REMINDER_TYPE_LABELS[payload.type] || "تذكير"}. تقدر تكمّل بياناته من التطبيق (زي المعاد أو السعر) لو حابب.`);
   }
 
   // ===== ACCOUNT STATEMENT =====

@@ -379,3 +379,196 @@ export async function runZakatReminderForUser(user: ZakatUser) {
     return { notified: false, reason: "send_failed" };
   }
 }
+
+// ================= التذكيرات (round 27) =================
+
+// ---------------- general reminders ----------------
+// Fires once per reminder at its own remind_at (not tied to a per-user hour
+// preference like debts/recurring — a general reminder's whole point is a
+// specific date+time the user picked). Guarded by reminded_at, cleared
+// whenever the reminder is rescheduled or re-activated (see
+// PATCH /api/reminders/general/[id]).
+// كل قد إيه (Round 29) — "أبدا" (none, the default) fires once then guards
+// via reminded_at forever (unchanged behavior); daily/weekly/monthly instead
+// ADVANCES remind_at to the next occurrence and clears reminded_at, so the
+// same reminder keeps firing on schedule instead of needing to be re-created
+// every time. The next occurrence is computed from the reminder's own
+// remind_at (not "now") so a fixed time-of-day doesn't drift even if a tick
+// runs a bit late.
+function nextRepeatAt(remindAt: string, freq: string): string | null {
+  const d = new Date(remindAt);
+  if (freq === "daily") d.setDate(d.getDate() + 1);
+  else if (freq === "weekly") d.setDate(d.getDate() + 7);
+  else if (freq === "monthly") d.setMonth(d.getMonth() + 1);
+  else return null;
+  return d.toISOString();
+}
+
+export async function runGeneralRemindersForUser(user: ReminderUser) {
+  if (!botToken() || !user.telegram_chat_id || isMuted(user)) return { sent: 0 };
+  const nowIso = new Date().toISOString();
+  const { data: reminders } = await supabaseAdmin
+    .from("general_reminders")
+    .select("id,title,remind_at,repeat_frequency")
+    .eq("user_id", user.id)
+    .eq("status", "active")
+    .is("reminded_at", null)
+    .not("remind_at", "is", null)
+    .lte("remind_at", nowIso);
+
+  let sent = 0;
+  for (const r of reminders || []) {
+    try {
+      await sendText(botToken(), user.telegram_chat_id, `🔔 تذكير: ${r.title}`);
+      sent++;
+    } catch {
+      // best-effort
+    }
+    const next = r.remind_at ? nextRepeatAt(r.remind_at, r.repeat_frequency || "none") : null;
+    if (next) {
+      // recurring — roll forward instead of permanently guarding.
+      await supabaseAdmin.from("general_reminders").update({ remind_at: next, reminded_at: null }).eq("id", r.id);
+    } else {
+      await supabaseAdmin.from("general_reminders").update({ reminded_at: nowIso }).eq("id", r.id);
+    }
+  }
+  return { sent };
+}
+
+// ---------------- medications: dose-due + low-stock ----------------
+// Two independent guarded checks per medication per tick:
+//   - dose due: fires remind_before_minutes ahead of next_dose_at, guarded
+//     by last_dose_reminded_at === next_dose_at (so it fires exactly once per
+//     dose, and automatically re-arms once next_dose_at advances after the
+//     dose is logged — see computeNextDoseAt in lib/medicationSchedule.ts).
+//   - low stock: fires once when remaining_doses drops to/under
+//     low_stock_threshold, guarded by low_stock_alerted_at (cleared when the
+//     pack is refilled above the threshold — see PATCH .../medications/[id]).
+export async function runMedicationRemindersForUser(user: ReminderUser) {
+  if (!botToken() || !user.telegram_chat_id || isMuted(user)) return { sent: 0 };
+  const now = new Date();
+
+  const { data: meds } = await supabaseAdmin
+    .from("medications")
+    .select("id,name,remaining_doses,low_stock_threshold,low_stock_alerted_at,reminder_enabled,remind_before_minutes,next_dose_at,last_dose_reminded_at")
+    .eq("user_id", user.id)
+    .eq("status", "active");
+
+  let sent = 0;
+  for (const m of meds || []) {
+    if (m.reminder_enabled && m.next_dose_at && m.last_dose_reminded_at !== m.next_dose_at) {
+      const doseAt = new Date(m.next_dose_at);
+      const alertAt = new Date(doseAt.getTime() - (m.remind_before_minutes || 0) * 60_000);
+      if (now >= alertAt) {
+        try {
+          await tgCall(botToken(), "sendMessage", {
+            chat_id: user.telegram_chat_id,
+            text: `💊 موعد جرعة "${m.name}"${m.remind_before_minutes ? ` بعد ${m.remind_before_minutes} دقيقة تقريبًا` : ""}`,
+            reply_markup: { inline_keyboard: [[{ text: "✅ اتاخدت", callback_data: `dose_taken:${m.id}` }]] },
+          });
+          sent++;
+        } catch {
+          // best-effort
+        }
+        await supabaseAdmin.from("medications").update({ last_dose_reminded_at: m.next_dose_at }).eq("id", m.id);
+      }
+    }
+
+    if (m.remaining_doses !== null && m.remaining_doses !== undefined && m.remaining_doses <= (m.low_stock_threshold ?? 5) && !m.low_stock_alerted_at) {
+      try {
+        await sendText(botToken(), user.telegram_chat_id, `⚠️ الدواء "${m.name}" قرب يخلص — باقي ${m.remaining_doses} بس. وقت تجيب علبة جديدة.`);
+        sent++;
+      } catch {
+        // best-effort
+      }
+      await supabaseAdmin.from("medications").update({ low_stock_alerted_at: new Date().toISOString() }).eq("id", m.id);
+    }
+  }
+  return { sent };
+}
+
+// ---------------- medical appointments ----------------
+// One heads-up per appointment, sent once it's within 24h and still
+// upcoming — guarded by reminded_at, cleared if the user reschedules it.
+export async function runAppointmentRemindersForUser(user: ReminderUser) {
+  if (!botToken() || !user.telegram_chat_id || isMuted(user)) return { sent: 0 };
+  const now = new Date();
+  const in1Day = new Date(now.getTime() + 24 * 3600_000);
+
+  const { data: appts } = await supabaseAdmin
+    .from("medical_appointments")
+    .select("id,title,kind,appointment_at")
+    .eq("user_id", user.id)
+    .eq("status", "upcoming")
+    .is("reminded_at", null)
+    .lte("appointment_at", in1Day.toISOString())
+    .gte("appointment_at", now.toISOString());
+
+  let sent = 0;
+  for (const a of appts || []) {
+    const kindLabel = a.kind === "consultation" ? "استشارة طبية" : "كشف طبي";
+    const when = new Date(a.appointment_at).toLocaleString("ar-EG", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
+    try {
+      await sendText(botToken(), user.telegram_chat_id, `🩺 تذكير: ${kindLabel}${a.title ? ` — ${a.title}` : ""}\nالمعاد: ${when}`);
+      sent++;
+    } catch {
+      // best-effort
+    }
+    await supabaseAdmin.from("medical_appointments").update({ reminded_at: new Date().toISOString() }).eq("id", a.id);
+  }
+  return { sent };
+}
+
+// ---------------- monthly utility-usage insight ----------------
+// "كل شهر تقوله استخدام الشهر ده اعلي في الكهرباء مثلا و اقل في المياه" —
+// sends at most once every ~28 days, only during the first 3 days of a
+// month, and only when there's enough history (3+ readings of a meter type)
+// to compare the latest usage delta against the one before it.
+interface UtilityUser extends ReminderUser {
+  utility_insight_last_sent_at?: string | null;
+}
+
+export async function runUtilityInsightForUser(user: UtilityUser) {
+  if (!botToken() || !user.telegram_chat_id || isMuted(user)) return { sent: false, reason: "no_telegram_or_muted" };
+  const now = new Date();
+  if (now.getDate() > 3) return { sent: false, reason: "not_window" };
+
+  const lastMs = user.utility_insight_last_sent_at ? new Date(user.utility_insight_last_sent_at).getTime() : 0;
+  const daysSince = (now.getTime() - lastMs) / 86_400_000;
+  if (daysSince < 28) return { sent: false, reason: "too_soon" };
+
+  const { data: readings } = await supabaseAdmin
+    .from("utility_meter_readings")
+    .select("meter_type,reading_value,reading_date")
+    .eq("user_id", user.id)
+    .order("reading_date", { ascending: true });
+  if (!readings || readings.length < 3) return { sent: false, reason: "not_enough_data" };
+
+  const labels: Record<string, string> = { electricity: "الكهرباء", gas: "الغاز", water: "المياه" };
+  const byType: Record<string, typeof readings> = {};
+  for (const r of readings) (byType[r.meter_type] ||= []).push(r);
+
+  const lines: string[] = [];
+  for (const type of Object.keys(byType)) {
+    const list = byType[type];
+    if (list.length < 3) continue;
+    const last = list[list.length - 1];
+    const prev = list[list.length - 2];
+    const prevPrev = list[list.length - 3];
+    const lastUsage = Number(last.reading_value) - Number(prev.reading_value);
+    const prevUsage = Number(prev.reading_value) - Number(prevPrev.reading_value);
+    if (prevUsage <= 0) continue;
+    const diffPct = Math.round(((lastUsage - prevUsage) / prevUsage) * 100);
+    if (Math.abs(diffPct) < 5) continue;
+    lines.push(`${labels[type] || type}: استهلاكك ${diffPct > 0 ? "أعلى" : "أقل"} بـ ${Math.abs(diffPct)}% عن الفترة اللي قبلها`);
+  }
+  if (!lines.length) return { sent: false, reason: "no_signal" };
+
+  try {
+    await sendText(botToken(), user.telegram_chat_id, `📊 مقارنة استهلاك العدادات\n\n${lines.join("\n")}`);
+    await supabaseAdmin.from("app_users").update({ utility_insight_last_sent_at: now.toISOString() }).eq("id", user.id);
+    return { sent: true };
+  } catch {
+    return { sent: false, reason: "send_failed" };
+  }
+}

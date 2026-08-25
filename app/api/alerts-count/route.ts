@@ -56,28 +56,59 @@ export async function GET() {
     }
   }
 
-  const [{ data: recurring }, { data: budgets }, { data: overdueDebts, count: overdueDebtsCountRaw }, { data: txs }, { data: overdueInstallments }, { data: overdueGam3eya }] =
-    await Promise.all([
-      supabaseAdmin.from("recurring_items").select("id,name,last_confirmed_month,is_active").eq("user_id", userId).eq("is_active", true),
-      supabaseAdmin.from("budgets").select("id,category_id,monthly_limit,alert_threshold_pct,categories(name)").eq("user_id", userId),
-      // limit(20) on the actual rows (so the dropdown list stays short) but
-      // count: "exact" still reflects the TRUE total, so the badge number
-      // never undercounts a user with more than 20 overdue debts.
-      supabaseAdmin.from("debts").select("id,title,people(name)", { count: "exact" }).eq("user_id", userId).eq("status", "overdue").limit(20),
-      supabaseAdmin.from("transactions").select("category_id,amount").eq("user_id", userId).eq("type", "expense").gte("occurred_at", monthStart),
-      supabaseAdmin
-        .from("installment_payments")
-        .select("id,due_date,installment_plans!inner(user_id,item_name)")
-        .eq("installment_plans.user_id", userId)
-        .eq("status", "pending")
-        .lte("due_date", todayIso),
-      supabaseAdmin
-        .from("gam3eya_payments")
-        .select("id,due_date,gam3eyas!inner(user_id,name),gam3eya_participants(name)")
-        .eq("gam3eyas.user_id", userId)
-        .eq("status", "pending")
-        .lte("due_date", todayIso),
-    ]);
+  // round 27's التذكيرات feature — "due" here (for the bell) is a plain
+  // time/threshold check, deliberately NOT gated by the same
+  // reminded_at/last_dose_reminded_at guards lib/reminders.ts's cron uses
+  // for Telegram (those guards exist so a push message sends once; the bell
+  // is a pull-based read that should just reflect current reality every
+  // time it's opened, Telegram-linked or not).
+  const nowIso = new Date().toISOString();
+  const in1DayIso = new Date(Date.now() + 24 * 3600_000).toISOString();
+
+  const [
+    { data: recurring },
+    { data: budgets },
+    { data: overdueDebts, count: overdueDebtsCountRaw },
+    { data: txs },
+    { data: overdueInstallments },
+    { data: overdueGam3eya },
+    { data: dueGeneralReminders },
+    { data: activeMeds },
+    { data: upcomingAppts },
+  ] = await Promise.all([
+    supabaseAdmin.from("recurring_items").select("id,name,last_confirmed_month,is_active").eq("user_id", userId).eq("is_active", true),
+    supabaseAdmin.from("budgets").select("id,category_id,monthly_limit,alert_threshold_pct,categories(name)").eq("user_id", userId),
+    // limit(20) on the actual rows (so the dropdown list stays short) but
+    // count: "exact" still reflects the TRUE total, so the badge number
+    // never undercounts a user with more than 20 overdue debts.
+    supabaseAdmin.from("debts").select("id,title,people(name)", { count: "exact" }).eq("user_id", userId).eq("status", "overdue").limit(20),
+    supabaseAdmin.from("transactions").select("category_id,amount").eq("user_id", userId).eq("type", "expense").gte("occurred_at", monthStart),
+    supabaseAdmin
+      .from("installment_payments")
+      .select("id,due_date,installment_plans!inner(user_id,item_name)")
+      .eq("installment_plans.user_id", userId)
+      .eq("status", "pending")
+      .lte("due_date", todayIso),
+    supabaseAdmin
+      .from("gam3eya_payments")
+      .select("id,due_date,gam3eyas!inner(user_id,name),gam3eya_participants(name)")
+      .eq("gam3eyas.user_id", userId)
+      .eq("status", "pending")
+      .lte("due_date", todayIso),
+    supabaseAdmin.from("general_reminders").select("id,title").eq("user_id", userId).eq("status", "active").not("remind_at", "is", null).lte("remind_at", nowIso),
+    supabaseAdmin
+      .from("medications")
+      .select("id,name,remaining_doses,low_stock_threshold,next_dose_at,reminder_enabled,remind_before_minutes")
+      .eq("user_id", userId)
+      .eq("status", "active"),
+    supabaseAdmin
+      .from("medical_appointments")
+      .select("id,title,kind,appointment_at")
+      .eq("user_id", userId)
+      .eq("status", "upcoming")
+      .lte("appointment_at", in1DayIso)
+      .gte("appointment_at", nowIso),
+  ]);
 
   const items: { label: string; href: string }[] = [];
 
@@ -124,6 +155,30 @@ export async function GET() {
     items.push({ label: `اعتراض على دين "${d.title}" محتاج مراجعتك`, href: `/people?debt=${d.id}` });
   }
 
+  // round 27 — general reminders due, medication doses due/low-stock,
+  // upcoming appointments. Same "/reminders" href for all of them; the page
+  // itself sorts by soonest so tapping any one lands somewhere useful.
+  for (const r of dueGeneralReminders || []) {
+    items.push({ label: `تذكير: ${r.title}`, href: "/reminders" });
+  }
+
+  const dueDoseMeds = (activeMeds || []).filter((m: any) => {
+    if (!m.reminder_enabled || !m.next_dose_at) return false;
+    const alertAt = new Date(m.next_dose_at).getTime() - (m.remind_before_minutes || 0) * 60_000;
+    return Date.now() >= alertAt;
+  });
+  for (const m of dueDoseMeds as any[]) {
+    items.push({ label: `موعد جرعة "${m.name}"`, href: "/reminders" });
+  }
+  const lowStockMeds = (activeMeds || []).filter((m: any) => m.remaining_doses !== null && m.remaining_doses !== undefined && m.remaining_doses <= (m.low_stock_threshold ?? 5));
+  for (const m of lowStockMeds as any[]) {
+    items.push({ label: `الدواء "${m.name}" قرب يخلص`, href: "/reminders" });
+  }
+  for (const a of (upcomingAppts || []) as any[]) {
+    const kindLabel = a.kind === "consultation" ? "استشارة طبية" : "كشف طبي";
+    items.push({ label: `${kindLabel}${a.title ? ` — ${a.title}` : ""} قريب`, href: "/reminders" });
+  }
+
   const dueRecurring = dueRecurringList.length;
   const overBudget = overBudgetList.length;
   const overdueCount = overdueDebtsCountRaw ?? (overdueDebts || []).length;
@@ -131,9 +186,24 @@ export async function GET() {
   const overdueGam3eyaCount = (overdueGam3eya || []).length;
   const debtRequestsCount = debtRequestItems.length;
   const unresolvedObjectionsCount = (myUnresolvedObjections || []).length;
+  const dueGeneralRemindersCount = (dueGeneralReminders || []).length;
+  const dueDoseMedsCount = dueDoseMeds.length;
+  const lowStockMedsCount = lowStockMeds.length;
+  const upcomingApptsCount = (upcomingAppts || []).length;
 
   return NextResponse.json({
-    count: dueRecurring + overBudget + overdueCount + overdueInstallmentsCount + overdueGam3eyaCount + debtRequestsCount + unresolvedObjectionsCount,
+    count:
+      dueRecurring +
+      overBudget +
+      overdueCount +
+      overdueInstallmentsCount +
+      overdueGam3eyaCount +
+      debtRequestsCount +
+      unresolvedObjectionsCount +
+      dueGeneralRemindersCount +
+      dueDoseMedsCount +
+      lowStockMedsCount +
+      upcomingApptsCount,
     dueRecurring,
     overBudget,
     overdueCount,
@@ -141,6 +211,10 @@ export async function GET() {
     overdueGam3eyaCount,
     debtRequestsCount,
     unresolvedObjectionsCount,
+    dueGeneralRemindersCount,
+    dueDoseMedsCount,
+    lowStockMedsCount,
+    upcomingApptsCount,
     items,
   });
 }

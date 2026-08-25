@@ -7,6 +7,10 @@ import {
   runZakatReminderForUser,
   runInstallmentRemindersForUser,
   runGam3eyaRemindersForUser,
+  runGeneralRemindersForUser,
+  runMedicationRemindersForUser,
+  runAppointmentRemindersForUser,
+  runUtilityInsightForUser,
 } from "@/lib/reminders";
 
 // Unified reminder endpoint meant to be pinged HOURLY by a free external
@@ -32,7 +36,7 @@ export async function GET(req: NextRequest) {
   const { data: users, error } = await supabaseAdmin
     .from("app_users")
     .select(
-      "id,base_currency,telegram_chat_id,telegram_notifications_muted,charity_amount,charity_frequency,charity_reminder_enabled,charity_last_reminded_at,charity_muted_date,debt_reminder_hour,recurring_reminder_hour,hijri_correction_days,zakat_next_due_at,zakat_reminder_enabled,zakat_last_reminded_at,ig_reminders_enabled,ig_reminder_mode,ig_reminder_interval_hours,ig_reminder_hour,ig_last_reminded_at"
+      "id,base_currency,telegram_chat_id,telegram_notifications_muted,charity_amount,charity_frequency,charity_reminder_enabled,charity_last_reminded_at,charity_muted_date,debt_reminder_hour,recurring_reminder_hour,hijri_correction_days,zakat_next_due_at,zakat_reminder_enabled,zakat_last_reminded_at,ig_reminders_enabled,ig_reminder_mode,ig_reminder_interval_hours,ig_reminder_hour,ig_last_reminded_at,utility_insight_last_sent_at"
     );
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
@@ -77,6 +81,15 @@ export async function GET(req: NextRequest) {
         }
       }
     }
+    // التذكيرات (round 27) — general/medications/appointments are each
+    // internally guarded by their own reminded_at-style timestamp, so it's
+    // safe (and correct — they're each due at their own specific time, not
+    // a per-user daily hour) to check them every single tick.
+    entry.generalReminders = await runGeneralRemindersForUser(u);
+    entry.medications = await runMedicationRemindersForUser(u);
+    entry.appointments = await runAppointmentRemindersForUser(u);
+    entry.utilityInsight = await runUtilityInsightForUser(u);
+
     if (Object.keys(entry).length > 1) results.push(entry);
   }
 
