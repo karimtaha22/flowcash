@@ -90,8 +90,10 @@ function isQuotaError(message: string, status?: number) {
   const m = (message || "").toLowerCase();
   return status === 429 || m.includes("quota") || m.includes("rate limit") || m.includes("resource_exhausted");
 }
+// Round 32 — المستخدم طلب توحيد النص ده مع باقي رسائل "تعذر الاتصال بخوادم
+// IDEA" في التطبيق بدل الشرح التقني عن حد الطلبات.
 const QUOTA_MESSAGE =
-  "الحد المسموح به من طلبات البحث بالذكاء الاصطناعي خلص مؤقتًا (بيتجدد بعد شوية حسب خطة جوجل). تقدر تسجّل السعر يدويًا دلوقتي، أو تجرب تاني بعد شوية.";
+  "تعذر الاتصال بخوادم IDEA — تقدر تسجّل السعر يدويًا، أو تعيد المحاولة بعد دقائق.";
 
 export async function fetchAiPrice(itemName: string): Promise<AiPriceResult> {
   const { apiKey, model } = await resolveGeminiConfig();
