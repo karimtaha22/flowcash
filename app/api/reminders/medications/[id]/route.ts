@@ -25,19 +25,23 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
   if ("reminder_enabled" in body) update.reminder_enabled = !!body.reminder_enabled;
   if ("remind_before_minutes" in body) update.remind_before_minutes = Number(body.remind_before_minutes) || 0;
-  if ("low_stock_threshold" in body) update.low_stock_threshold = Number(body.low_stock_threshold) || 5;
+  if ("low_stock_threshold" in body) update.low_stock_threshold = Number(body.low_stock_threshold) || 2;
   if ("status" in body && ["active", "completed", "cancelled"].includes(body.status)) update.status = body.status;
   if ("note" in body) update.note = body.note || null;
+  if ("course_duration_days" in body) update.course_duration_days = body.course_duration_days ? Number(body.course_duration_days) : null;
 
-  const scheduleChanged = "schedule_type" in body || "meal_timing" in body || "interval_hours" in body;
+  const SCHEDULE_TYPES = ["meal", "interval", "daily", "weekly", "monthly"];
+  const scheduleChanged = "schedule_type" in body || "meal_timing" in body || "interval_hours" in body || "first_dose_at" in body;
   if (scheduleChanged) {
-    const scheduleType = "schedule_type" in body ? (body.schedule_type === "interval" ? "interval" : body.schedule_type === "meal" ? "meal" : null) : current.schedule_type;
+    const scheduleType = "schedule_type" in body ? (SCHEDULE_TYPES.includes(body.schedule_type) ? body.schedule_type : null) : current.schedule_type;
     const mealTiming = "meal_timing" in body ? body.meal_timing || null : current.meal_timing;
     const intervalHours = "interval_hours" in body ? Number(body.interval_hours) || null : current.interval_hours;
+    const firstDoseAt = "first_dose_at" in body ? body.first_dose_at || null : current.first_dose_at;
     update.schedule_type = scheduleType;
     update.meal_timing = scheduleType === "meal" ? mealTiming : null;
     update.interval_hours = scheduleType === "interval" ? intervalHours : null;
-    update.next_dose_at = scheduleType ? computeNextDoseAt(scheduleType, mealTiming, intervalHours).toISOString() : null;
+    update.first_dose_at = firstDoseAt;
+    update.next_dose_at = scheduleType ? computeNextDoseAt(scheduleType, mealTiming, intervalHours, new Date(), firstDoseAt).toISOString() : null;
     update.last_dose_reminded_at = null;
   }
 

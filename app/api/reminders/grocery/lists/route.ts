@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
   const userId = await getSessionUserId();
   if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const body = await req.json();
-  const entries: { raw_text: string; item_id?: string | null; selected_option_id?: string | null; quantity?: number; note?: string }[] = body.entries || [];
+  const entries: { raw_text: string; item_id?: string | null; selected_option_id?: string | null; quantity?: number; unit?: string | null; note?: string }[] = body.entries || [];
   if (!entries.length) return NextResponse.json({ error: "القائمة فاضية" }, { status: 400 });
 
   const { data: list, error: listErr } = await supabaseAdmin
@@ -38,6 +38,7 @@ export async function POST(req: NextRequest) {
     item_id: e.item_id || null,
     selected_option_id: e.selected_option_id || null,
     quantity: e.quantity && e.quantity > 0 ? e.quantity : 1,
+    unit: e.unit || null,
     note: e.note || null,
   }));
   const { data: insertedEntries, error: entriesErr } = await supabaseAdmin.from("grocery_list_entries").insert(rows).select();

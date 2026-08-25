@@ -83,6 +83,16 @@ export interface AiPriceResult {
 // اللولو") — count as valid sources; reinforced in the prompt text itself.
 const ALLOWED_STORES = ["كارفور", "أمازون مصر", "سبينيس", "اللولو"];
 
+// Recognizes a Gemini quota/rate-limit failure so the client can show a
+// friendly Arabic message instead of Google's raw English error text (the
+// exact real bug report from Round 30: "you exceeded your current quota...").
+function isQuotaError(message: string, status?: number) {
+  const m = (message || "").toLowerCase();
+  return status === 429 || m.includes("quota") || m.includes("rate limit") || m.includes("resource_exhausted");
+}
+const QUOTA_MESSAGE =
+  "الحد المسموح به من طلبات البحث بالذكاء الاصطناعي خلص مؤقتًا (بيتجدد بعد شوية حسب خطة جوجل). تقدر تسجّل السعر يدويًا دلوقتي، أو تجرب تاني بعد شوية.";
+
 export async function fetchAiPrice(itemName: string): Promise<AiPriceResult> {
   const { apiKey, model } = await resolveGeminiConfig();
   if (!apiKey) {
@@ -123,7 +133,8 @@ export async function fetchAiPrice(itemName: string): Promise<AiPriceResult> {
     });
     const data = await res.json();
     if (!res.ok) {
-      return { ok: false, options: [], error: data?.error?.message || `Gemini API error (${res.status})` };
+      const rawMessage = data?.error?.message || `Gemini API error (${res.status})`;
+      return { ok: false, options: [], error: isQuotaError(rawMessage, res.status) ? QUOTA_MESSAGE : rawMessage };
     }
     const text: string = (data?.candidates?.[0]?.content?.parts || [])
       .map((p: any) => p.text || "")
@@ -149,6 +160,102 @@ export async function fetchAiPrice(itemName: string): Promise<AiPriceResult> {
     return { ok: true, options };
   } catch (e: any) {
     return { ok: false, options: [], error: e?.message || "حصل خطأ أثناء البحث عن السعر، حاول تاني." };
+  }
+}
+
+export interface AiPriceBatchItem {
+  item_name: string;
+  ok: boolean;
+  options: AiPriceOption[];
+  error?: string;
+}
+
+// Round 30 — batched version of fetchAiPrice: looks up up to a handful of
+// items (the client groups rows into batches of 3, see GroceryTab) in ONE
+// Gemini call instead of one call per item, since the user hit a real quota
+// error and asked directly whether to batch. Same anti-hallucination rules
+// and allowed-store list as the single-item version, just asking for
+// multiple items' worth of options back in one JSON response.
+export async function fetchAiPriceBatch(itemNames: string[]): Promise<{ ok: boolean; items: AiPriceBatchItem[]; error?: string }> {
+  const names = itemNames.map((n) => n.trim()).filter(Boolean).slice(0, 5);
+  if (!names.length) return { ok: true, items: [] };
+
+  const { apiKey, model } = await resolveGeminiConfig();
+  if (!apiKey) {
+    return {
+      ok: false,
+      items: [],
+      error: "GEMINI_API_KEY مش متسجل — لا في Vercel ولا من إعدادات /admin. تسعير الأصناف الجديدة بالذكاء الاصطناعي متوقف مؤقتًا؛ سجّل السعر يدويًا لحد ما يتضاف مفتاح.",
+    };
+  }
+
+  const itemsList = names.map((n, i) => `${i + 1}. ${n}`).join("\n");
+  const prompt = `ابحث عن الأسعار الحالية الحقيقية للمنتجات دي في السوق المصري، كل واحد على حدة، حصريًا من المتاجر الكبرى دي: ${ALLOWED_STORES.join("، ")}.
+
+المنتجات:
+${itemsList}
+
+قواعد صارمة (لازم تتبع بالظبط):
+- ممنوع تخمين أو تقدير أي سعر تمامًا. لو منتج معين مالقتش له سعر حقيقي معلن رسميًا، رجّع له options فاضية (من غير ما تشيله من الرد).
+- لو لاقيت أكتر من ماركة أو خيار لنفس المنتج، رجّعهم كلهم (لحد 5 خيارات لكل منتج).
+- الأسعار بالجنيه المصري (EGP) إلا لو ذُكر غير كده صراحة.
+- لازم ترجع نتيجة لكل منتج من المنتجات المذكورة بالترتيب، حتى لو options بتاعته فاضية.
+
+رجّع الرد بصيغة JSON فقط، من غير أي نص أو شرح قبله أو بعده، بالشكل ده بالظبط:
+{"items":[{"item_name":"اسم المنتج زي ما اتكتب بالظبط","options":[{"brand":"اسم الماركة أو null لو مفيش","store_name":"اسم المتجر (واحد من الأربعة المذكورين)","price":123.45,"currency":"EGP"}]}]}`;
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        tools: [{ google_search: {} }],
+        generationConfig: { temperature: 0.1 },
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      const rawMessage = data?.error?.message || `Gemini API error (${res.status})`;
+      return { ok: false, items: [], error: isQuotaError(rawMessage, res.status) ? QUOTA_MESSAGE : rawMessage };
+    }
+    const text: string = (data?.candidates?.[0]?.content?.parts || [])
+      .map((p: any) => p.text || "")
+      .join("\n")
+      .trim();
+    if (!text) return { ok: false, items: [], error: "مفيش رد واضح من نظام التسعير، حاول تاني." };
+
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return { ok: false, items: [], error: "رد النظام مكانش بصيغة JSON صالحة." };
+
+    const parsed = JSON.parse(jsonMatch[0]);
+    const rawItems: any[] = Array.isArray(parsed.items) ? parsed.items : [];
+    const items: AiPriceBatchItem[] = names.map((requestedName) => {
+      // match the model's returned item_name loosely back to the requested
+      // one (normalized containment) rather than trusting positional order,
+      // since the model occasionally reorders or rephrases slightly.
+      const norm = normalizeGroceryName(requestedName);
+      const found = rawItems.find((it) => {
+        const itNorm = normalizeGroceryName(String(it?.item_name || ""));
+        return itNorm === norm || itNorm.includes(norm) || norm.includes(itNorm);
+      });
+      const options: AiPriceOption[] = Array.isArray(found?.options)
+        ? found.options
+            .filter((o: any) => o && typeof o.price === "number" && o.price > 0 && o.store_name)
+            .slice(0, 5)
+            .map((o: any) => ({
+              brand: o.brand ? String(o.brand) : null,
+              store_name: String(o.store_name),
+              price: Number(o.price),
+              currency: o.currency ? String(o.currency) : "EGP",
+            }))
+        : [];
+      return { item_name: requestedName, ok: true, options };
+    });
+    return { ok: true, items };
+  } catch (e: any) {
+    return { ok: false, items: [], error: e?.message || "حصل خطأ أثناء البحث عن الأسعار، حاول تاني." };
   }
 }
 

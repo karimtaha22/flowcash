@@ -450,12 +450,27 @@ export async function runMedicationRemindersForUser(user: ReminderUser) {
 
   const { data: meds } = await supabaseAdmin
     .from("medications")
-    .select("id,name,remaining_doses,low_stock_threshold,low_stock_alerted_at,reminder_enabled,remind_before_minutes,next_dose_at,last_dose_reminded_at")
+    .select(
+      "id,name,remaining_doses,low_stock_threshold,low_stock_alerted_at,reminder_enabled,remind_before_minutes,next_dose_at,last_dose_reminded_at,first_dose_at,course_duration_days,created_at"
+    )
     .eq("user_id", user.id)
     .eq("status", "active");
 
   let sent = 0;
   for (const m of meds || []) {
+    // "مدة العلاج" (Round 30) — once the course has run its full length from
+    // the first-dose anchor (or creation date if none was set), auto-complete
+    // the medication so it stops reminding without the user having to notice
+    // and cancel it manually.
+    if (m.course_duration_days) {
+      const start = new Date(m.first_dose_at || m.created_at);
+      const end = new Date(start.getTime() + m.course_duration_days * 24 * 3600_000);
+      if (now >= end) {
+        await supabaseAdmin.from("medications").update({ status: "completed" }).eq("id", m.id);
+        continue;
+      }
+    }
+
     if (m.reminder_enabled && m.next_dose_at && m.last_dose_reminded_at !== m.next_dose_at) {
       const doseAt = new Date(m.next_dose_at);
       const alertAt = new Date(doseAt.getTime() - (m.remind_before_minutes || 0) * 60_000);
@@ -488,19 +503,22 @@ export async function runMedicationRemindersForUser(user: ReminderUser) {
 }
 
 // ---------------- medical appointments ----------------
-// One heads-up per appointment, sent once it's within 24h and still
-// upcoming — guarded by reminded_at, cleared if the user reschedules it.
+// Two heads-up messages per appointment (Round 30): one a day before
+// (guarded by reminded_at, as before) and a second one 3 hours before
+// (guarded by the separate reminded_3h_at column) — mirrors the
+// 2-days/due-day pattern used for installments/gam3eya. Both guards are
+// cleared on reschedule (see PATCH .../appointments/[id]).
 export async function runAppointmentRemindersForUser(user: ReminderUser) {
   if (!botToken() || !user.telegram_chat_id || isMuted(user)) return { sent: 0 };
   const now = new Date();
   const in1Day = new Date(now.getTime() + 24 * 3600_000);
+  const in3Hours = new Date(now.getTime() + 3 * 3600_000);
 
   const { data: appts } = await supabaseAdmin
     .from("medical_appointments")
-    .select("id,title,kind,appointment_at")
+    .select("id,title,kind,appointment_at,reminded_at,reminded_3h_at,doctor_name,doctor_address,doctor_phone,doctor_specialty")
     .eq("user_id", user.id)
     .eq("status", "upcoming")
-    .is("reminded_at", null)
     .lte("appointment_at", in1Day.toISOString())
     .gte("appointment_at", now.toISOString());
 
@@ -508,13 +526,27 @@ export async function runAppointmentRemindersForUser(user: ReminderUser) {
   for (const a of appts || []) {
     const kindLabel = a.kind === "consultation" ? "استشارة طبية" : "كشف طبي";
     const when = new Date(a.appointment_at).toLocaleString("ar-EG", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
-    try {
-      await sendText(botToken(), user.telegram_chat_id, `🩺 تذكير: ${kindLabel}${a.title ? ` — ${a.title}` : ""}\nالمعاد: ${when}`);
-      sent++;
-    } catch {
-      // best-effort
+    const doctorLine = a.doctor_name ? `\nد. ${a.doctor_name}${a.doctor_specialty ? ` (${a.doctor_specialty})` : ""}${a.doctor_phone ? ` — ${a.doctor_phone}` : ""}` : "";
+
+    if (!a.reminded_at) {
+      try {
+        await sendText(botToken(), user.telegram_chat_id, `🩺 تذكير: ${kindLabel}${a.title ? ` — ${a.title}` : ""}\nالمعاد: ${when}${doctorLine}`);
+        sent++;
+      } catch {
+        // best-effort
+      }
+      await supabaseAdmin.from("medical_appointments").update({ reminded_at: new Date().toISOString() }).eq("id", a.id);
     }
-    await supabaseAdmin.from("medical_appointments").update({ reminded_at: new Date().toISOString() }).eq("id", a.id);
+
+    if (!a.reminded_3h_at && new Date(a.appointment_at) <= in3Hours) {
+      try {
+        await sendText(botToken(), user.telegram_chat_id, `⏰ باقي 3 ساعات على ${kindLabel}${a.title ? ` — ${a.title}` : ""}\nالمعاد: ${when}${doctorLine}`);
+        sent++;
+      } catch {
+        // best-effort
+      }
+      await supabaseAdmin.from("medical_appointments").update({ reminded_3h_at: new Date().toISOString() }).eq("id", a.id);
+    }
   }
   return { sent };
 }

@@ -18,8 +18,12 @@ export async function POST(req: NextRequest) {
   const name = String(body.name || "").trim();
   if (!name) return NextResponse.json({ error: "اسم الدواء مطلوب" }, { status: 400 });
 
-  const scheduleType = body.schedule_type === "interval" ? "interval" : body.schedule_type === "meal" ? "meal" : null;
-  const nextDoseAt = scheduleType ? computeNextDoseAt(scheduleType, body.meal_timing, Number(body.interval_hours) || null) : null;
+  const SCHEDULE_TYPES = ["meal", "interval", "daily", "weekly", "monthly"];
+  const scheduleType = SCHEDULE_TYPES.includes(body.schedule_type) ? body.schedule_type : null;
+  const firstDoseAt = body.first_dose_at || null;
+  const nextDoseAt = scheduleType
+    ? computeNextDoseAt(scheduleType, body.meal_timing, Number(body.interval_hours) || null, new Date(), firstDoseAt)
+    : null;
 
   const { data, error } = await supabaseAdmin
     .from("medications")
@@ -32,9 +36,11 @@ export async function POST(req: NextRequest) {
       schedule_type: scheduleType,
       meal_timing: scheduleType === "meal" ? body.meal_timing || null : null,
       interval_hours: scheduleType === "interval" ? Number(body.interval_hours) || null : null,
+      first_dose_at: firstDoseAt,
+      course_duration_days: body.course_duration_days ? Number(body.course_duration_days) : null,
       reminder_enabled: body.reminder_enabled !== false,
       remind_before_minutes: Number(body.remind_before_minutes) || 0,
-      low_stock_threshold: body.low_stock_threshold != null ? Number(body.low_stock_threshold) : 5,
+      low_stock_threshold: body.low_stock_threshold != null ? Number(body.low_stock_threshold) : 2,
       next_dose_at: nextDoseAt ? nextDoseAt.toISOString() : null,
       source: body.source === "telegram" ? "telegram" : "app",
       note: body.note || null,

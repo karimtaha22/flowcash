@@ -17,7 +17,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
 
   const newRemaining = med.remaining_doses !== null ? Math.max(0, med.remaining_doses - 1) : null;
   const nowIso = new Date().toISOString();
-  const nextDose = med.schedule_type ? computeNextDoseAt(med.schedule_type, med.meal_timing, med.interval_hours) : null;
+  const nextDose = med.schedule_type ? computeNextDoseAt(med.schedule_type, med.meal_timing, med.interval_hours, new Date(), med.first_dose_at) : null;
 
   const { data, error } = await supabaseAdmin
     .from("medications")

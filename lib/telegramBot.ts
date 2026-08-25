@@ -164,14 +164,14 @@ export async function handleTelegramCallback(userId: string, botToken: string, c
   if (prefix === "dose_taken") {
     const { data: med } = await supabaseAdmin
       .from("medications")
-      .select("id,name,remaining_doses,schedule_type,meal_timing,interval_hours")
+      .select("id,name,remaining_doses,schedule_type,meal_timing,interval_hours,first_dose_at")
       .eq("id", value)
       .eq("user_id", userId)
       .single();
     if (!med) return reply(botToken, chatId, "الدواء ده مش موجود دلوقتي.");
     const { computeNextDoseAt } = await import("./medicationSchedule");
     const newRemaining = med.remaining_doses !== null ? Math.max(0, med.remaining_doses - 1) : null;
-    const nextDose = med.schedule_type ? computeNextDoseAt(med.schedule_type, med.meal_timing, med.interval_hours) : null;
+    const nextDose = med.schedule_type ? computeNextDoseAt(med.schedule_type, med.meal_timing, med.interval_hours, new Date(), med.first_dose_at) : null;
     await supabaseAdmin
       .from("medications")
       .update({
