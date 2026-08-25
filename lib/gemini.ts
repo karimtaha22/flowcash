@@ -332,6 +332,83 @@ export async function extractMeterReading(imageDataUrl: string, meterType?: stri
   }
 }
 
+// Round 33 — "ارفع إيصال السوبر ماركت ل تحديث الاسعار": يقرأ صورة فاتورة/إيصال
+// سوبر ماركت ويستخرج كل صنف واسعره زي ما هو مكتوب بالظبط — مفيش تخمين، لو
+// السعر أو الاسم مش واضح للصنف ده بيتشال من الرد، مش يترجّع بتخمين. اسم
+// المتجر (لو ظاهر في رأس الإيصال) بيترجّع منفصل عشان يتسجل كـ store_name
+// للأسعار المستخرجة بدل ما تتسجل "بدون متجر".
+export interface ReceiptExtractionResult {
+  ok: boolean;
+  store_name: string | null;
+  items: { name: string; price: number }[];
+  error?: string;
+}
+
+const RECEIPT_EXTRACT_SCHEMA = {
+  type: "object",
+  properties: {
+    store_name: { type: "string", description: "اسم المتجر/السوبر ماركت زي ما هو مكتوب في رأس الإيصال، أو فاضي لو مش واضح" },
+    items: {
+      type: "array",
+      description: "كل صنف ظاهر في الإيصال بسعره — استبعد أي صنف اسمه أو سعره مش واضح تمامًا",
+      items: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "اسم الصنف زي ما هو مكتوب في الإيصال" },
+          price: { type: "number", description: "السعر الفعلي المدفوع للصنف ده (سعر الوحدة × الكمية لو الإيصال مكتوب كده)، بالجنيه المصري" },
+        },
+        required: ["name", "price"],
+      },
+    },
+  },
+  required: ["store_name", "items"],
+};
+
+export async function extractReceiptItems(imageDataUrl: string): Promise<ReceiptExtractionResult> {
+  const { apiKey, model } = await resolveGeminiConfig();
+  const fallback = (over: Partial<ReceiptExtractionResult>): ReceiptExtractionResult => ({
+    ok: false, store_name: null, items: [], ...over,
+  });
+  if (!apiKey) return fallback({ error: "GEMINI_API_KEY مش متسجل — لا في Vercel ولا من إعدادات التوثيق في /admin." });
+
+  const part = dataUrlToInlinePart(imageDataUrl);
+  if (!part) return fallback({ error: "الصورة وصلت بصيغة غير متوقعة." });
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: "user",
+            parts: [
+              { text: "دي صورة إيصال/فاتورة سوبر ماركت. استخرج اسم كل صنف اشتراه المستخدم مع السعر الفعلي المدفوع له، واسم المتجر لو ظاهر في رأس الإيصال. ممنوع تخمين أي اسم أو سعر مش واضح — لو صنف معين مش واضح خالص، سيبه برا القائمة تمامًا. رجّع JSON بس زي الـ schema." },
+              { inline_data: part },
+            ],
+          },
+        ],
+        generationConfig: { responseMimeType: "application/json", responseSchema: RECEIPT_EXTRACT_SCHEMA, temperature: 0.1 },
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) return fallback({ error: data?.error?.message || `Gemini API error (${res.status})` });
+    const text: string | undefined = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) return fallback({ error: "مفيش رد واضح من نظام الاستخراج، حاول تاني." });
+    const parsed = JSON.parse(text);
+    const items = Array.isArray(parsed.items)
+      ? parsed.items
+          .filter((it: any) => it && typeof it.name === "string" && it.name.trim() && typeof it.price === "number" && it.price > 0)
+          .map((it: any) => ({ name: String(it.name).trim(), price: Number(it.price) }))
+      : [];
+    if (!items.length) return fallback({ error: "معرفناش نقرأ أي صنف بسعره بوضوح من الإيصال ده." });
+    return { ok: true, store_name: parsed.store_name ? String(parsed.store_name).trim() : null, items };
+  } catch (e: any) {
+    return fallback({ error: e?.message || "حصل خطأ ومقدرناش نقرأ الصورة، حاول تاني." });
+  }
+}
+
 // "AI يتأكد إنها صورة بطاقة فعلا مش أي صورة ويطابق الاسم" — يتفرق عن
 // verifyIdAgainstSelfie: هنا مفيش سيلفي، بس بنتأكد (أ) إن الصورة فعلاً بطاقة
 // هوية واضحة و(ب) إن الاسم المكتوب على البطاقة يطابق الاسم اللي المستخدم

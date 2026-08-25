@@ -4,8 +4,9 @@ import Card from "@/components/Card";
 import Switch from "@/components/Switch";
 import { shrinkImage } from "@/lib/image";
 import { shareFile } from "@/lib/shareFile";
+import { fmt } from "@/lib/format";
 import { MEAL_TIMING_LABELS, MEDICATION_FORM_LABELS, SCHEDULE_TYPE_LABELS } from "@/lib/medicationSchedule";
-import { Trash2, Camera, Loader2, Sparkles, FileDown, CheckCircle2, Pill, Pencil, X, Upload, Image as ImageIcon } from "lucide-react";
+import { Trash2, Camera, Loader2, Sparkles, FileDown, CheckCircle2, Pill, Pencil, X, Upload, Image as ImageIcon, ShoppingCart, Receipt } from "lucide-react";
 
 type Tab = "grocery" | "general" | "medications" | "utility";
 
@@ -132,6 +133,16 @@ function GroceryTab() {
   const [savedLists, setSavedLists] = useState<any[]>([]);
   const [msg, setMsg] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [exportingImg, setExportingImg] = useState(false);
+  // Round 33 — "ابدأ التسوق": القائمة (كاملة بجميع entries) اللي المستخدم
+  // فاتحها في وضع التسوق دلوقتي، أو null لو مفيش وضع تسوق مفتوح.
+  const [shoppingList, setShoppingList] = useState<any | null>(null);
+  // Round 33 — "ارفع إيصال السوبر ماركت": حالة رفع/تحليل صورة الإيصال.
+  const [receiptExtracting, setReceiptExtracting] = useState(false);
+  const [receiptMsg, setReceiptMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  // Round 33 — id القائمة اللي جاري تحميلها لوضع التعديل التفصيلي دلوقتي
+  // (منفصل عن matching عشان اللودينج يظهر على زرار القائمة المحددة بس).
+  const [continuingListId, setContinuingListId] = useState<string | null>(null);
   // set when "تعديل القائمة"/"أكمل القائمة" is tapped on an existing saved
   // (or telegram draft) list — its raw lines get loaded back into the editor
   // above, and saving replaces it (deletes the old row, inserts the edited
@@ -234,6 +245,37 @@ function GroceryTab() {
     aiQueueRef.current = aiQueueRef.current.filter((q) => q.id !== id);
   };
 
+  // Round 33 — extracted out of runMatch so "تعديل القائمة" can reuse the
+  // exact same matching logic and land the user directly on the full
+  // detailed rows (with options/price/quantity already populated), instead
+  // of dumping them back into the "قائمة سريعة" textarea and making them
+  // press "إنشاء القائمة" a second time just to see/edit price+quantity —
+  // that extra hop was the user's exact complaint ("تعديل القائمه يفتح
+  // القائمه الكامله مش القائمة السريعه علشان يعدل سعر كميه").
+  const matchLines = async (
+    rawLines: string[],
+    pending: Record<string, { quantity: number; unit: string; selected_option_id: string | null }> | null
+  ): Promise<LineState[]> => {
+    const res = await fetch("/api/reminders/grocery/match", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines: rawLines }) });
+    const data = await res.json();
+    if (!res.ok) { setMsg(data.error || "حصل خطأ"); return []; }
+    return (data.matches || []).map((m: any) => {
+      const prev = pending?.[m.raw_text];
+      const prevOptionStillValid = prev?.selected_option_id && (m.options || []).some((o: any) => o.id === prev.selected_option_id);
+      const row = blankRow(nextIdRef.current++);
+      return {
+        ...row,
+        raw_text: m.raw_text,
+        unit: prev?.unit || "",
+        item_id: m.item_id,
+        item_name: m.item_name,
+        options: m.options || [],
+        selectedOptionId: prevOptionStillValid ? prev!.selected_option_id : m.options?.[0]?.id || null,
+        quantity: prev?.quantity || 1,
+      };
+    });
+  };
+
   // "قائمة سريعة" — paste several items at once (one per line). Each becomes
   // a row exactly like a manually-added one: instant catalog check, then an
   // automatic (batched) AI lookup for anything not already in the catalog.
@@ -242,24 +284,7 @@ function GroceryTab() {
     if (!raw.length) return;
     setMatching(true);
     try {
-      const res = await fetch("/api/reminders/grocery/match", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines: raw }) });
-      const data = await res.json();
-      if (!res.ok) { setMsg(data.error || "حصل خطأ"); return; }
-      const newRows: LineState[] = (data.matches || []).map((m: any) => {
-        const prev = pendingEntries?.[m.raw_text];
-        const prevOptionStillValid = prev?.selected_option_id && (m.options || []).some((o: any) => o.id === prev.selected_option_id);
-        const row = blankRow(nextIdRef.current++);
-        return {
-          ...row,
-          raw_text: m.raw_text,
-          unit: prev?.unit || "",
-          item_id: m.item_id,
-          item_name: m.item_name,
-          options: m.options || [],
-          selectedOptionId: prevOptionStillValid ? prev!.selected_option_id : m.options?.[0]?.id || null,
-          quantity: prev?.quantity || 1,
-        };
-      });
+      const newRows = await matchLines(raw, pendingEntries);
       setLines((prevLines) => [...prevLines, ...newRows]);
       setPendingEntries(null);
       setListText("");
@@ -323,68 +348,92 @@ function GroceryTab() {
     loadLists();
   };
 
-  // "أكمل القائمة" — loads a saved (or telegram draft) list's raw lines back
-  // into the quick-entry editor so prices can be picked/completed; the actual
-  // list row it came from gets replaced (not duplicated) when re-saved.
-  const continueList = (sl: any) => {
+  // "تعديل القائمة"/"أكمل القائمة" (Round 33 — أعيد كتابتها) — كانت بتحمّل
+  // أسماء الأصناف في مربع "قائمة سريعة" وتسيب المستخدم يدوس "إنشاء القائمة"
+  // تاني بنفسه عشان يشوف صفوف السعر/الكمية القابلة للتعديل — خطوة زيادة
+  // كانت هي شكوى المستخدم بالظبط. دلوقتي بتعمل المطابقة فورًا وتفتح على طول
+  // على الصفوف التفصيلية (زي ما لو كان دوس "إنشاء القائمة" بنفسه)، فيقدر
+  // يعدل السعر/الكمية على طول من غير خطوة وسط.
+  const continueList = async (sl: any) => {
     const entries = sl.grocery_list_entries || [];
     const rawLines = entries.map((e: any) => e.raw_text);
     const pending: Record<string, { quantity: number; unit: string; selected_option_id: string | null }> = {};
     for (const e of entries) pending[e.raw_text] = { quantity: e.quantity || 1, unit: e.unit || "", selected_option_id: e.selected_option_id || null };
-    setPendingEntries(pending);
-    setListText(rawLines.join("\n"));
     setListName(sl.name || "");
     setReplacingListId(sl.id);
     setLines([]);
-    setMsg('اتحمّلت القائمة فوق — دوس "إنشاء القائمة" وكمّل منها.');
+    setListText("");
+    setMsg("");
+    setContinuingListId(sl.id);
+    try {
+      const newRows = await matchLines(rawLines, pending);
+      setLines(newRows);
+      for (const row of newRows) if (!row.options.length) enqueueAi(row.id, row.raw_text);
+    } finally {
+      setContinuingListId(null);
+    }
   };
 
   // "تصدير" — rasterizes the current (in-progress or saved) list as a
-  // shareable PDF, same off-screen-HTML → html2canvas-pro → jsPDF pattern
-  // used everywhere else in the app for Arabic text (see app/(protected)/export/page.tsx).
+  // shareable PDF/image, same off-screen-HTML → html2canvas-pro pattern used
+  // everywhere else in the app for Arabic text (see app/(protected)/export/page.tsx).
+  //
+  // Round 33 postmortem — "التنسيق مش مظبوط" complaint: الأسعار كانت بتتكتب
+  // كنص خام "١٢٣ EGP" (رقم + حروف لاتينية) جوه عنصر اتجاهه RTL — خوارزمية
+  // bidi بتاعة المتصفح/html2canvas بتقلب ترتيب الحروف اللاتينية جوه سياق
+  // عربي فيطلع معكوس "EGP 123" بدل "123 EGP". اتأكد الفرض ده برندر فعلي
+  // للـ HTML بمتصفح Chromium وتصويره — الفرق واضح لما نستخدم fmt() (بترجع
+  // رمز عملة عربي "ج.م" بدل الحروف اللاتينية) بدل التركيب اليدوي.
+  const rasterizeRows = async (rows: { label: string; optionLabel: string; price: number; currency: string; qty: number }[], total: number, title: string) => {
+    const node = document.createElement("div");
+    node.style.position = "fixed";
+    node.style.left = "-9999px";
+    node.style.top = "0";
+    node.style.width = "700px";
+    node.style.background = "#ffffff";
+    node.style.padding = "24px";
+    node.style.fontFamily = "Cairo, sans-serif";
+    node.style.direction = "rtl";
+    node.style.color = "#111827";
+    const rowsHtml = rows
+      .map(
+        (r) => `<tr>
+          <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:12px;">${r.label}</td>
+          <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;color:#6b7280;">${r.optionLabel}</td>
+          <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;">×${r.qty}</td>
+          <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:12px;font-weight:600;white-space:nowrap;">${fmt(r.price * r.qty, r.currency)}</td>
+        </tr>`
+      )
+      .join("");
+    node.innerHTML = `
+      <div style="text-align:center;margin-bottom:16px;">
+        <p style="font-size:12px;color:#ea580c;font-weight:700;">FlowCash</p>
+        <h2 style="font-size:17px;margin:6px 0 2px;">${title}</h2>
+      </div>
+      <table style="width:100%;border-collapse:collapse;">
+        <thead><tr style="background:#f9fafb;"><th style="padding:6px 4px;font-size:11px;text-align:right;">الصنف</th><th style="padding:6px 4px;font-size:11px;text-align:right;">التفاصيل</th><th style="padding:6px 4px;font-size:11px;text-align:right;">الكمية</th><th style="padding:6px 4px;font-size:11px;text-align:right;">السعر</th></tr></thead>
+        <tbody>${rowsHtml || '<tr><td colspan="4" style="font-size:11px;color:#9ca3af;padding:6px 4px;">لا يوجد</td></tr>'}</tbody>
+      </table>
+      <div style="border-top:1px solid #e5e7eb;margin-top:12px;padding-top:10px;display:flex;justify-content:space-between;">
+        <p style="font-size:13px;font-weight:700;">الإجمالي</p>
+        <p style="font-size:13px;font-weight:700;color:#ea580c;">${fmt(total, "EGP")}</p>
+      </div>
+      <div style="border-top:1px solid #e5e7eb;margin-top:12px;padding-top:10px;text-align:center;">
+        <p style="font-size:10px;color:#9ca3af;margin:0;">تم الإنشاء بواسطة FlowCash — ${new Date().toLocaleDateString("ar-EG")}</p>
+      </div>`;
+    document.body.appendChild(node);
+    try {
+      const html2canvas = (await import("html2canvas-pro")).default;
+      return await html2canvas(node, { scale: 2, backgroundColor: "#ffffff" });
+    } finally {
+      document.body.removeChild(node);
+    }
+  };
+
   const exportRows = async (rows: { label: string; optionLabel: string; price: number; currency: string; qty: number }[], total: number, title: string) => {
     setExporting(true);
     try {
-      const node = document.createElement("div");
-      node.style.position = "fixed";
-      node.style.left = "-9999px";
-      node.style.top = "0";
-      node.style.width = "700px";
-      node.style.background = "#ffffff";
-      node.style.padding = "24px";
-      node.style.fontFamily = "Cairo, sans-serif";
-      node.style.direction = "rtl";
-      node.style.color = "#111827";
-      const rowsHtml = rows
-        .map(
-          (r) => `<tr>
-            <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:12px;">${r.label}</td>
-            <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;color:#6b7280;">${r.optionLabel}</td>
-            <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;">×${r.qty}</td>
-            <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:12px;font-weight:600;white-space:nowrap;">${(r.price * r.qty).toLocaleString()} ${r.currency}</td>
-          </tr>`
-        )
-        .join("");
-      node.innerHTML = `
-        <div style="text-align:center;margin-bottom:16px;">
-          <p style="font-size:12px;color:#ea580c;font-weight:700;">FlowCash</p>
-          <h2 style="font-size:17px;margin:6px 0 2px;">${title}</h2>
-        </div>
-        <table style="width:100%;border-collapse:collapse;">
-          <thead><tr style="background:#f9fafb;"><th style="padding:6px 4px;font-size:11px;text-align:right;">الصنف</th><th style="padding:6px 4px;font-size:11px;text-align:right;">التفاصيل</th><th style="padding:6px 4px;font-size:11px;text-align:right;">الكمية</th><th style="padding:6px 4px;font-size:11px;text-align:right;">السعر</th></tr></thead>
-          <tbody>${rowsHtml || '<tr><td style="font-size:11px;color:#9ca3af;padding:6px 4px;">لا يوجد</td></tr>'}</tbody>
-        </table>
-        <div style="border-top:1px solid #e5e7eb;margin-top:12px;padding-top:10px;display:flex;justify-content:space-between;">
-          <p style="font-size:13px;font-weight:700;">الإجمالي</p>
-          <p style="font-size:13px;font-weight:700;color:#ea580c;">${total.toLocaleString()} EGP</p>
-        </div>
-        <div style="border-top:1px solid #e5e7eb;margin-top:12px;padding-top:10px;text-align:center;">
-          <p style="font-size:10px;color:#9ca3af;margin:0;">تم الإنشاء بواسطة FlowCash — ${new Date().toLocaleDateString("ar-EG")}</p>
-        </div>`;
-      document.body.appendChild(node);
-      const html2canvas = (await import("html2canvas-pro")).default;
-      const canvas = await html2canvas(node, { scale: 2, backgroundColor: "#ffffff" });
-      document.body.removeChild(node);
+      const canvas = await rasterizeRows(rows, total, title);
       const { jsPDF } = await import("jspdf");
       const w = canvas.width / 2;
       const h = canvas.height / 2;
@@ -396,16 +445,27 @@ function GroceryTab() {
     }
   };
 
-  const exportCurrentList = () => {
-    const rows = lines
-      .map((l) => {
-        const opt = l.options.find((o) => o.id === l.selectedOptionId);
-        return { label: l.raw_text, optionLabel: opt ? `${opt.brand ? opt.brand + " — " : ""}${opt.store_name || ""}` : "بدون سعر", price: opt?.price || 0, currency: opt?.currency || "EGP", qty: l.quantity };
-      });
-    exportRows(rows, total, `قائمة سوبر ماركت${listName ? " — " + listName : ""}`);
+  // Round 33 — "خلي في تنسيق صوره كمان": نفس الرسم بالظبط، بس PNG مباشر من
+  // غير لفّه في PDF.
+  const exportRowsImage = async (rows: { label: string; optionLabel: string; price: number; currency: string; qty: number }[], total: number, title: string) => {
+    setExportingImg(true);
+    try {
+      const canvas = await rasterizeRows(rows, total, title);
+      await shareFile(canvas.toDataURL("image/png"), `${title}.png`, "image/png");
+    } finally {
+      setExportingImg(false);
+    }
   };
 
-  const exportSavedList = (sl: any) => {
+  const currentListRows = () =>
+    lines.map((l) => {
+      const opt = l.options.find((o) => o.id === l.selectedOptionId);
+      return { label: l.raw_text, optionLabel: opt ? `${opt.brand ? opt.brand + " — " : ""}${opt.store_name || ""}` : "بدون سعر", price: opt?.price || 0, currency: opt?.currency || "EGP", qty: l.quantity };
+    });
+  const exportCurrentList = () => exportRows(currentListRows(), total, `قائمة سوبر ماركت${listName ? " — " + listName : ""}`);
+  const exportCurrentListImage = () => exportRowsImage(currentListRows(), total, `قائمة سوبر ماركت${listName ? " — " + listName : ""}`);
+
+  const savedListRows = (sl: any) => {
     const entries = sl.grocery_list_entries || [];
     const rows = entries.map((e: any) => ({
       label: e.raw_text,
@@ -415,7 +475,15 @@ function GroceryTab() {
       qty: e.quantity || 1,
     }));
     const listTotal = rows.reduce((s: number, r: any) => s + r.price * r.qty, 0);
+    return { rows, listTotal };
+  };
+  const exportSavedList = (sl: any) => {
+    const { rows, listTotal } = savedListRows(sl);
     exportRows(rows, listTotal, `قائمة سوبر ماركت${sl.name ? " — " + sl.name : ""}`);
+  };
+  const exportSavedListImage = (sl: any) => {
+    const { rows, listTotal } = savedListRows(sl);
+    exportRowsImage(rows, listTotal, `قائمة سوبر ماركت${sl.name ? " — " + sl.name : ""}`);
   };
 
   return (
@@ -429,6 +497,37 @@ function GroceryTab() {
         </button>
         {msg && <p className="text-xs text-orange-600">{msg}</p>}
       </Card>
+
+      <ReceiptUploadCard
+        extracting={receiptExtracting}
+        result={receiptMsg}
+        onPick={async (dataUrl) => {
+          setReceiptExtracting(true);
+          setReceiptMsg(null);
+          try {
+            const res = await fetch("/api/reminders/grocery/extract-receipt", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ image: dataUrl }),
+            });
+            const data = await res.json().catch(() => null);
+            if (!res.ok || !data) {
+              setReceiptMsg({ ok: false, text: (data && data.error) || "تعذر قراءة الإيصال" });
+              return;
+            }
+            if (!data.saved?.length) {
+              setReceiptMsg({ ok: false, text: "معرفناش نقرأ أي صنف بسعره بوضوح من الإيصال ده." });
+              return;
+            }
+            const names = data.saved.map((s: any) => s.name).join("، ");
+            setReceiptMsg({ ok: true, text: `تم تحديث سعر ${data.saved.length} صنف من الإيصال: ${names} ✅` });
+          } catch {
+            setReceiptMsg({ ok: false, text: "تعذر الاتصال بخوادم IDEA — جرب تاني بعد شوية." });
+          } finally {
+            setReceiptExtracting(false);
+          }
+        }}
+      />
 
       <div className="space-y-2">
         {lines.map((l) => (
@@ -471,7 +570,7 @@ function GroceryTab() {
                       {o.brand ? `${o.brand} — ` : ""}
                       {o.store_name || (o.source === "manual" ? "يدوي" : "")}
                     </span>
-                    <span className="font-medium">{o.price.toLocaleString()} {o.currency}</span>
+                    <span className="font-medium">{fmt(o.price, o.currency)}</span>
                     {o.source === "ai" && <Sparkles size={12} className="text-orange-500" />}
                   </label>
                 ))}
@@ -510,16 +609,19 @@ function GroceryTab() {
             </div>
             <div className="flex items-center justify-between">
               <p className="text-sm font-medium">الإجمالي التقريبي{replacingListId ? " (استكمال قائمة)" : ""}</p>
-              <p className="text-lg font-bold text-orange-600">{total.toLocaleString()} EGP</p>
+              <p className="text-lg font-bold text-orange-600">{fmt(total, "EGP")}</p>
             </div>
             <p className="text-[11px] text-neutral-400">ملحوظة: الأسعار متوسط استرشادي من كارفور، أمازون مصر، سبينيس، واللولو — ممكن تختلف شوية حسب الفرع.</p>
             <input placeholder="اسم القائمة (اختياري)" value={listName} onChange={(e) => setListName(e.target.value)} className={inputCls} />
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <button onClick={saveList} disabled={saving} className={btnPrimary}>
                 {saving ? <Loader2 size={14} className="animate-spin inline" /> : "احفظ القائمة"}
               </button>
-              <button onClick={exportCurrentList} disabled={exporting} className={`${btnGhost} flex items-center gap-1`}>
-                {exporting ? <Loader2 size={12} className="animate-spin" /> : <FileDown size={12} />} تصدير
+              <button onClick={exportCurrentList} disabled={exporting || exportingImg} className={`${btnGhost} flex items-center gap-1`}>
+                {exporting ? <Loader2 size={12} className="animate-spin" /> : <FileDown size={12} />} تصدير PDF
+              </button>
+              <button onClick={exportCurrentListImage} disabled={exporting || exportingImg} className={`${btnGhost} flex items-center gap-1`}>
+                {exportingImg ? <Loader2 size={12} className="animate-spin" /> : <ImageIcon size={12} />} تصدير صورة
               </button>
               {replacingListId && (
                 <button onClick={() => { setReplacingListId(null); setPendingEntries(null); setLines([]); setListText(""); setListName(""); }} className="text-red-500 p-1"><X size={14} /></button>
@@ -535,24 +637,34 @@ function GroceryTab() {
           {savedLists.map((sl) => {
             const entries = sl.grocery_list_entries || [];
             const listTotal = entries.reduce((s: number, e: any) => s + (e.grocery_item_options?.price || 0) * (e.quantity || 1), 0);
+            const done = sl.status === "done";
             return (
               <Card key={sl.id} className="space-y-1">
                 <div className="flex items-center justify-between">
-                  <p className="text-sm font-medium">
+                  <p className={`text-sm font-medium ${done ? "line-through text-neutral-400" : ""}`}>
                     {sl.name || "قائمة بدون اسم"}
                     {sl.source === "telegram" ? " (تليجرام)" : ""}
                     {sl.status === "draft" ? " — مسودة" : ""}
+                    {done ? " — تم التسوق ✅" : ""}
                   </p>
                   <button onClick={() => deleteList(sl.id)} className="text-red-500 p-1"><Trash2 size={14} /></button>
                 </div>
-                <p className="text-xs text-neutral-400">{entries.map((e: any) => e.raw_text).join("، ")}</p>
-                <p className="text-xs font-medium">الإجمالي: {listTotal.toLocaleString()} EGP</p>
-                <div className="flex items-center gap-2">
-                  <button onClick={() => continueList(sl)} className={`${btnGhost} flex items-center gap-1`}>
-                    <Pencil size={12} /> {sl.status === "draft" ? "أكمل القائمة" : "تعديل القائمة"}
+                <p className={`text-xs text-neutral-400 ${done ? "line-through" : ""}`}>{entries.map((e: any) => e.raw_text).join("، ")}</p>
+                <p className={`text-xs font-medium ${done ? "line-through text-neutral-400" : ""}`}>الإجمالي: {fmt(listTotal, "EGP")}</p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {!done && (
+                    <button onClick={() => setShoppingList(sl)} className={`${btnPrimary} flex items-center gap-1`}>
+                      <ShoppingCart size={12} /> ابدأ التسوق
+                    </button>
+                  )}
+                  <button onClick={() => continueList(sl)} disabled={continuingListId === sl.id} className={`${btnGhost} flex items-center gap-1`}>
+                    {continuingListId === sl.id ? <Loader2 size={12} className="animate-spin" /> : <Pencil size={12} />} {sl.status === "draft" ? "أكمل القائمة" : "تعديل القائمة"}
                   </button>
-                  <button onClick={() => exportSavedList(sl)} disabled={exporting} className={`${btnGhost} flex items-center gap-1`}>
-                    {exporting ? <Loader2 size={12} className="animate-spin" /> : <FileDown size={12} />} تصدير
+                  <button onClick={() => exportSavedList(sl)} disabled={exporting || exportingImg} className={`${btnGhost} flex items-center gap-1`}>
+                    {exporting ? <Loader2 size={12} className="animate-spin" /> : <FileDown size={12} />} تصدير PDF
+                  </button>
+                  <button onClick={() => exportSavedListImage(sl)} disabled={exporting || exportingImg} className={`${btnGhost} flex items-center gap-1`}>
+                    {exportingImg ? <Loader2 size={12} className="animate-spin" /> : <ImageIcon size={12} />} تصدير صورة
                   </button>
                 </div>
               </Card>
@@ -560,6 +672,142 @@ function GroceryTab() {
           })}
         </div>
       )}
+
+      {shoppingList && (
+        <ShoppingModeModal
+          list={shoppingList}
+          onClose={() => setShoppingList(null)}
+          onFinished={() => { setShoppingList(null); loadLists(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Round 33 — "ارفع إيصال السوبر ماركت لتحديث الأسعار": الزرار الرئيسي المطلوب
+// إنه "يظهر بوضوح شديد" — دائرة نيون برتقالية نابضة حواليه (CSS keyframes
+// محلية للمكوّن، مفيش ملف global CSS في المشروع أصلاً فده أبسط تغيير معزول).
+function ReceiptUploadCard({
+  extracting,
+  result,
+  onPick,
+}: {
+  extracting: boolean;
+  result: { text: string; ok: boolean } | null;
+  onPick: (dataUrl: string) => void;
+}) {
+  const handle = async (f: File | undefined) => {
+    if (f) onPick(await shrinkImage(f));
+  };
+  return (
+    <Card className="space-y-2 text-center">
+      <style>{`
+        @keyframes receiptPulseRing {
+          0% { box-shadow: 0 0 0 0 rgba(234,88,12,0.55); }
+          70% { box-shadow: 0 0 0 14px rgba(234,88,12,0); }
+          100% { box-shadow: 0 0 0 0 rgba(234,88,12,0); }
+        }
+        .receipt-pulse-btn { animation: receiptPulseRing 1.8s infinite; }
+      `}</style>
+      <label className={`receipt-pulse-btn ${extracting ? "opacity-70" : ""} inline-flex flex-col items-center gap-2 mx-auto bg-orange-500 text-white rounded-2xl px-5 py-4 cursor-pointer max-w-xs`}>
+        {extracting ? <Loader2 size={22} className="animate-spin" /> : <Receipt size={22} />}
+        <span className="text-xs font-medium leading-relaxed">
+          ارفع إيصال السوبر ماركت لتحديث الأسعار ومساعدتك في الشراء المرات القادمة
+        </span>
+        <input type="file" accept="image/*" capture="environment" className="hidden" disabled={extracting} onChange={(e) => handle(e.target.files?.[0])} />
+      </label>
+      <label className="text-xs text-orange-600 underline cursor-pointer block">
+        أو ارفع من المعرض
+        <input type="file" accept="image/*" className="hidden" disabled={extracting} onChange={(e) => handle(e.target.files?.[0])} />
+      </label>
+      {extracting && <p className="text-xs text-orange-500 flex items-center justify-center gap-1"><Loader2 size={12} className="animate-spin" /> {AI_LOADING_TEXT}</p>}
+      {result && <p className={`text-xs ${result.ok ? "text-green-600" : "text-red-500"}`}>{result.text}</p>}
+    </Card>
+  );
+}
+
+// Round 33 — "ابدأ التسوق": عرض القائمة كأصناف تحت بعض، كل واحد بجمبه شيك
+// بوكس ("اتحط في العربة")، وزرار "انتهى التسوق" في الآخر. لو فيه أصناف
+// معلمهاش، بيتنبّه قبل ما يقفل القائمة فعليًا (status: "done").
+function ShoppingModeModal({ list, onClose, onFinished }: { list: any; onClose: () => void; onFinished: () => void }) {
+  const entries: any[] = list.grocery_list_entries || [];
+  const [picked, setPicked] = useState<Record<string, boolean>>(() => {
+    const init: Record<string, boolean> = {};
+    for (const e of entries) init[e.id] = !!e.picked;
+    return init;
+  });
+  const [confirming, setConfirming] = useState(false);
+  const [finishing, setFinishing] = useState(false);
+
+  const togglePick = async (entryId: string) => {
+    const next = !picked[entryId];
+    setPicked((p) => ({ ...p, [entryId]: next }));
+    try {
+      await fetch(`/api/reminders/grocery/lists/${list.id}/entries/${entryId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ picked: next }),
+      });
+    } catch {
+      // best-effort — لو فشل التحديث، الحالة المحلية لسه بتفضل صح لحد نهاية التسوق
+    }
+  };
+
+  const unpickedEntries = entries.filter((e) => !picked[e.id]);
+
+  const finishShopping = async () => {
+    if (unpickedEntries.length && !confirming) {
+      setConfirming(true);
+      return;
+    }
+    setFinishing(true);
+    try {
+      await fetch(`/api/reminders/grocery/lists/${list.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "done" }),
+      });
+      onFinished();
+    } finally {
+      setFinishing(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-white dark:bg-neutral-900 rounded-t-2xl sm:rounded-2xl w-full max-w-sm p-4 space-y-3 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <p className="font-semibold text-sm flex items-center gap-1"><ShoppingCart size={16} /> {list.name || "قائمة التسوق"}</p>
+          <button onClick={onClose} className="text-neutral-400 p-1"><X size={16} /></button>
+        </div>
+        <p className="text-[11px] text-neutral-400">علّم على كل صنف حطيته في العربة.</p>
+        <div className="space-y-1">
+          {entries.map((e) => (
+            <label key={e.id} className="flex items-center gap-2 py-1.5 border-b border-neutral-100 dark:border-neutral-800 last:border-0">
+              <input type="checkbox" checked={!!picked[e.id]} onChange={() => togglePick(e.id)} className="shrink-0" />
+              <span className={`flex-1 text-sm ${picked[e.id] ? "line-through text-neutral-400" : ""}`}>
+                {e.raw_text}{e.quantity && e.quantity > 1 ? ` ×${e.quantity}` : ""}{e.unit ? ` (${e.unit})` : ""}
+              </span>
+            </label>
+          ))}
+        </div>
+
+        {confirming && unpickedEntries.length > 0 && (
+          <div className="text-xs rounded-lg p-2 bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 space-y-1">
+            <p>لسه عندك {unpickedEntries.length} صنف معلمتش عليه: {unpickedEntries.map((e) => e.raw_text).join("، ")}.</p>
+            <p>عايز تنهي التسوق برضو؟</p>
+          </div>
+        )}
+
+        <div className="flex items-center gap-2">
+          <button onClick={finishShopping} disabled={finishing} className={`${btnPrimary} flex-1`}>
+            {finishing ? <Loader2 size={14} className="animate-spin inline" /> : confirming ? "أيوه، إنهاء التسوق" : "انتهى التسوق"}
+          </button>
+          {confirming && (
+            <button onClick={() => setConfirming(false)} className={btnGhost}>رجوع</button>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
