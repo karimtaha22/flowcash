@@ -6,7 +6,8 @@ import { shrinkImage } from "@/lib/image";
 import { shareFile } from "@/lib/shareFile";
 import { fmt } from "@/lib/format";
 import { MEAL_TIMING_LABELS, MEDICATION_FORM_LABELS, SCHEDULE_TYPE_LABELS } from "@/lib/medicationSchedule";
-import { Trash2, Camera, Loader2, Sparkles, FileDown, CheckCircle2, Pill, Pencil, X, Upload, Image as ImageIcon, ShoppingCart, Receipt } from "lucide-react";
+import { lookupDefaultUnit } from "@/lib/groceryDefaultUnits";
+import { Trash2, Camera, Loader2, FileDown, CheckCircle2, Pill, Pencil, X, Upload, Image as ImageIcon, ShoppingCart, Receipt, ListChecks } from "lucide-react";
 
 type Tab = "grocery" | "general" | "medications" | "utility";
 
@@ -100,7 +101,17 @@ interface OptionRow {
   currency: string;
   source: string;
 }
-const GROCERY_UNITS = ["علبة", "كيس", "كيلو", "زجاجة", "صندوق كامل"];
+// Round 36 — "في الكمية او العبوه زود اضافة وحدة قياس": القائمة كانت 5
+// وحدات بس ومش كافية تغطي الملف المرجعي اللي رفعه المستخدم (~310 صنف،
+// 19 وحدة تعبئة شائعة مختلفة بعد التبسيط — راجع lib/groceryDefaultUnits.ts).
+// اتضافت هنا كلها + خيار "وحدة أخرى" حر (custom_unit_mode تحت) لأي حاجة
+// مش من ضمن القائمة.
+const GROCERY_UNITS = [
+  "علبة", "كيس", "كيلو", "لتر", "زجاجة", "صندوق كامل", "باكت", "برطمان",
+  "أنبوبة", "قطعة", "لفة", "ظرف", "شكارة", "طبق", "جركن", "كانز",
+  "كرتونة", "كوب", "عبوة",
+];
+const CUSTOM_UNIT_VALUE = "__custom__";
 // how many rows' worth of "no catalog match" names get sent to Gemini in one
 // call — the user hit a real quota-exceeded error and asked directly whether
 // to batch lookups instead of one-call-per-item; grouping by 3 cuts the call
@@ -124,10 +135,20 @@ interface LineState {
   grams: number | null;
   loadingAi: boolean;
   aiMessage: string | null;
-  manualOpen: boolean;
+  // Round 36 — "خلي الخانه مفتوحه للكتابة جاهزه" بدل زرار "سجّل السعر
+  // يدويًا" اللي كان بيكشف/يخفي الخانة: السعر بقى دايمًا معروض وقابل
+  // للتعديل، ومتعبّى أوتوماتيك من أرخص سعر معروف لو موجود.
   manualStore: string;
   manualBrand: string;
   manualPrice: string;
+  // Round 36 — "نكتفي تحت بعلامه خضراء ... حمرا": بيتسجل هنا إزاي السعر
+  // اتلقى — "ai" (الذكاء الاصطناعي بحث عنه دلوقتي) أو "catalog" (كان
+  // متسجل/متخزن قبل كده — سواء من كتالوج سابق أو إدخال يدوي)، وبيتعرض
+  // كنقطة خضراء/حمراء واحدة تحت خيارات السعر بدل أيقونة Sparkles لكل خيار.
+  resolvedVia: "ai" | "catalog" | null;
+  // Round 36 — "زود اضافة وحدة قياس": true لو المستخدم مختار "وحدة أخرى"
+  // من قائمة GROCERY_UNITS وبيكتب وحدة حرة في unit بدل ما يختارها من القائمة.
+  customUnitMode: boolean;
 }
 
 function blankRow(id: number): LineState {
@@ -143,10 +164,11 @@ function blankRow(id: number): LineState {
     grams: null,
     loadingAi: false,
     aiMessage: null,
-    manualOpen: false,
     manualStore: "",
     manualBrand: "",
     manualPrice: "",
+    resolvedVia: null,
+    customUnitMode: false,
   };
 }
 
@@ -168,12 +190,17 @@ const toLatinDigits = (s: string) => s.replace(/[٠-٩]/g, (d) => ARABIC_DIGITS[
 const FRACTION_WORDS: Record<string, number> = { "نص": 0.5, "نصف": 0.5, "ربع": 0.25, "تمن": 0.125, "ثمن": 0.125 };
 const UNIT_WORD_MAP: Record<string, string> = {
   "كيلو": "كيلو", "كجم": "كيلو", "كج": "كيلو",
+  "لتر": "لتر",
   "كيس": "كيس",
   "علبة": "علبة", "علبه": "علبة",
   "زجاجة": "زجاجة", "زجاجه": "زجاجة",
   "صندوق": "صندوق كامل", "كرتونة": "صندوق كامل", "كرتونه": "صندوق كامل",
+  "باكت": "باكت", "برطمان": "برطمان", "أنبوبة": "أنبوبة", "انبوبة": "أنبوبة",
+  "قطعة": "قطعة", "قطعه": "قطعة", "لفة": "لفة", "لفه": "لفة",
+  "ظرف": "ظرف", "شكارة": "شكارة", "شكاره": "شكارة", "طبق": "طبق",
+  "جركن": "جركن", "كانز": "كانز", "كوب": "كوب", "عبوة": "عبوة", "عبوه": "عبوة",
 };
-const UNIT_WORD_ALT = "كيلو|كجم|كج|كيس|علبة|علبه|زجاجة|زجاجه|صندوق|كرتونة|كرتونه";
+const UNIT_WORD_ALT = "كيلو|كجم|كج|لتر|كيس|علبة|علبه|زجاجة|زجاجه|صندوق|كرتونة|كرتونه|باكت|برطمان|أنبوبة|انبوبة|قطعة|قطعه|لفة|لفه|ظرف|شكارة|شكاره|طبق|جركن|كانز|كوب|عبوة|عبوه";
 
 function parseQuantityLine(raw: string): { name: string; quantity: number; unit: string } {
   let text = toLatinDigits(raw.trim());
@@ -203,10 +230,28 @@ function parseQuantityLine(raw: string): { name: string; quantity: number; unit:
   return { name: text || raw.trim(), quantity, unit };
 }
 
+// Round 36 — "لو هو كتب مكتبش حط انت الاشهر": wraps parseQuantityLine and,
+// only when the user's own text didn't specify a unit, fills in a sensible
+// default from the uploaded 310-item reference table (lib/groceryDefaultUnits.ts).
+// Used by both the detailed pricing flow (runMatch) and the new lightweight
+// checklist flow (runQuickChecklist) so "كيلو لبن" → name=لبن/unit=كيلو stays
+// consistent everywhere, and a bare "لبن" still gets a unit (لتر) automatically.
+function parseGroceryLineWithDefault(raw: string): { name: string; quantity: number; unit: string } {
+  const parsed = parseQuantityLine(raw);
+  if (!parsed.unit) {
+    const guessed = lookupDefaultUnit(parsed.name);
+    if (guessed) parsed.unit = guessed;
+  }
+  return parsed;
+}
+
 function GroceryTab() {
   const [listText, setListText] = useState("");
   const [lines, setLines] = useState<LineState[]>([]);
   const [matching, setMatching] = useState(false);
+  // Round 36 — قائمة الشيك بوكس السريعة (runQuickChecklist) لوحدها، منفصلة
+  // عن matching (قائمة الأسعار المفصّلة) عشان اللودينج يظهر على الزرار الصح.
+  const [quickListSaving, setQuickListSaving] = useState(false);
   const [listName, setListName] = useState("");
   const [saving, setSaving] = useState(false);
   const [savedLists, setSavedLists] = useState<any[]>([]);
@@ -268,7 +313,17 @@ function GroceryTab() {
         for (const b of batch) {
           const r = data.results?.[b.name];
           if (!r) { updateLine(b.id, { loadingAi: false, aiMessage: "تعذر البحث عن السعر" }); continue; }
-          updateLine(b.id, { loadingAi: false, item_id: r.item_id, options: r.options || [], selectedOptionId: r.options?.[0]?.id || null, aiMessage: r.message || null });
+          const opt = r.options?.[0] || null;
+          updateLine(b.id, {
+            loadingAi: false,
+            item_id: r.item_id,
+            options: r.options || [],
+            selectedOptionId: opt?.id || null,
+            aiMessage: r.message || null,
+            // Round 36 — الذكاء الاصطناعي هو اللي جاب السعر ده دلوقتي → نقطة خضراء.
+            resolvedVia: opt ? "ai" : null,
+            manualPrice: opt ? String(opt.price) : "",
+          });
         }
       }
     } catch {
@@ -295,7 +350,17 @@ function GroceryTab() {
       const m = data.matches?.[0];
       if (!res.ok || !m) return;
       if (m.options?.length) {
-        updateLine(id, { item_id: m.item_id, item_name: m.item_name, options: m.options, selectedOptionId: m.options[0]?.id || null });
+        const opt = m.options[0];
+        updateLine(id, {
+          item_id: m.item_id,
+          item_name: m.item_name,
+          options: m.options,
+          selectedOptionId: opt?.id || null,
+          // Round 36 — السعر ده كان متسجل قبل كده (كتالوج/يدوي)، مفيش ذكاء
+          // اصطناعي اتنادى دلوقتي → نقطة حمراء.
+          resolvedVia: "catalog",
+          manualPrice: opt ? String(opt.price) : "",
+        });
       } else {
         enqueueAi(id, name);
       }
@@ -307,12 +372,22 @@ function GroceryTab() {
   // Called on every keystroke in a row's name field — debounced so it only
   // fires ~700ms after the user stops typing, matching "مجرد ما كتب لبن في
   // الخلفيه بيحصل استدعاء للقوائم المحفوظه" from the feedback.
+  //
+  // Round 36 — لو المستخدم لسه مختارش وحدة قياس بنفسه للسطر ده، بندور على
+  // وحدة افتراضية من جدول الأصناف المرجعي (lib/groceryDefaultUnits.ts) —
+  // "لو هو كتب مكتبش حط انت الاشهر" — لكن من غير ما نلغي وحدة "أخرى" حرة
+  // كان المستخدم كاتبها بنفسه (customUnitMode).
   const onNameChange = (id: number, value: string) => {
-    updateLine(id, { raw_text: value, item_id: null, item_name: null, options: [], selectedOptionId: null, aiMessage: null });
+    updateLine(id, { raw_text: value, item_id: null, item_name: null, options: [], selectedOptionId: null, aiMessage: null, resolvedVia: null });
     if (rowTimersRef.current[id]) clearTimeout(rowTimersRef.current[id]);
     aiQueueRef.current = aiQueueRef.current.filter((q) => q.id !== id);
     const trimmed = value.trim();
     if (trimmed.length < 2) return;
+    const current = lines.find((l) => l.id === id);
+    if (current && !current.unit && !current.customUnitMode) {
+      const guessed = lookupDefaultUnit(trimmed);
+      if (guessed) updateLine(id, { unit: guessed });
+    }
     rowTimersRef.current[id] = setTimeout(() => matchRow(id, trimmed), 700);
   };
 
@@ -341,6 +416,8 @@ function GroceryTab() {
     return (data.matches || []).map((m: any) => {
       const prev = pending?.[m.raw_text];
       const prevOptionStillValid = prev?.selected_option_id && (m.options || []).some((o: any) => o.id === prev.selected_option_id);
+      const selectedOptionId = prevOptionStillValid ? prev!.selected_option_id : m.options?.[0]?.id || null;
+      const selectedOption = (m.options || []).find((o: any) => o.id === selectedOptionId) || null;
       const row = blankRow(nextIdRef.current++);
       return {
         ...row,
@@ -349,28 +426,37 @@ function GroceryTab() {
         item_id: m.item_id,
         item_name: m.item_name,
         options: m.options || [],
-        selectedOptionId: prevOptionStillValid ? prev!.selected_option_id : m.options?.[0]?.id || null,
+        selectedOptionId,
         quantity: prev?.quantity || 1,
         grams: prev?.grams || null,
+        // Round 36 — لو /match لقى سعر جاهز فورًا، ده كان متسجل قبل كده
+        // (كتالوج) → نقطة حمراء؛ لو مفيش سعر، هيتحط "ai" لما enqueueAi يلاقي
+        // حاجة بعد كده (راجع flushAiQueue).
+        resolvedVia: selectedOption ? "catalog" : null,
+        manualPrice: selectedOption ? String(selectedOption.price) : "",
       };
     });
   };
 
-  // "قائمة سريعة" — paste several items at once (one per line). Each becomes
-  // a row exactly like a manually-added one: instant catalog check, then an
-  // automatic (batched) AI lookup for anything not already in the catalog.
+  // "قائمة أسعار مفصّلة" (اسمها القديم كان "أنشأ قائمة تسوق سريعة" — Round 36
+  // صحّح التسمية دي، راجع الملاحظة فوق الكارت في الـ JSX) — paste several
+  // items at once (one per line). Each becomes a row exactly like a
+  // manually-added one: instant catalog check, then an automatic (batched)
+  // AI lookup for anything not already in the catalog.
   //
   // Round 35 — each line is first run through parseQuantityLine so a phrase
   // like "٢كيلو طماطم" splits into quantity=2/unit=كيلو/name="طماطم" before
   // catalog matching even happens (cleaner name → better catalog hit rate
   // too), instead of quantity always defaulting to 1 and the whole phrase
   // being used as the item name.
+  // Round 36 — parseQuantityLine بقى parseGroceryLineWithDefault: لو السطر
+  // مفيهوش وحدة صريحة، بيتحط له وحدة افتراضية من الجدول المرجعي.
   const runMatch = async () => {
     const raw = listText.split("\n").map((l) => l.trim()).filter(Boolean);
     if (!raw.length) return;
     setMatching(true);
     try {
-      const parsed = raw.map(parseQuantityLine);
+      const parsed = raw.map(parseGroceryLineWithDefault);
       const names = parsed.map((p) => p.name);
       const matchedRows = await matchLines(names, pendingEntries);
       const newRows = matchedRows.map((row, i) => {
@@ -388,6 +474,44 @@ function GroceryTab() {
     }
   };
 
+  // Round 36 — "حط مفتاح انشا قائمة تسوق سريعه تطلع قائمه فيها المنتجات و
+  // جمبها شيك بوكس ... لو هطلب حاجه مثلا من السوبر ماركت بالتليفون": قائمة
+  // شيك-بوكس خفيفة بالكامل، منفصلة تمامًا عن قائمة الأسعار المفصّلة فوق —
+  // بتتحفظ فورًا من غير أي مطابقة كتالوج أو بحث ذكاء اصطناعي عن سعر (مفيش
+  // داعي لسعر أصلاً هنا)، وبتفتح على طول في وضع التسوق (ShoppingModeModal)
+  // اللي أصلاً مبني بالظبط للاستخدام ده — علّم على كل صنف طلبته.
+  //
+  // Round 35 كان بيسمي الزرار القديم (اللي فعليًا بيعمل runMatch/القائمة
+  // العادية) "أنشأ قائمة تسوق سريعة" — ده كان الخلط اللي المستخدم اشتكى منه
+  // ("انشا قائمة التسوق تنزل القائمة العاديه"). الزرار القديم اتسمى بوضوح
+  // "إنشاء قائمة أسعار مفصّلة" تحت، والزرار ده بقى هو "قائمة سريعة" الحقيقية.
+  const runQuickChecklist = async () => {
+    const raw = listText.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (!raw.length) return;
+    setQuickListSaving(true);
+    try {
+      const parsed = raw.map(parseGroceryLineWithDefault);
+      const res = await fetch("/api/reminders/grocery/lists", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: listName || null,
+          entries: parsed.map((p) => ({ raw_text: p.name, item_id: null, selected_option_id: null, quantity: p.quantity, unit: p.unit || null })),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMsg(data.error || "حصل خطأ في الحفظ"); return; }
+      setListText("");
+      setListName("");
+      setShoppingList({ ...data.list, grocery_list_entries: data.entries || [] });
+      loadLists();
+    } finally {
+      setQuickListSaving(false);
+    }
+  };
+
+  // Round 36 — الخانة بقت دايمًا مفتوحة (مفيش زرار "سجّل السعر يدويًا"
+  // بيكشفها بقى)، فـ saveManual بتتنادى من زرار "حفظ" جنب الخانة مباشرة.
   const saveManual = async (id: number) => {
     const l = lines.find((x) => x.id === id);
     if (!l) return;
@@ -400,7 +524,18 @@ function GroceryTab() {
     });
     const data = await res.json();
     if (!res.ok) return;
-    updateLine(id, { item_id: data.item_id, options: data.options || [], selectedOptionId: data.options?.[0]?.id || null, manualOpen: false, manualPrice: "", manualBrand: "", manualStore: "" });
+    const options: OptionRow[] = data.options || [];
+    const justSaved =
+      options.find((o) => o.source === "manual" && Number(o.price) === price && (o.store_name || "") === (l.manualStore || "يدوي")) ||
+      options[0] ||
+      null;
+    updateLine(id, {
+      item_id: data.item_id,
+      options,
+      selectedOptionId: justSaved?.id || null,
+      resolvedVia: "catalog",
+      manualPrice: justSaved ? String(justSaved.price) : l.manualPrice,
+    });
   };
 
   const total = lines.reduce((sum, l) => {
@@ -594,12 +729,21 @@ function GroceryTab() {
   return (
     <div className="space-y-4">
       <Card className="space-y-2">
-        <p className="text-sm font-medium">قائمة سريعة</p>
+        <p className="text-sm font-medium">إضافة أصناف</p>
         <p className="text-xs text-neutral-400">اكتب كل صنف في سطر، وتقدر تكتب الكمية معاه — مثال: كيلو لبن، نص كيلو أرز، ٢كيلو طماطم، صندوق مياه</p>
         <textarea value={listText} onChange={(e) => setListText(e.target.value)} rows={4} className={inputCls} placeholder={"كيلو لبن\nنص كيلو أرز\n٢كيلو طماطم\nصندوق مياه"} />
-        <button onClick={runMatch} disabled={matching} className={btnPrimary}>
-          {matching ? <Loader2 size={14} className="animate-spin inline" /> : "أنشأ قائمة تسوق سريعة"}
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={runMatch} disabled={matching || quickListSaving} className={btnPrimary}>
+            {matching ? <Loader2 size={14} className="animate-spin inline" /> : "إنشاء قائمة أسعار مفصّلة"}
+          </button>
+          {/* Round 36 — قائمة الشيك بوكس السريعة الحقيقية: بتتحفظ فورًا من
+              غير أي بحث سعر وتفتح على طول في وضع التسوق — للاستخدام وقت
+              الطلب بالتليفون. */}
+          <button onClick={runQuickChecklist} disabled={matching || quickListSaving} className={`${btnGhost} flex items-center gap-1`}>
+            {quickListSaving ? <Loader2 size={14} className="animate-spin" /> : <ListChecks size={14} />} قائمة سريعة (شيك بوكس)
+          </button>
+        </div>
+        <p className="text-[11px] text-neutral-400">"إنشاء قائمة أسعار مفصّلة" بيدوّر على سعر كل صنف. "قائمة سريعة (شيك بوكس)" بتحفظ الأصناف على طول وتفتحلك تعليم عليها — مناسبة لو هتطلب بالتليفون.</p>
         {msg && <p className="text-xs text-orange-600">{msg}</p>}
       </Card>
 
@@ -650,11 +794,21 @@ function GroceryTab() {
               </button>
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <select value={l.unit} onChange={(e) => updateLine(l.id, { unit: e.target.value, grams: e.target.value === "كيلو" ? l.grams : null })} className={inputCls}>
+              {/* Round 36 — "زود اضافة وحدة قياس": بالإضافة لقائمة الوحدات
+                  الموسّعة، خيار "وحدة أخرى" بيفتح خانة كتابة حرة. */}
+              <select
+                value={l.customUnitMode ? CUSTOM_UNIT_VALUE : l.unit}
+                onChange={(e) => {
+                  if (e.target.value === CUSTOM_UNIT_VALUE) updateLine(l.id, { customUnitMode: true, unit: "", grams: null });
+                  else updateLine(l.id, { customUnitMode: false, unit: e.target.value, grams: e.target.value === "كيلو" ? l.grams : null });
+                }}
+                className={inputCls}
+              >
                 <option value="">الكمية / العبوة</option>
                 {GROCERY_UNITS.map((u) => (
                   <option key={u} value={u}>{u}</option>
                 ))}
+                <option value={CUSTOM_UNIT_VALUE}>وحدة أخرى (اكتب)...</option>
               </select>
               <input
                 type="number"
@@ -666,6 +820,14 @@ function GroceryTab() {
                 placeholder="العدد"
               />
             </div>
+            {l.customUnitMode && (
+              <input
+                placeholder="اكتب وحدة القياس"
+                value={l.unit}
+                onChange={(e) => updateLine(l.id, { unit: e.target.value })}
+                className={inputCls}
+              />
+            )}
 
             {l.unit === "كيلو" && (
               <div className="rounded-lg bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-700 p-2 space-y-1.5">
@@ -696,15 +858,30 @@ function GroceryTab() {
               <div className="space-y-1">
                 {l.options.map((o) => (
                   <label key={o.id} className="flex items-center gap-2 text-xs">
-                    <input type="checkbox" checked={l.selectedOptionId === o.id} onChange={() => updateLine(l.id, { selectedOptionId: l.selectedOptionId === o.id ? null : o.id })} />
+                    <input
+                      type="checkbox"
+                      checked={l.selectedOptionId === o.id}
+                      onChange={() => {
+                        const nowSelected = l.selectedOptionId === o.id ? null : o.id;
+                        updateLine(l.id, { selectedOptionId: nowSelected, manualPrice: nowSelected ? String(o.price) : l.manualPrice });
+                      }}
+                    />
                     <span className="flex-1">
                       {o.brand ? `${o.brand} — ` : ""}
                       {o.store_name || (o.source === "manual" ? "يدوي" : "")}
                     </span>
                     <span className="font-medium">{fmt(o.price, o.currency)}</span>
-                    {o.source === "ai" && <Sparkles size={12} className="text-orange-500" />}
                   </label>
                 ))}
+                {/* Round 36 — "نكتفي تحت بعلامه خضراء دي معناها الذكاء
+                    الاصطناعي ساعد في القائمه، حمرا القائمه كانت مخزنه في
+                    السيرفر": نقطة واحدة تحت خيارات السعر بدل أيقونة لكل خيار. */}
+                {l.resolvedVia && (
+                  <p className="flex items-center gap-1.5 text-[10px] text-neutral-400">
+                    <span className={`inline-block w-2 h-2 rounded-full ${l.resolvedVia === "ai" ? "bg-green-500" : "bg-red-500"}`} />
+                    {l.resolvedVia === "ai" ? "الذكاء الاصطناعي ساعد في السعر ده" : "السعر ده كان متسجل عندنا قبل كده"}
+                  </p>
+                )}
               </div>
             ) : (
               !l.loadingAi && l.raw_text.trim() && <p className="text-xs text-neutral-400">مفيش سعر مسجل للصنف ده لسه.</p>
@@ -713,20 +890,18 @@ function GroceryTab() {
             {l.loadingAi && <p className="text-xs text-orange-500 flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> {AI_LOADING_TEXT}</p>}
             {l.aiMessage && <p className="text-xs text-orange-500">{l.aiMessage}</p>}
 
-            <button onClick={() => updateLine(l.id, { manualOpen: !l.manualOpen })} className={btnGhost}>
-              سجّل السعر يدويًا
-            </button>
-
-            {l.manualOpen && (
-              <div className="grid grid-cols-3 gap-1">
-                <input placeholder="السعر" value={l.manualPrice} onChange={(e) => updateLine(l.id, { manualPrice: e.target.value })} className={inputCls} />
-                <input placeholder="الماركة (اختياري)" value={l.manualBrand} onChange={(e) => updateLine(l.id, { manualBrand: e.target.value })} className={inputCls} />
-                <div className="flex gap-1">
-                  <input placeholder="المتجر (اختياري)" value={l.manualStore} onChange={(e) => updateLine(l.id, { manualStore: e.target.value })} className={inputCls} />
-                  <button onClick={() => saveManual(l.id)} className={btnPrimary}>حفظ</button>
-                </div>
+            {/* Round 36 — "بدل كلمة دخل خانة السعر يدوي خلي الخانه مفتوحه
+                للكتابة جاهزه لو عندك السعر حطه اتوماتيك معندكش سيب العميل
+                يكتبه": الخانة بقت دايمًا ظاهرة ومتعبّية أوتوماتيك لو السعر
+                معروف، بدل زرار "سجّل السعر يدويًا" اللي كان بيكشفها. */}
+            <div className="grid grid-cols-3 gap-1">
+              <input placeholder="السعر" type="number" value={l.manualPrice} onChange={(e) => updateLine(l.id, { manualPrice: e.target.value })} className={inputCls} />
+              <input placeholder="الماركة (اختياري)" value={l.manualBrand} onChange={(e) => updateLine(l.id, { manualBrand: e.target.value })} className={inputCls} />
+              <div className="flex gap-1">
+                <input placeholder="المتجر (اختياري)" value={l.manualStore} onChange={(e) => updateLine(l.id, { manualStore: e.target.value })} className={inputCls} />
+                <button onClick={() => saveManual(l.id)} className={btnPrimary}>حفظ</button>
               </div>
-            )}
+            </div>
           </Card>
         ))}
 
@@ -1090,6 +1265,18 @@ function medScheduleLabel(m: any) {
   return "بدون جدول";
 }
 
+// Round 36 — "تصدير الكشف للدكتور بيطلع بايظ": نفس فئة باج bidi بتاعة
+// Round 33 (راجع reminders-feature.md) بس هنا — medScheduleLabel بترجع
+// نص فيه رقم مختلط بالعربي ("كل 8 ساعة") بيتحط في جدول HTML مصدَّر من غير
+// عزل، فيتقلب بصريًا. نسخة خاصة بسياقات التصدير (HTML) بتعزل الرقم بس عن
+// طريق ltrIsolate، مش النص كله (عزل النص كله كان هيقلب ترتيب الكلمتين
+// العربي حواليه). الاستخدام العادي في الواجهة (medScheduleLabel الخام) فضل
+// من غير تغيير.
+function medScheduleLabelHtml(m: any) {
+  if (m.schedule_type === "interval") return `كل ${ltrIsolate(String(m.interval_hours))} ساعة`;
+  return escapeHtml(medScheduleLabel(m));
+}
+
 function MedicationsTab() {
   const [meds, setMeds] = useState<any[]>([]);
   const [appts, setAppts] = useState<any[]>([]);
@@ -1098,6 +1285,9 @@ function MedicationsTab() {
   // لنفس المجموعة عشان نطلع كشف واحد ليها كلها.
   const [groups, setGroups] = useState<any[]>([]);
   const [exportingGroupId, setExportingGroupId] = useState<string | null>(null);
+  // Round 36 — سوتشات "إرفاق التحاليل" / "إرفاق نتيجة السكر والضغط" جوه
+  // تصدير كشف الدكتور لكل مجموعة على حدة (افتراضيًا مقفولين).
+  const [groupExportOpts, setGroupExportOpts] = useState<Record<string, { attachLabs: boolean; attachHealth: boolean }>>({});
   const [form, setForm] = useState<any>({
     name: "",
     formType: "tablet",
@@ -1462,7 +1652,7 @@ function MedicationsTab() {
       .map(
         (m) => `<tr>
           <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:12px;${cellWrap}">${FORM_EMOJI[m.form] || ""} ${escapeHtml(m.name)}</td>
-          <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;${cellWrap}">${escapeHtml(medScheduleLabel(m))}</td>
+          <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;${cellWrap}">${medScheduleLabelHtml(m)}</td>
           <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;">${ltrIsolate(`${m.remaining_doses ?? "-"} / ${m.pack_size ?? "-"}`)}</td>
         </tr>`
       )
@@ -1531,10 +1721,42 @@ function MedicationsTab() {
   // Round 34 — "كشف يروح للدكتور": تصدير مخصوص لمجموعة واحدة — عنوانه
   // بيانات الطبيب فوق، وتحته بس أدوية المجموعة دي (عكس exportSchedule
   // العام اللي بقى بيصدّر الأدوية بس من غير أي طبيب).
-  const exportGroupReferral = async (g: any) => {
+  //
+  // Round 36 fixes:
+  // 1. "بيطلع بايظ" — نفس فئة باج bidi: medScheduleLabel ("كل 8 ساعة") ورقم
+  //    تليفون الدكتور كانوا بيتحطوا جوه HTML مصدَّر من غير عزل. اتصلح بـ
+  //    medScheduleLabelHtml() + عزل رقم التليفون بس (مش السطر كله).
+  // 2. "سوتش ارفاق التحاليل، سوتش ارفاق نتيجة السكر والضغط": المجموعة
+  //    (medication_groups) مش عندها measurements/labs خاصة بيها في الـ
+  //    state هنا (دي جوه HealthSection منفصلة) — فبنجيبها بطلب API مباشر
+  //    وقت التصدير بس لو السويتش المعني مفعّل، بدل ما تتحمل دايمًا.
+  //    نتائج التحاليل (صور) بتتضاف كصفحات إضافية في نفس ملف الـ PDF.
+  const exportGroupReferral = async (g: any, opts: { attachLabs: boolean; attachHealth: boolean }) => {
     setExportingGroupId(g.id);
     try {
       const groupMeds = meds.filter((m) => m.group_id === g.id);
+
+      let healthRows: any[] = [];
+      if (opts.attachHealth) {
+        try {
+          const res = await fetch("/api/reminders/health/measurements");
+          const data = await res.json();
+          healthRows = (data.measurements || []).slice(0, 10);
+        } catch {
+          // best-effort — التصدير يكمل من غير القياسات لو الطلب فشل
+        }
+      }
+      let labImages: string[] = [];
+      if (opts.attachLabs) {
+        try {
+          const res = await fetch("/api/reminders/health/labs");
+          const data = await res.json();
+          labImages = (data.labs || []).filter((l: any) => l.group_id === g.id).map((l: any) => l.image);
+        } catch {
+          // best-effort — التصدير يكمل من غير التحاليل لو الطلب فشل
+        }
+      }
+
       const node = document.createElement("div");
       node.style.position = "fixed";
       node.style.left = "-9999px";
@@ -1550,11 +1772,38 @@ function MedicationsTab() {
         .map(
           (m) => `<tr>
             <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:12px;${cellWrap}">${FORM_EMOJI[m.form] || ""} ${escapeHtml(m.name)}</td>
-            <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;${cellWrap}">${escapeHtml(medScheduleLabel(m))}</td>
+            <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;${cellWrap}">${medScheduleLabelHtml(m)}</td>
           </tr>`
         )
         .join("");
-      const doctorLine = [g.doctor_name ? `د. ${g.doctor_name}` : "", g.doctor_specialty || "", g.doctor_phone || "", g.doctor_address || ""].filter(Boolean).map(escapeHtml).join(" — ");
+      const doctorLine = [
+        g.doctor_name ? `د. ${escapeHtml(g.doctor_name)}` : "",
+        g.doctor_specialty ? escapeHtml(g.doctor_specialty) : "",
+        g.doctor_phone ? ltrIsolate(escapeHtml(g.doctor_phone)) : "",
+        g.doctor_address ? escapeHtml(g.doctor_address) : "",
+      ].filter(Boolean).join(" — ");
+
+      const healthRowsHtml = healthRows
+        .map((m) => {
+          const valueLabel = m.kind === "blood_pressure" ? `${m.value1}/${m.value2}` : String(m.value1);
+          return `<tr>
+            <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:12px;${cellWrap}">${HEALTH_KIND_EMOJI[m.kind] || ""} ${escapeHtml(HEALTH_KIND_LABELS[m.kind] || m.kind)}</td>
+            <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:12px;">${ltrIsolate(valueLabel)}</td>
+            <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;color:#6b7280;">${ltrIsolate(escapeHtml(new Date(m.measured_at).toLocaleString("ar-EG")))}</td>
+          </tr>`;
+        })
+        .join("");
+      const healthSection = opts.attachHealth
+        ? `<div style="margin-top:16px;">
+            <h3 style="font-size:13px;margin:0 0 6px;">قياسات السكر والضغط</h3>
+            <table style="width:100%;border-collapse:collapse;table-layout:fixed;">
+              <colgroup><col style="width:34%;"/><col style="width:26%;"/><col style="width:40%;"/></colgroup>
+              <thead><tr style="background:#f9fafb;"><th style="padding:6px 4px;font-size:11px;text-align:right;">النوع</th><th style="padding:6px 4px;font-size:11px;text-align:right;">القراءة</th><th style="padding:6px 4px;font-size:11px;text-align:right;">التاريخ</th></tr></thead>
+              <tbody>${healthRowsHtml || '<tr><td colspan="3" style="font-size:11px;color:#9ca3af;padding:6px 4px;">لا يوجد</td></tr>'}</tbody>
+            </table>
+          </div>`
+        : "";
+
       node.innerHTML = `
         <div style="text-align:center;margin-bottom:16px;">
           <p style="font-size:12px;color:#ea580c;font-weight:700;">FlowCash</p>
@@ -1566,8 +1815,9 @@ function MedicationsTab() {
           <thead><tr style="background:#f9fafb;"><th style="padding:6px 4px;font-size:11px;text-align:right;">الدواء</th><th style="padding:6px 4px;font-size:11px;text-align:right;">الجرعات</th></tr></thead>
           <tbody>${rows || '<tr><td colspan="2" style="font-size:11px;color:#9ca3af;padding:6px 4px;">لا يوجد</td></tr>'}</tbody>
         </table>
+        ${healthSection}
         <div style="border-top:1px solid #e5e7eb;margin-top:16px;padding-top:10px;text-align:center;">
-          <p style="font-size:10px;color:#9ca3af;margin:0;">تم الإنشاء بواسطة FlowCash — ${new Date().toLocaleDateString("ar-EG")}</p>
+          <p style="font-size:10px;color:#9ca3af;margin:0;">تم الإنشاء بواسطة FlowCash — ${new Date().toLocaleDateString("ar-EG")}${opts.attachLabs && labImages.length ? ` — مرفق ${labImages.length} نتيجة تحليل في الصفحات التالية` : ""}</p>
         </div>`;
       document.body.appendChild(node);
       try {
@@ -1579,6 +1829,20 @@ function MedicationsTab() {
         const h = canvas.height / 2;
         const pdf = new jsPDF({ unit: "px", format: [w, h] });
         pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, w, h);
+        for (const imgUrl of labImages) {
+          try {
+            const dims = await new Promise<{ w: number; h: number }>((resolve, reject) => {
+              const img = new Image();
+              img.onload = () => resolve({ w: img.width, h: img.height });
+              img.onerror = reject;
+              img.src = imgUrl;
+            });
+            pdf.addPage([dims.w, dims.h], dims.w >= dims.h ? "landscape" : "portrait");
+            pdf.addImage(imgUrl, "JPEG", 0, 0, dims.w, dims.h);
+          } catch {
+            // صورة تحليل واحدة فشلت تتحمل — نكمل بالباقي بدل ما نوقف التصدير كله
+          }
+        }
         await shareFile(pdf.output("dataurlstring"), `كشف-${g.name}.pdf`, "application/pdf");
       } finally {
         document.body.removeChild(node);
@@ -1827,13 +2091,38 @@ function MedicationsTab() {
         {groups.map((g) => {
           const groupMeds = meds.filter((m) => m.group_id === g.id);
           if (!groupMeds.length) return null;
+          const opts = groupExportOpts[g.id] || { attachLabs: false, attachHealth: false };
+          const setOpts = (patch: Partial<{ attachLabs: boolean; attachHealth: boolean }>) =>
+            setGroupExportOpts((prev) => ({ ...prev, [g.id]: { ...opts, ...patch } }));
           return (
             <div key={g.id} className="space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-xs font-medium text-neutral-500 truncate">📋 {g.name}{g.doctor_name ? ` — د. ${g.doctor_name}` : ""}</p>
-                <button onClick={() => exportGroupReferral(g)} disabled={exportingGroupId === g.id} className={`${btnGhost} flex items-center gap-1 text-[10px] shrink-0`}>
+                <button onClick={() => exportGroupReferral(g, opts)} disabled={exportingGroupId === g.id} className={`${btnGhost} flex items-center gap-1 text-[10px] shrink-0`}>
                   {exportingGroupId === g.id ? <Loader2 size={11} className="animate-spin" /> : <FileDown size={11} />} تصدير كشف للدكتور
                 </button>
+              </div>
+              {/* Round 36 — سوتشات إرفاق التحاليل / نتيجة السكر والضغط جوه
+                  التصدير، لكل مجموعة على حدة. */}
+              <div className="flex items-center gap-3 pr-1">
+                <label className="flex items-center gap-1 text-[10px] text-neutral-500 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={opts.attachLabs}
+                    onChange={(e) => setOpts({ attachLabs: e.target.checked })}
+                    className="accent-orange-500"
+                  />
+                  إرفاق التحاليل
+                </label>
+                <label className="flex items-center gap-1 text-[10px] text-neutral-500 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={opts.attachHealth}
+                    onChange={(e) => setOpts({ attachHealth: e.target.checked })}
+                    className="accent-orange-500"
+                  />
+                  إرفاق نتيجة السكر والضغط
+                </label>
               </div>
               {groupMeds.map(medCard)}
             </div>
@@ -2114,14 +2403,31 @@ function HealthSection({ groups }: { groups: any[] }) {
         </button>
       </div>
 
-      <div className="space-y-1.5">
-        {measurements.slice(0, 8).map((m) => (
-          <div key={m.id} className="flex items-center justify-between rounded-lg bg-neutral-50 dark:bg-neutral-800/50 px-2.5 py-1.5 text-xs">
-            <span>{HEALTH_KIND_EMOJI[m.kind]} {m.kind === "blood_pressure" ? `${m.value1}/${m.value2}` : m.value1} — {new Date(m.measured_at).toLocaleString("ar-EG")}</span>
-            <button onClick={() => delMeasurement(m.id)} className="text-red-500 p-1"><Trash2 size={12} /></button>
-          </div>
-        ))}
-        {!measurements.length && <p className="text-xs text-neutral-400 text-center py-2">مفيش قياسات مسجلة</p>}
+      {/* Round 36 — "خلي كل واحد لوحده جدول يمين و شمال": بدل قائمة واحدة
+          مختلطة، جدولين جنب بعض — قياسات السكر وقياسات الضغط كل واحد في
+          عموده. الحاوية RTL فالعنصر الأول في الـ DOM (سكر) بيطلع على
+          اليمين، والتاني (ضغط) على الشمال. */}
+      <div className="grid grid-cols-2 gap-2">
+        {(["blood_sugar", "blood_pressure"] as const).map((k) => {
+          const rows = measurements.filter((m) => m.kind === k).slice(0, 8);
+          return (
+            <div key={k} className="space-y-1.5">
+              <p className="text-[11px] font-medium text-neutral-500 text-center">{HEALTH_KIND_EMOJI[k]} {HEALTH_KIND_LABELS[k]}</p>
+              <div className="space-y-1">
+                {rows.map((m) => (
+                  <div key={m.id} className="flex flex-col gap-0.5 rounded-lg bg-neutral-50 dark:bg-neutral-800/50 px-2 py-1.5 text-[11px]">
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="font-medium">{m.kind === "blood_pressure" ? `${m.value1}/${m.value2}` : m.value1}</span>
+                      <button onClick={() => delMeasurement(m.id)} className="text-red-500 p-0.5 shrink-0"><Trash2 size={11} /></button>
+                    </div>
+                    <span className="text-neutral-400 text-[10px]">{new Date(m.measured_at).toLocaleString("ar-EG")}</span>
+                  </div>
+                ))}
+                {!rows.length && <p className="text-[11px] text-neutral-400 text-center py-2">مفيش قياسات</p>}
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       <div className="border-t border-neutral-100 dark:border-neutral-800 pt-3 space-y-2">

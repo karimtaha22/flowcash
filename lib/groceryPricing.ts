@@ -92,8 +92,11 @@ function isQuotaError(message: string, status?: number) {
 }
 // Round 32 — المستخدم طلب توحيد النص ده مع باقي رسائل "تعذر الاتصال بخوادم
 // IDEA" في التطبيق بدل الشرح التقني عن حد الطلبات.
-const QUOTA_MESSAGE =
-  "تعذر الاتصال بخوادم IDEA — تقدر تسجّل السعر يدويًا، أو تعيد المحاولة بعد دقائق.";
+// Round 36 — "شيل جملة تعذر الاتصال بخوادم IDEA — تقدر تسجّل السعر يدويًا،
+// أو تعيد المحاولة بعد دقائق.": شيلت النص القديم ده بالظبط؛ خانة السعر بقت
+// دايمًا مفتوحة للكتابة أصلاً (Round 36 — راجع reminders/page.tsx)، فمفيش
+// داعي نوجّه المستخدم لزرار "سجّل يدويًا" مبقاش موجود.
+const QUOTA_MESSAGE = "الأسعار مشغولة دلوقتي، جرب تاني بعد شوية.";
 
 export async function fetchAiPrice(itemName: string): Promise<AiPriceResult> {
   const { apiKey, model } = await resolveGeminiConfig();
