@@ -485,7 +485,7 @@ const SEGMENT_CATEGORY_CLASS: Record<string, string> = {
 };
 
 function PlanningTab({ settings }: { settings: Settings }) {
-  const [sub, setSub] = useState<"travel" | "energy">("travel");
+  const [sub, setSub] = useState<"travel" | "energy" | "baby">("travel");
   const [periods, setPeriods] = useState<any[]>([]);
   const [busy, setBusy] = useState(false);
   const [tripStart, setTripStart] = useState("");
@@ -513,7 +513,9 @@ function PlanningTab({ settings }: { settings: Settings }) {
   };
 
   const plan = tripStart && tripEnd ? describeTravelRange(periods, settings.avg_cycle_length, tripStart, tripEnd) : null;
-  const currentPhase = cycleInfo(periods, settings.avg_cycle_length)?.phase || null;
+  const info = cycleInfo(periods, settings.avg_cycle_length);
+  const currentPhase = info?.phase || null;
+  const lastPeriod = [...periods].sort((a, b) => (a.start_date < b.start_date ? 1 : -1))[0] || null;
 
   return (
     <div className="space-y-3">
@@ -523,6 +525,9 @@ function PlanningTab({ settings }: { settings: Settings }) {
         </button>
         <button onClick={() => setSub("energy")} className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-full font-medium ${sub === "energy" ? "bg-white dark:bg-neutral-700 shadow-sm" : "text-neutral-400"}`}>
           <Zap size={13} /> الطاقة والإنتاجية
+        </button>
+        <button onClick={() => setSub("baby")} className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-full font-medium ${sub === "baby" ? "bg-white dark:bg-neutral-700 shadow-sm" : "text-neutral-400"}`}>
+          <Baby size={13} /> عاوزة بيبي
         </button>
       </div>
 
@@ -591,6 +596,41 @@ function PlanningTab({ settings }: { settings: Settings }) {
               <p><b>الرياضة:</b> {PRODUCTIVITY_MAP[ph].fitness}</p>
             </Card>
           ))}
+        </div>
+      )}
+
+      {sub === "baby" && (
+        <div className="space-y-3">
+          {!lastPeriod ? (
+            <Card className="text-center text-sm text-neutral-400 py-6">سجّلي أول دورة في تبويب "الرئيسية" الأول عشان نقدر نحسب نافذة الخصوبة.</Card>
+          ) : (
+            <>
+              <Card className="space-y-1.5 text-xs">
+                <p>
+                  دورتك الأخيرة بدأت يوم <b>{fmtDate(lastPeriod.start_date)}</b>{lastPeriod.end_date ? <> وانتهت يوم <b>{fmtDate(lastPeriod.end_date)}</b></> : null}.
+                  بناءً على إن متوسط طول دورتك <b>{settings.avg_cycle_length}</b> يوم، من المتوقع إن التبويض هيكون يوم <b>{info?.ovulationDate ? fmtDate(info.ovulationDate) : "-"}</b>، والدورة الجاية متوقعة يوم <b>{info?.nextPeriodDate ? fmtDate(info.nextPeriodDate) : "-"}</b>.
+                </p>
+              </Card>
+
+              {info?.fertileStart && info?.fertileEnd && (
+                <Card className="text-center space-y-1 bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900">
+                  <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">أفضل وقت للحمل — نافذة الخصوبة</p>
+                  <p className="text-sm font-bold text-emerald-700 dark:text-emerald-300">{fmtDate(info.fertileStart)} إلى {fmtDate(info.fertileEnd)}</p>
+                  <p className="text-[11px] text-emerald-600 dark:text-emerald-400">أعلى فرصة حمل في اليومين اللي قبل التبويض ويوم التبويض نفسه.</p>
+                </Card>
+              )}
+
+              <Card className="space-y-1.5 text-xs">
+                <p className="font-semibold">نصايح تزود فرصة الحمل</p>
+                <p>• حمض الفوليك ٤٠٠ ميكروجرام يوميًا — يفضّل تبدئي قبل الحمل بشهر لو ينفع.</p>
+                <p>• حاولي توقيتي العلاقة الزوجية خلال نافذة الخصوبة فوق.</p>
+                <p>• وزن صحي ونشاط بدني معتدل بيساعدوا في انتظام التبويض.</p>
+                <p>• قللي الكافيين، وابعدي تمامًا عن التدخين والكحول.</p>
+                <p>• نوم كافٍ وتقليل التوتر قدر الإمكان.</p>
+                <p>• لو مرّ ٦-١٢ شهر من المحاولة من غير حمل، يفضّل تستشيري دكتورة.</p>
+              </Card>
+            </>
+          )}
         </div>
       )}
     </div>
@@ -744,7 +784,51 @@ function PregnancyHomeTab({ settings }: { settings: Settings }) {
         <p className="text-2xl font-bold">🍇 حجم البيبي دلوقتي: {fetalSize}</p>
         <p className="text-xs text-neutral-500">موعد الولادة المتوقع: <b>{fmtDate(info.dueDate)}</b> (حسب قاعدة نيغيلي)</p>
       </Card>
+
+      <UltrasoundGallery />
     </div>
+  );
+}
+
+// Round 41 — "🖼️ ألبوم صور السونار": مفيش جدول منفصل للصور (قرار Round 38
+// المتعمد — الصور بتتحط داخل المواعيد بس، راجع claude/laha-feature.md's
+// قسم "نطاق مبسّط")، فالألبوم هنا بيلمّ أي موعد له صورة (`laha_appointments.
+// image`) ويرتبهم تصاعديًا بتاريخ الزيارة، بدل جدول/API جديد بالكامل.
+function UltrasoundGallery() {
+  const [appointments, setAppointments] = useState<any[]>([]);
+  const [openIdx, setOpenIdx] = useState<number | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try { const d = await api("/api/laha/appointments"); setAppointments(d.appointments || []); } catch {}
+    })();
+  }, []);
+
+  const withImages = appointments.filter((a) => a.image).sort((a, b) => (a.appt_date < b.appt_date ? -1 : 1));
+  if (!withImages.length) return null;
+
+  return (
+    <Card className="space-y-2">
+      <p className="text-xs font-semibold">🖼️ ألبوم صور السونار</p>
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        {withImages.map((a, i) => (
+          <button key={a.id} onClick={() => setOpenIdx(i)} className="shrink-0 w-16 h-16 rounded-lg overflow-hidden border border-neutral-200 dark:border-neutral-700">
+            <img src={a.image} alt={a.title} className="w-full h-full object-cover" />
+          </button>
+        ))}
+      </div>
+
+      {openIdx !== null && withImages[openIdx] && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex flex-col items-center justify-center p-4" onClick={() => setOpenIdx(null)}>
+          <img src={withImages[openIdx].image} alt={withImages[openIdx].title} className="max-w-full max-h-[70vh] rounded-xl object-contain" onClick={(e) => e.stopPropagation()} />
+          <div className="text-center text-white mt-3 space-y-1" onClick={(e) => e.stopPropagation()}>
+            <p className="text-sm font-medium">{fmtDate(withImages[openIdx].appt_date)} — {withImages[openIdx].title}</p>
+            {withImages[openIdx].notes && <p className="text-xs text-neutral-300">{withImages[openIdx].notes}</p>}
+            <button onClick={() => setOpenIdx(null)} className="mt-2 text-xs bg-white/10 rounded-lg px-4 py-1.5">إغلاق</button>
+          </div>
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -1093,9 +1177,45 @@ function BabyNamesTab({ settings, saveSettings }: { settings: Settings; saveSett
   const [meaningBusy, setMeaningBusy] = useState(false);
   const [meaningResult, setMeaningResult] = useState<{ found: boolean; meaning: string; error?: string } | null>(null);
 
+  // Round 41 — "Family Heart Poll": لينك حقيقي بمفتاح ثابت لتصويت العيلة
+  // على الأسماء المختارة (selected=true)، مع عدّاد لايف.
+  const [pollToken, setPollToken] = useState<string | null>(null);
+  const [pollBusy, setPollBusy] = useState(false);
+  const [pollCopied, setPollCopied] = useState(false);
+  const [pollOrigin, setPollOrigin] = useState("");
+  const [voteCounts, setVoteCounts] = useState<Record<string, number>>({});
+
+  useEffect(() => { setPollOrigin(window.location.origin); }, []);
+
   const load = async () => { const d = await api("/api/laha/baby-names"); setNames(d.names || []); };
-  useEffect(() => { load(); }, []);
+  const loadPoll = async () => {
+    try {
+      const d = await api("/api/laha/baby-names/poll-link");
+      setPollToken(d.token);
+      if (d.token) {
+        const res = await fetch(`/api/name-poll/${d.token}`);
+        const pd = await res.json().catch(() => ({}));
+        const map: Record<string, number> = {};
+        (pd.names || []).forEach((n: any) => { map[n.id] = n.voteCount; });
+        setVoteCounts(map);
+      }
+    } catch {}
+  };
+  useEffect(() => { load(); loadPoll(); }, []);
   useEffect(() => { setFatherName(settings.father_name || ""); }, [settings.father_name]);
+
+  const generatePollLink = async (regenerate = false) => {
+    setPollBusy(true);
+    try {
+      const d = await api("/api/laha/baby-names/poll-link", { method: "POST", body: JSON.stringify({ regenerate }) });
+      setPollToken(d.token);
+      loadPoll();
+    } catch (e: any) { alert(e.message); } finally { setPollBusy(false); }
+  };
+  const pollShareLink = pollToken ? `${pollOrigin}/name-poll/${pollToken}` : "";
+  const copyPollLink = async () => {
+    try { await navigator.clipboard.writeText(pollShareLink); setPollCopied(true); setTimeout(() => setPollCopied(false), 1500); } catch {}
+  };
 
   const fullName = (n: string) => (fatherName.trim() ? `${n} ${fatherName.trim()}` : n);
 
@@ -1118,7 +1238,7 @@ function BabyNamesTab({ settings, saveSettings }: { settings: Settings; saveSett
     setSuggestions((prev) => prev.filter((s) => s.name !== n.name));
     load();
   };
-  const toggleSelect = async (id: string, selected: boolean) => { await api(`/api/laha/baby-names/${id}`, { method: "PATCH", body: JSON.stringify({ selected }) }); load(); };
+  const toggleSelect = async (id: string, selected: boolean) => { await api(`/api/laha/baby-names/${id}`, { method: "PATCH", body: JSON.stringify({ selected }) }); load(); loadPoll(); };
   const del = async (id: string) => { await api(`/api/laha/baby-names/${id}`, { method: "DELETE" }); load(); };
 
   const lookupMeaning = async () => {
@@ -1210,12 +1330,16 @@ function BabyNamesTab({ settings, saveSettings }: { settings: Settings; saveSett
 
       <Card className="space-y-2">
         <p className="text-xs font-semibold">أسماء محفوظة</p>
+        <p className="text-[10px] text-neutral-400">دوسي على القلب ❤️ عشان ترشحي الاسم للتصويت العائلي تحت</p>
         {names.map((n) => (
           <div key={n.id} className="flex items-center justify-between gap-2 text-xs">
             <div className="flex-1">
               <p className="font-medium">{n.name} {n.gender === "girl" ? "💗" : "💙"}</p>
               {n.meaning && <p className="text-neutral-400">{n.meaning}</p>}
               {fatherName.trim() && <p className="text-neutral-400 mt-0.5">الاسم كامل: {fullName(n.name)}</p>}
+              {n.selected && voteCounts[n.id] !== undefined && (
+                <p className="text-pink-500 mt-0.5">🗳️ {voteCounts[n.id]} صوت من العيلة</p>
+              )}
             </div>
             <button onClick={() => toggleSelect(n.id, !n.selected)} className={n.selected ? "text-pink-500" : "text-neutral-300"}>
               <Heart size={16} fill={n.selected ? "currentColor" : "none"} />
@@ -1224,6 +1348,27 @@ function BabyNamesTab({ settings, saveSettings }: { settings: Settings; saveSett
           </div>
         ))}
         {!names.length && <p className="text-xs text-neutral-400 text-center py-2">مفيش أسماء محفوظة لسه</p>}
+      </Card>
+
+      <Card className="space-y-2">
+        <p className="text-xs font-semibold">🗳️ تصويت العيلة على الأسماء</p>
+        <p className="text-[10px] text-neutral-400">ابعتي اللينك ده لأي حد في العيلة يصوّت على الأسماء اللي رشحتيها (اللي عليها ❤️ فوق).</p>
+        {!pollToken ? (
+          <button onClick={() => generatePollLink(false)} disabled={pollBusy} className="w-full bg-pink-500 text-white rounded-xl py-2.5 text-sm font-medium">
+            {pollBusy ? "لحظة واحدة..." : "توليد لينك تصويت العيلة"}
+          </button>
+        ) : (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <input readOnly value={pollShareLink} className="flex-1 text-xs rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 truncate" />
+              <button onClick={copyPollLink} className="shrink-0 bg-neutral-800 dark:bg-neutral-200 text-white dark:text-neutral-900 rounded-lg px-3 py-1.5"><Copy size={14} /></button>
+            </div>
+            {pollCopied && <p className="text-[10px] text-emerald-500 text-center">اتنسخ! ✅</p>}
+            <a href={`https://wa.me/?text=${encodeURIComponent(`ساعدونا نختار اسم البيبي! صوّتوا هنا: ${pollShareLink}`)}`} target="_blank" rel="noopener noreferrer"
+              className="block text-center text-xs bg-emerald-500 text-white rounded-lg py-2 font-medium">مشاركة على واتساب</a>
+            <button onClick={() => generatePollLink(true)} disabled={pollBusy} className="w-full text-[11px] text-neutral-400 underline">توليد لينك جديد (بيلغي القديم)</button>
+          </div>
+        )}
       </Card>
     </div>
   );
