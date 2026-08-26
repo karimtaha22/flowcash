@@ -41,8 +41,9 @@ export default function Sidebar() {
           const active = pathname === href || pathname?.startsWith(href + "/");
           // طلب المستخدم صراحة: مفتاح "لها" في القائمة يتلون وردي (مش برتقالي
           // زي باقي القائمة) لما نكون واقفين عليه أو بنعمله hover، وفي حالته
-          // العادية (مش واقفين عليه) يفضل جواه وردة صغيرة بتتنفس برفق
-          // (.animate-rose-breathe) — "شكل مريح للأعصاب".
+          // العادية (مش واقفين عليه) يفضل جواه أيقونة بتنبض برفق — "شكل مريح
+          // للأعصاب". Round 42 — الوردة 🌹 القديمة كانت "مش حلوة" (طلب صريح)،
+          // بدّلناها بقلب وردي 💗 (.animate-heart-glow) بينبض زي نبضة قلب.
           if (href === "/laha") {
             return (
               <Link
@@ -55,8 +56,8 @@ export default function Sidebar() {
                 <Icon size={18} />
                 {label}
                 {!active && (
-                  <span className="ms-auto animate-rose-breathe text-sm leading-none select-none" aria-hidden>
-                    🌹
+                  <span className="ms-auto animate-heart-glow text-sm leading-none select-none" aria-hidden>
+                    💗
                   </span>
                 )}
               </Link>

@@ -38,8 +38,7 @@ html {
 }
 
 /* Round 39 — قسم "لها": البيبي بيتحرك رايحة جاية جوه زرار اختيار الاسم وقت
-   التحميل، والوردة الصغيرة بتتنفس برفق جوه مفتاح "لها" في القائمة الجانبية
-   لما مايكونش متفعّل (طلب المستخدم صراحة: "شكل مريح للأعصاب"). */
+   التحميل (طلب المستخدم صراحة: "شكل مريح للأعصاب"). */
 @keyframes baby-sway {
   0%, 100% { transform: translateX(-8px) rotate(-6deg); }
   50% { transform: translateX(8px) rotate(6deg); }
@@ -47,12 +46,26 @@ html {
 .animate-baby-sway {
   animation: baby-sway 1.1s ease-in-out infinite;
 }
-@keyframes rose-breathe {
-  0%, 100% { transform: scale(0.92) rotate(-4deg); opacity: 0.75; }
-  50% { transform: scale(1.08) rotate(4deg); opacity: 1; }
+/* Round 42 — الوردة 🌹 القديمة جوه مفتاح "لها" في القائمة الجانبية كانت
+   "مش حلوة" (طلب المستخدم صراحة). بدّلناها بقلب وردي 💗 بينبض زي نبضة قلب
+   هادية — أنسب بصريًا لموضوع القسم (حمل/دورة/عيلة) ومتسقة مع لون
+   bg-pink-500 المستخدم في نفس المفتاح وقت التفعيل. */
+@keyframes heart-glow {
+  0%, 100% { transform: scale(0.88); opacity: 0.7; }
+  50% { transform: scale(1.18); opacity: 1; }
 }
-.animate-rose-breathe {
-  animation: rose-breathe 2.6s ease-in-out infinite;
+.animate-heart-glow {
+  animation: heart-glow 1.7s ease-in-out infinite;
+}
+/* Round 42 — توهج نيون خفيف حوالين تبويبات "لها" غير المفعّلة (متابعة
+   الدورة/الحمل) عشان يلفت النظر إن فيه محتوى تاني — طلب المستخدم صراحة
+   بعد ما فاتها تبويب "🎈 تيم بينك/بلو" الموجود أصلاً من راوند 38. */
+@keyframes neon-tab {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(236, 72, 153, 0); border-color: rgba(236, 72, 153, 0.35); }
+  50% { box-shadow: 0 0 7px 1.5px rgba(236, 72, 153, 0.55); border-color: rgba(236, 72, 153, 0.9); }
+}
+.animate-neon-tab {
+  animation: neon-tab 2.2s ease-in-out infinite;
 }
 
 /* Round 40 — تقرير الطبيب القابل للطباعة (app/(protected)/laha/doctor-report):

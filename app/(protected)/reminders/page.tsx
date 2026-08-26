@@ -7,7 +7,7 @@ import { shareFile } from "@/lib/shareFile";
 import { fmt } from "@/lib/format";
 import { MEAL_TIMING_LABELS, MEDICATION_FORM_LABELS, SCHEDULE_TYPE_LABELS } from "@/lib/medicationSchedule";
 import { lookupDefaultUnit } from "@/lib/groceryDefaultUnits";
-import { Trash2, Camera, Loader2, FileDown, CheckCircle2, Pill, Pencil, X, Upload, Image as ImageIcon, ShoppingCart, Receipt, ListChecks } from "lucide-react";
+import { Trash2, Camera, Loader2, FileDown, CheckCircle2, Pill, Pencil, X, Upload, Image as ImageIcon, ShoppingCart, Receipt, ListChecks, Plus } from "lucide-react";
 
 type Tab = "grocery" | "general" | "medications" | "utility";
 
@@ -306,9 +306,11 @@ function GroceryTab() {
   const [pendingEntries, setPendingEntries] = useState<Record<string, { quantity: number; unit: string; selected_option_id: string | null; grams: number | null }> | null>(null);
 
   const nextIdRef = useRef(1);
-  // per-row debounce timers (name typed → catalog check) and the shared
-  // "no catalog match" queue that gets flushed to the batched AI endpoint —
-  // see enqueueAi/flushAiQueue below.
+  // per-row debounce timer (name typed → catalog check) and the shared
+  // "AI-lookup requested" queue that gets flushed to the batched AI endpoint
+  // — see enqueueAi/flushAiQueue below. Round 42 — بقى بيتنادى بس لما
+  // المستخدمة تدوس زرار "دوّر بالذكاء الاصطناعي" يدويًا (راجع الملاحظة جنب
+  // matchRow)، مش تلقائي على كل صف من غير سعر.
   const rowTimersRef = useRef<Record<number, any>>({});
   const aiQueueRef = useRef<{ id: number; name: string }[]>([]);
   const aiFlushTimerRef = useRef<any>(null);
@@ -418,30 +420,33 @@ function GroceryTab() {
     }
   };
 
-  // Instant, local, no-Gemini-call catalog check for one row — if it misses,
-  // the row is queued for the batched AI lookup automatically instead of
-  // needing a manual "دوّر بالذكاء الاصطناعي" tap.
+  // Round 42 — "احنا لاغينا فكرة جيميناي وبيعتمد علي الاسكربت": مبقاش فيه
+  // نداء تلقائي لـ Gemini لما الكتالوج الشخصي ميلاقيش تطابق. قبل كده
+  // matchRow كانت بتعمل enqueueAi تلقائيًا هنا، وده اللي كان بيظهر "جاري
+  // الاتصال بخوادم IDEA" وبعدها رسالة "الأسعار مشغولة دلوقتي" (رسالة quota
+  // خاصة بـ Gemini) — مربّك للمستخدمة اللي مش متوقعة نداء ذكاء اصطناعي
+  // أصلًا بعد ما اتعمد الاعتماد على سكريبت السحب (market_catalog، عبر
+  // fetchMarketSuggestions تحت) بدل البحث بالذكاء الاصطناعي. دلوقتي: لو
+  // الكتالوج الشخصي ميلاقيش تطابق، الصف بيفضل من غير سعر — المستخدمة تقدر
+  // تختار من اقتراحات السوق (لو ظهرت) أو تكتب السعر يدويًا (خانة السعر
+  // مفتوحة دايمًا أصلًا من راوند 36).
   const matchRow = async (id: number, name: string) => {
     try {
       const res = await fetch("/api/reminders/grocery/match", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines: [name] }) });
       const data = await res.json();
       const m = data.matches?.[0];
-      if (!res.ok || !m) return;
-      if (m.options?.length) {
-        const opt = m.options[0];
-        updateLine(id, {
-          item_id: m.item_id,
-          item_name: m.item_name,
-          options: m.options,
-          selectedOptionId: opt?.id || null,
-          // Round 36 — السعر ده كان متسجل قبل كده (كتالوج/يدوي)، مفيش ذكاء
-          // اصطناعي اتنادى دلوقتي → نقطة حمراء.
-          resolvedVia: "catalog",
-          manualPrice: opt ? String(opt.price) : "",
-        });
-      } else {
-        enqueueAi(id, name);
-      }
+      if (!res.ok || !m || !m.options?.length) return;
+      const opt = m.options[0];
+      updateLine(id, {
+        item_id: m.item_id,
+        item_name: m.item_name,
+        options: m.options,
+        selectedOptionId: opt?.id || null,
+        // Round 36 — السعر ده كان متسجل قبل كده (كتالوج/يدوي)، مفيش ذكاء
+        // اصطناعي اتنادى دلوقتي → نقطة حمراء.
+        resolvedVia: "catalog",
+        manualPrice: opt ? String(opt.price) : "",
+      });
     } catch {
       // best-effort — the manual-price fallback is always available
     }
@@ -557,7 +562,9 @@ function GroceryTab() {
       setLines((prevLines) => [...prevLines, ...newRows]);
       setPendingEntries(null);
       setListText("");
-      for (const row of newRows) if (!row.options.length) enqueueAi(row.id, row.raw_text);
+      // Round 42 — مبقاش فيه نداء تلقائي لـ Gemini هنا للصفوف اللي من غير
+      // سعر؛ المستخدمة تقدر تدوس "دوّر بالذكاء الاصطناعي" يدويًا لكل صف لو
+      // حابة (راجع ملاحظة matchRow فوق).
     } finally {
       setMatching(false);
     }
@@ -686,7 +693,7 @@ function GroceryTab() {
     try {
       const newRows = await matchLines(rawLines, pending);
       setLines(newRows);
-      for (const row of newRows) if (!row.options.length) enqueueAi(row.id, row.raw_text);
+      // Round 42 — نفس التعديل: مفيش نداء تلقائي لـ Gemini هنا كمان.
     } finally {
       setContinuingListId(null);
     }
@@ -867,6 +874,13 @@ function GroceryTab() {
         }}
       />
 
+      {/* Round 42 — "اضف صف خليها واضحه و حطها في المكان الي بين رفع فاتوره
+          وانشاء قائمه": زرار واضح لإضافة صف يدوي، بين كارت رفع الفاتورة
+          وقائمة الأصناف — بدل ما يكون مدفون تحت في آخر الصفحة بس. */}
+      <button onClick={addRow} className={`${btnGhost} w-full flex items-center justify-center gap-1.5`}>
+        <Plus size={14} /> إضافة صنف جديد يدويًا
+      </button>
+
       <div className="space-y-2">
         {lines.map((l) => (
           <Card key={l.id} className="space-y-2">
@@ -875,6 +889,15 @@ function GroceryTab() {
                 placeholder="اسم الصنف — مثال: لبن"
                 value={l.raw_text}
                 onChange={(e) => onNameChange(l.id, e.target.value)}
+                // Round 42 — "خلي في اوبشن لو داس انتر من الموبيل او الكيبورد
+                // يحط صف جديد": دوس Enter في خانة اسم أي صف (موبايل أو
+                // كيبورد فعلي) يضيف صف جديد فاضي تحته على طول.
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addRow();
+                  }
+                }}
                 className={`${inputCls} flex-1`}
               />
               {l.loadingAi && <Loader2 size={14} className="animate-spin text-orange-500 shrink-0" />}
@@ -996,7 +1019,15 @@ function GroceryTab() {
                 )}
               </div>
             ) : (
-              !l.loadingAi && l.raw_text.trim() && <p className="text-xs text-neutral-400">مفيش سعر مسجل للصنف ده لسه.</p>
+              // Round 42 — بدل ما البحث بالذكاء الاصطناعي يتنادى تلقائي (وده
+              // اللي كان بيظهر "جاري الاتصال بخوادم IDEA" مربكة)، بقى زرار
+              // يدوي اختياري — المستخدمة تدوس عليه بس لو حابة فعلًا.
+              !l.loadingAi && l.raw_text.trim() && (
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs text-neutral-400">مفيش سعر مسجل للصنف ده لسه.</p>
+                  <button onClick={() => enqueueAi(l.id, l.raw_text.trim())} className="text-[11px] text-pink-500 shrink-0 underline">🔍 دوّر بالذكاء الاصطناعي</button>
+                </div>
+              )
             )}
 
             {l.loadingAi && <p className="text-xs text-orange-500 flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> {AI_LOADING_TEXT}</p>}

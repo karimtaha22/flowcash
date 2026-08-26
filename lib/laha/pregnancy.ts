@@ -33,6 +33,14 @@ export function weekBucket(week: number): "early" | "mid" | "late" {
   return week <= 13 ? "early" : week <= 27 ? "mid" : "late";
 }
 
+// Round 42 — "حجم البيبي الأسبوع كذا يساوي الشهر كذا": البروتوتايب المرجعي
+// (index (2).html) كان بيحسب الشهر التقويمي التقريبي من الأسبوع بمعادلة
+// gestationalMonth = ceil((week+1)/4.345) مقصوصة بين ١ و١٠ — نفس الحساب هنا
+// حرفيًا عشان نعرض "الشهر X من ١٠" جنب رقم الأسبوع زي الطلب بالظبط.
+export function gestationalMonth(week: number): number {
+  return Math.min(10, Math.max(1, Math.ceil((week + 1) / 4.345)));
+}
+
 // مقارنات حجم الجنين بفاكهة/خضار مألوفة — أسبوع ٤ لحد ٤٠. مأخوذة بتصرف من
 // البروتوتايب المرجعي (نفس فكرة تطبيقات الحمل المعروفة).
 export const FETAL_SIZES: Record<number, string> = {

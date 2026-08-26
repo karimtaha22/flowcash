@@ -10,6 +10,7 @@ import {
   runGeneralRemindersForUser,
   runMedicationRemindersForUser,
   runAppointmentRemindersForUser,
+  runLahaAppointmentRemindersForUser,
   runUtilityInsightForUser,
 } from "@/lib/reminders";
 
@@ -88,6 +89,7 @@ export async function GET(req: NextRequest) {
     entry.generalReminders = await runGeneralRemindersForUser(u);
     entry.medications = await runMedicationRemindersForUser(u);
     entry.appointments = await runAppointmentRemindersForUser(u);
+    entry.lahaAppointments = await runLahaAppointmentRemindersForUser(u);
     entry.utilityInsight = await runUtilityInsightForUser(u);
 
     if (Object.keys(entry).length > 1) results.push(entry);

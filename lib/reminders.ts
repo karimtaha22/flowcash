@@ -551,6 +551,51 @@ export async function runAppointmentRemindersForUser(user: ReminderUser) {
   return { sent };
 }
 
+// ---------------- "لها" appointments (Round 42) ----------------
+// نفس فكرة runAppointmentRemindersForUser بالظبط (تذكير قبل يوم + تذكير يوم
+// الموعد نفسه)، لكن على جدول laha_appointments المنفصل بتاع قسم "لها" —
+// appt_date هنا تاريخ بس من غير وقت (مفيش ساعة محددة للموعد زي
+// medical_appointments.appointment_at)، فمفيش تذكير "قبل ٣ ساعات" هنا؛ بدلها
+// تذكير صباحي بسيط يوم الموعد نفسه. مضمون مرة واحدة بس لكل موعد بـ
+// reminded_at (يوم قبل) و reminded_same_day_at (يوم الموعد) بشكل منفصل.
+export async function runLahaAppointmentRemindersForUser(user: ReminderUser) {
+  if (!botToken() || !user.telegram_chat_id || isMuted(user)) return { sent: 0 };
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowIso = tomorrow.toISOString().slice(0, 10);
+
+  const { data: appts } = await supabaseAdmin
+    .from("laha_appointments")
+    .select("id,title,appt_date,reminded_at,reminded_same_day_at")
+    .eq("user_id", user.id)
+    .gte("appt_date", todayIso)
+    .lte("appt_date", tomorrowIso);
+
+  let sent = 0;
+  for (const a of appts || []) {
+    if (a.appt_date === tomorrowIso && !a.reminded_at) {
+      try {
+        await sendText(botToken(), user.telegram_chat_id, `🩺 تذكير: معاكي موعد بكرة — ${a.title}`);
+        sent++;
+      } catch {
+        // best-effort
+      }
+      await supabaseAdmin.from("laha_appointments").update({ reminded_at: new Date().toISOString() }).eq("id", a.id);
+    }
+    if (a.appt_date === todayIso && !a.reminded_same_day_at) {
+      try {
+        await sendText(botToken(), user.telegram_chat_id, `🔔 معاكي موعد النهاردة — ${a.title}`);
+        sent++;
+      } catch {
+        // best-effort
+      }
+      await supabaseAdmin.from("laha_appointments").update({ reminded_same_day_at: new Date().toISOString() }).eq("id", a.id);
+    }
+  }
+  return { sent };
+}
+
 // ---------------- monthly utility-usage insight ----------------
 // "كل شهر تقوله استخدام الشهر ده اعلي في الكهرباء مثلا و اقل في المياه" —
 // sends at most once every ~28 days, only during the first 3 days of a

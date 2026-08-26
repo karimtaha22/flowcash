@@ -8,7 +8,7 @@ import {
   cycleInfo, cycleRegularity, PRODUCTIVITY_MAP, detectGapFillers, waterRetentionInsight, describeTravelRange,
   type CyclePhase,
 } from "@/lib/laha/cycle";
-import { pregnancyInfo, fetalSizeLabel, weekBucket } from "@/lib/laha/pregnancy";
+import { pregnancyInfo, fetalSizeLabel, weekBucket, gestationalMonth } from "@/lib/laha/pregnancy";
 import {
   Heart, Baby, Calendar, Scale, StickyNote, Footprints, Timer, Stethoscope,
   Sparkles, PartyPopper, Copy, Lock, Unlock, Check, X, Wand2, ChevronRight, ChevronLeft, Search,
@@ -171,13 +171,20 @@ export default function LahaPage() {
         )}
       </Card>
 
+      {/* Round 42 — "نيون بيلف حوالين التبويب لو مش واقف عليها": المستخدم
+          مكنش بيلاحظ إن فيه تبويبات تانية (زي "🎈 تيم بينك/بلو" اللي كان
+          فاكرها "مش موجودة" أصلاً مع إنها متعملة من راوند 38) — توهج نيون
+          خفيف بيلف حوالين كل تبويب مش واقف عليه بيلفت النظر إن فيه محتوى
+          تاني يستاهل يتفتح. */}
       <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
         {tabs.map(({ key, label, icon: Icon }) => (
           <button
             key={key}
             onClick={() => setTab(key)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap shrink-0 transition ${
-              activeTabs === key ? "bg-pink-500 text-white" : "bg-neutral-100 dark:bg-neutral-800 text-neutral-500"
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap shrink-0 transition border ${
+              activeTabs === key
+                ? "bg-pink-500 text-white border-transparent"
+                : "bg-neutral-100 dark:bg-neutral-800 text-neutral-500 border-pink-300/70 dark:border-pink-700/60 animate-neon-tab"
             }`}
           >
             <Icon size={13} /> {label}
@@ -407,11 +414,15 @@ function CycleCalendar({
     return "safe";
   };
 
-  const CATEGORY_CLASS: Record<string, string> = {
-    period: "bg-rose-500 text-white",
-    ovulation: "bg-purple-500 text-white",
-    fertile: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300",
-    safe: "bg-neutral-50 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300",
+  // Round 42 — "التقويم كبير جدا": ريديزاين مبني على البروتوتايب المرجعي
+  // (index (2).html) — بدل ما اليوم يتلوّن بالكامل بلون الفئة (تخانة بصرية
+  // كبيرة)، الخلفية بتفضل بيضا/محايدة ونقطة صغيرة تحت الرقم بس بتدّي اللون.
+  // ده هو اللي بيخلي التقويم يحس إنه "أصغر" فعليًا حتى لو نفس المقاس بالبيكسل.
+  const DOT_CLASS: Record<string, string> = {
+    period: "bg-rose-400",
+    ovulation: "bg-purple-500",
+    fertile: "bg-emerald-400",
+    safe: "bg-sky-300",
   };
 
   const selectedExactPeriod = selected ? periods.find((p) => p.start_date === selected) : null;
@@ -425,7 +436,7 @@ function CycleCalendar({
         <button onClick={() => changeMonth(-1)} className="p-1 text-neutral-400"><ChevronLeft size={16} /></button>
       </div>
 
-      <div className="grid grid-cols-7 gap-1 text-center">
+      <div className="grid grid-cols-7 gap-1 text-center max-w-xs mx-auto w-full">
         {DOW_LABELS.map((d) => <span key={d} className="text-[9px] text-neutral-400">{d}</span>)}
         {cells.map((dateISO, i) => {
           if (!dateISO) return <span key={`empty-${i}`} />;
@@ -438,21 +449,28 @@ function CycleCalendar({
             <button
               key={dateISO}
               onClick={() => setSelected(isSelected ? null : dateISO)}
-              className={`relative aspect-square rounded-lg text-[11px] flex items-center justify-center transition ${CATEGORY_CLASS[cat]} ${isSelected ? "ring-2 ring-pink-500" : ""} ${isToday ? "font-bold" : ""} ${inTravel ? "ring-2 ring-sky-400" : ""}`}
+              className={`relative aspect-square rounded-lg text-[10px] flex flex-col items-center justify-center gap-0.5 transition border ${
+                isSelected ? "border-pink-500 bg-pink-50 dark:bg-pink-950/40" : "border-transparent"
+              } ${isToday ? "ring-1 ring-pink-400 font-bold" : ""} text-neutral-600 dark:text-neutral-300`}
             >
-              {parseISO(dateISO).d}
-              {isToday && <span className="absolute bottom-0.5 w-1 h-1 rounded-full bg-current" />}
-              {isTravelEdge && <span className="absolute -top-1 -left-1 text-[10px]">✈️</span>}
+              {isTravelEdge && <span className="absolute -top-2 text-[10px] leading-none">✈️</span>}
+              <span>{parseISO(dateISO).d}</span>
+              {inTravel ? (
+                <span className="text-[8px] leading-none">✈️</span>
+              ) : (
+                DOT_CLASS[cat] && <span className={`w-1.5 h-1.5 rounded-full ${DOT_CLASS[cat]}`} />
+              )}
             </button>
           );
         })}
       </div>
 
-      <div className="flex flex-wrap gap-x-3 gap-y-1 text-[9px] text-neutral-400">
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-rose-500" /> الدورة</span>
+      <div className="flex flex-wrap gap-x-3 gap-y-1 text-[9px] text-neutral-400 justify-center">
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-rose-400" /> الدورة</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-purple-500" /> التبويض</span>
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-300" /> نافذة الخصوبة</span>
-        {travelRange?.start && <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full ring-2 ring-sky-400" /> أيام الرحلة</span>}
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-400" /> نافذة الخصوبة</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-sky-300" /> أيام آمنة</span>
+        {travelRange?.start && <span className="flex items-center gap-1">✈️ أيام الرحلة</span>}
       </div>
 
       {selected && (
@@ -774,15 +792,46 @@ function PregnancyHomeTab({ settings }: { settings: Settings }) {
   }
   if (!info) return null;
 
+  // Round 42 — ريديزاين مبني حرفيًا على البروتوتايب المرجعي (index (2).html):
+  // حلقة تقدّم دائرية (SVG) بدل شريط تقدّم عريض، ورقم الأسبوع كبير في
+  // النص. الشهر التقويمي التقريبي ("الشهر ٦ من ١٠") بقى ظاهر جنب الأسبوع
+  // زي ما طلب المستخدم بالظبط ("حجم البيبي الأسبوع كذا = الشهر كذا").
+  const month = gestationalMonth(info.week);
+  const R = 60;
+  const CIRC = 2 * Math.PI * R;
+
   return (
     <div className="space-y-3">
-      <Card className="text-center space-y-2 bg-gradient-to-b from-pink-50 to-purple-50 dark:from-pink-950 dark:to-purple-950 border-none">
-        <p className="text-xs text-neutral-500">الأسبوع {info.week} + {info.day} يوم — الترايمستر {info.trimester === 1 ? "الأول" : info.trimester === 2 ? "الثاني" : "الثالث"}</p>
-        <div className="h-3 rounded-full bg-white/60 dark:bg-black/20 overflow-hidden">
-          <div className="h-full bg-purple-400" style={{ width: `${info.progressPct}%` }} />
+      <Card className="space-y-2">
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-semibold">🤰 متابعة الحمل</p>
+          <p className="text-xs text-neutral-400">الشهر {month} من 10</p>
         </div>
-        <p className="text-2xl font-bold">🍇 حجم البيبي دلوقتي: {fetalSize}</p>
-        <p className="text-xs text-neutral-500">موعد الولادة المتوقع: <b>{fmtDate(info.dueDate)}</b> (حسب قاعدة نيغيلي)</p>
+        <div className="relative flex items-center justify-center my-2">
+          <svg width="130" height="130" viewBox="0 0 130 130">
+            <circle cx="65" cy="65" r={R} fill="none" stroke="currentColor" strokeWidth="10" className="text-sky-50 dark:text-neutral-800" />
+            <circle
+              cx="65" cy="65" r={R} fill="none" stroke="currentColor" strokeWidth="10" strokeLinecap="round"
+              strokeDasharray={CIRC} strokeDashoffset={CIRC * (1 - info.progressPct / 100)}
+              transform="rotate(-90 65 65)" className="text-sky-400"
+            />
+          </svg>
+          <div className="absolute text-center">
+            <p className="text-3xl font-extrabold text-sky-500">{info.week}</p>
+            <p className="text-[11px] text-neutral-400">أسبوع و{info.day} يوم</p>
+          </div>
+        </div>
+        <p className="text-[11px] text-center text-neutral-400">الترايمستر {info.trimester === 1 ? "الأول" : info.trimester === 2 ? "الثاني" : "الثالث"}</p>
+        <div className="grid grid-cols-2 gap-2 text-center">
+          <div className="bg-sky-50 dark:bg-sky-950/40 rounded-xl p-2.5">
+            <p className="text-[10px] text-neutral-400">حجم الجنين تقريبًا</p>
+            <p className="font-bold text-sm">🍇 بحجم {fetalSize}</p>
+          </div>
+          <div className="bg-sky-50 dark:bg-sky-950/40 rounded-xl p-2.5">
+            <p className="text-[10px] text-neutral-400">الموعد المتوقع للولادة</p>
+            <p className="font-bold text-sm">{fmtDate(info.dueDate)}</p>
+          </div>
+        </div>
       </Card>
 
       <UltrasoundGallery />
@@ -1077,6 +1126,9 @@ function AppointmentsTab() {
         <Card className="space-y-2">
           <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="عنوان الموعد" className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+          {/* Round 42 — لينك المواعيد بتذكير تليجرام تلقائي (يوم قبل + يوم
+              الموعد نفسه)، بشرط إن الحساب متربط بالبوت من الإعدادات. */}
+          <p className="text-[11px] text-neutral-400">📲 لو حسابك متربط بتليجرام، هنفكّرك بالموعد ده يوم قبله وصبح يوم الموعد نفسه.</p>
           <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="ملاحظات (اختياري)" rows={2} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
           <label className="flex items-center gap-2 text-xs border border-dashed border-neutral-300 dark:border-neutral-700 rounded-lg px-3 py-2 cursor-pointer">
             {image ? "✅ صورة اتضافت" : "صورة سونار/روشتة (اختياري)"}
