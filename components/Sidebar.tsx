@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Wallet, Users, PlusCircle, Settings, Receipt, Wallet2, Repeat, CreditCard, Search, FileDown, BarChart3, Bell } from "lucide-react";
+import { LayoutDashboard, Wallet, Users, PlusCircle, Settings, Receipt, Wallet2, Repeat, CreditCard, Search, FileDown, BarChart3, Bell, Heart } from "lucide-react";
 
 // "التقويم" اتسمّى "التقارير" ونزل آخر عنصر فوق الإعدادات مباشرة (round 21)
 // — مش بس تقويم شهري، بقى فيه تحليلات وربط مباشر بالأقساط والجمعيات.
@@ -14,6 +14,7 @@ const items = [
   { href: "/planning", label: "التخطيط المالي", icon: Repeat },
   { href: "/installments", label: "أقساط وجمعيات", icon: CreditCard },
   { href: "/reminders", label: "التذكيرات", icon: Bell },
+  { href: "/laha", label: "لها", icon: Heart },
   { href: "/export", label: "تصدير كشف حساب", icon: FileDown },
   { href: "/calendar", label: "التقارير", icon: BarChart3 },
   { href: "/search", label: "البحث", icon: Search },
