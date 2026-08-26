@@ -112,6 +112,31 @@ const GROCERY_UNITS = [
   "كرتونة", "كوب", "عبوة",
 ];
 const CUSTOM_UNIT_VALUE = "__custom__";
+
+// Round 37 — نتيجة إكمال تلقائي واحدة من الكتالوج العام (market_catalog،
+// متغذّي من سكريبت سحب الأسعار — راجع lib/marketCatalog.ts).
+interface MarketSuggestion {
+  id: string;
+  item_name: string;
+  brand: string | null;
+  size_value: number | null;
+  unit_type: string | null;
+  store_name: string;
+  price: number;
+  currency: string;
+}
+
+// وحدات الكتالوج العام (زجاجة/كيس/صندوق/علبة/لتر/كيلو/جرام/قطعة — راجع
+// lib/marketCatalogParser.ts) مش نفس أسماء GROCERY_UNITS بالظبط ("صندوق"
+// هنا يقابل "صندوق كامل"، و"جرام" مالوش عمود مستقل أصلًا — بيتحط كوزن حر
+// (grams) تحت وحدة "كيلو" زي أي صنف كيلو تاني في التطبيق). الدالة دي بتحول
+// من تصنيف الكتالوج لشكل LineState الجاهز.
+function marketUnitToLine(unitType: string | null, sizeValue: number | null): { unit: string; quantity: number; grams: number | null } {
+  if (unitType === "صندوق") return { unit: "صندوق كامل", quantity: sizeValue || 1, grams: null };
+  if (unitType === "جرام") return { unit: "كيلو", quantity: 1, grams: sizeValue || null };
+  if (unitType && GROCERY_UNITS.includes(unitType)) return { unit: unitType, quantity: sizeValue || 1, grams: null };
+  return { unit: "", quantity: sizeValue || 1, grams: null };
+}
 // how many rows' worth of "no catalog match" names get sent to Gemini in one
 // call — the user hit a real quota-exceeded error and asked directly whether
 // to batch lookups instead of one-call-per-item; grouping by 3 cuts the call
@@ -252,6 +277,9 @@ function GroceryTab() {
   // Round 36 — قائمة الشيك بوكس السريعة (runQuickChecklist) لوحدها، منفصلة
   // عن matching (قائمة الأسعار المفصّلة) عشان اللودينج يظهر على الزرار الصح.
   const [quickListSaving, setQuickListSaving] = useState(false);
+  // Round 37 — نتائج الإكمال التلقائي من الكتالوج العام (market_catalog)
+  // لكل صف على حدة، بمفتاح id الصف — راجع fetchMarketSuggestions/adoptMarketSuggestion تحت.
+  const [marketSuggestions, setMarketSuggestions] = useState<Record<number, MarketSuggestion[]>>({});
   const [listName, setListName] = useState("");
   const [saving, setSaving] = useState(false);
   const [savedLists, setSavedLists] = useState<any[]>([]);
@@ -340,6 +368,56 @@ function GroceryTab() {
     aiFlushTimerRef.current = setTimeout(flushAiQueue, 900);
   };
 
+  // Round 37 — "تظهر قائمة إكمال تلقائي سريعة تبحث في الكلمات المفتاحية":
+  // بحث في الكتالوج العام المشترك (market_catalog، متغذّي من سكريبت السحب)
+  // — مستقل تمامًا عن matchRow (اللي بيبحث في كتالوج المستخدم الشخصي).
+  const fetchMarketSuggestions = async (id: number, name: string) => {
+    try {
+      const res = await fetch(`/api/reminders/grocery/search?q=${encodeURIComponent(name)}`);
+      const data = await res.json();
+      setMarketSuggestions((prev) => ({ ...prev, [id]: data.results || [] }));
+    } catch {
+      // best-effort — الإكمال التلقائي تحسين إضافي، مش أساسي لعمل الصف
+    }
+  };
+
+  // "عند اختيار المنتج، يتم ملء الحقول تلقائيًا: (اسم الصنف، الماركة،
+  // الوزن، وحدة القياس، المتجر، والسعر)" — بنملأ الصف من الاقتراح على طول،
+  // وبنادي adopt-market-price عشان ننسخ السعر ده لكتالوج المستخدم الشخصي
+  // (source: "market") زي أي سعر تاني هو اختاره.
+  const adoptMarketSuggestion = async (id: number, s: MarketSuggestion) => {
+    const mapped = marketUnitToLine(s.unit_type, s.size_value);
+    updateLine(id, {
+      raw_text: s.item_name,
+      unit: mapped.unit,
+      customUnitMode: false,
+      quantity: mapped.quantity,
+      grams: mapped.grams,
+    });
+    setMarketSuggestions((prev) => ({ ...prev, [id]: [] }));
+    try {
+      const res = await fetch("/api/reminders/grocery/adopt-market-price", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ market_id: s.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) return;
+      const options: OptionRow[] = data.options || [];
+      const opt = options.find((o) => o.store_name === s.store_name && Number(o.price) === s.price) || options[0] || null;
+      updateLine(id, {
+        item_id: data.item_id,
+        item_name: data.item_name,
+        options,
+        selectedOptionId: opt?.id || null,
+        resolvedVia: "catalog",
+        manualPrice: opt ? String(opt.price) : String(s.price),
+      });
+    } catch {
+      // best-effort — الحقول اتملت محليًا فوق حتى لو النسخ لكتالوج المستخدم فشل
+    }
+  };
+
   // Instant, local, no-Gemini-call catalog check for one row — if it misses,
   // the row is queued for the batched AI lookup automatically instead of
   // needing a manual "دوّر بالذكاء الاصطناعي" tap.
@@ -382,19 +460,30 @@ function GroceryTab() {
     if (rowTimersRef.current[id]) clearTimeout(rowTimersRef.current[id]);
     aiQueueRef.current = aiQueueRef.current.filter((q) => q.id !== id);
     const trimmed = value.trim();
-    if (trimmed.length < 2) return;
+    if (trimmed.length < 2) {
+      setMarketSuggestions((prev) => ({ ...prev, [id]: [] }));
+      return;
+    }
     const current = lines.find((l) => l.id === id);
     if (current && !current.unit && !current.customUnitMode) {
       const guessed = lookupDefaultUnit(trimmed);
       if (guessed) updateLine(id, { unit: guessed });
     }
-    rowTimersRef.current[id] = setTimeout(() => matchRow(id, trimmed), 700);
+    rowTimersRef.current[id] = setTimeout(() => {
+      matchRow(id, trimmed);
+      fetchMarketSuggestions(id, trimmed);
+    }, 700);
   };
 
   const addRow = () => setLines((prev) => [...prev, blankRow(nextIdRef.current++)]);
 
   const removeLine = (id: number) => {
     setLines((prev) => prev.filter((l) => l.id !== id));
+    setMarketSuggestions((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
     if (rowTimersRef.current[id]) { clearTimeout(rowTimersRef.current[id]); delete rowTimersRef.current[id]; }
     aiQueueRef.current = aiQueueRef.current.filter((q) => q.id !== id);
   };
@@ -793,6 +882,29 @@ function GroceryTab() {
                 <Trash2 size={14} />
               </button>
             </div>
+
+            {/* Round 37 — إكمال تلقائي من الكتالوج العام (سكريبت السحب):
+                "عند كتابة أي صنف ... تظهر قائمة إكمال تلقائي سريعة". */}
+            {(marketSuggestions[l.id]?.length ?? 0) > 0 && (
+              <div className="rounded-lg border border-neutral-200 dark:border-neutral-700 divide-y divide-neutral-100 dark:divide-neutral-800 overflow-hidden">
+                {marketSuggestions[l.id].map((s) => (
+                  <button
+                    key={s.id}
+                    onClick={() => adoptMarketSuggestion(l.id, s)}
+                    className="w-full text-right px-2 py-1.5 text-[11px] hover:bg-neutral-50 dark:hover:bg-neutral-800 flex items-center justify-between gap-2"
+                  >
+                    <span className="flex-1 truncate">
+                      {s.item_name}
+                      {s.brand ? ` — ${s.brand}` : ""}
+                      {s.size_value ? ` (${s.size_value} ${s.unit_type || ""})` : ""}
+                    </span>
+                    <span className="text-neutral-400 shrink-0">{s.store_name}</span>
+                    <span className="font-medium shrink-0">{fmt(s.price, s.currency)}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-2">
               {/* Round 36 — "زود اضافة وحدة قياس": بالإضافة لقائمة الوحدات
                   الموسّعة، خيار "وحدة أخرى" بيفتح خانة كتابة حرة. */}
@@ -918,6 +1030,8 @@ function GroceryTab() {
               <p className="text-lg font-bold text-orange-600">{fmt(total, "EGP")}</p>
             </div>
             <p className="text-[11px] text-neutral-400">ملحوظة: الأسعار متوسط استرشادي من كارفور، أمازون مصر، سبينيس، واللولو — ممكن تختلف شوية حسب الفرع.</p>
+            {/* Round 37 — نص التنبيه المطلوب حرفيًا تحت القائمة. */}
+            <p className="text-[11px] text-neutral-400">هذا السعر تقريبي بناءً على آخر تحديث لقائمة الأسعار المرتبطة بسيرفرات IDEA</p>
             <input placeholder="اسم القائمة (اختياري)" value={listName} onChange={(e) => setListName(e.target.value)} className={inputCls} />
             <div className="flex items-center gap-2 flex-wrap">
               <button onClick={saveList} disabled={saving} className={btnPrimary}>

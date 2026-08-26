@@ -1,0 +1,50 @@
+name: Market Price Scrape
+
+# Round 37 — تشغيل أسبوعي لسكريبت سحب أسعار السوق (Playwright) وحفظ
+# النتائج في قاعدة بيانات FlowCash. Vercel Hobby ماعندهوش cron أكتر من مرة
+# يوميًا، ومحتاجين مدة تنفيذ أطول من سيرفرليس عادي عشان متصفح Playwright —
+# فده بيشتغل على سيرفرات GitHub المجانية بدل كده، ومنفصل تمامًا عن نشر
+# التطبيق نفسه.
+#
+# محتاج سرّين متحطين في إعدادات الريبو (Settings → Secrets and variables →
+# Actions): FLOWCASH_APP_URL و MARKET_IMPORT_SECRET — راجع
+# scripts/market-scraper/README.md للتفاصيل.
+
+on:
+  schedule:
+    # كل يوم اتنين الساعة 3 صباحًا بتوقيت مصر (UTC+2، بدون توقيت صيفي منذ 2016)
+    - cron: "0 1 * * 1"
+  workflow_dispatch: {}
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        working-directory: scripts/market-scraper
+        run: |
+          pip install -r requirements.txt
+          playwright install --with-deps chromium
+
+      - name: Run scraper
+        working-directory: scripts/market-scraper
+        env:
+          FLOWCASH_APP_URL: ${{ secrets.FLOWCASH_APP_URL }}
+          MARKET_IMPORT_SECRET: ${{ secrets.MARKET_IMPORT_SECRET }}
+          SCRAPE_HEADLESS: "true"
+        run: python multi_source_scraper.py
+
+      - name: Upload scraped snapshot (artifact, for debugging)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: all_market_products
+          path: scripts/market-scraper/all_market_products.json
+          retention-days: 14

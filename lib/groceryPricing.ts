@@ -43,8 +43,13 @@ export interface GroceryOptionRow {
   store_name: string | null;
   price: number;
   currency: string;
-  source: "ai" | "manual";
+  source: "ai" | "manual" | "market";
   last_verified_at: string;
+  // Round 37 — راجع lib/marketCatalogParser.ts: الوزن/الحجم ونوع الوحدة
+  // المستخرجين من اسم المنتج (سكريبت السحب) أو من فاتورة، بيترحّلوا هنا
+  // لما يتسجل سعر جديد عشان يفضلوا مربوطين بيه.
+  size_value: number | null;
+  unit_type: string | null;
 }
 
 export interface GroceryMatch {
@@ -264,81 +269,105 @@ ${itemsList}
   }
 }
 
-// Persists AI-sourced options back to the user's own catalog (source: "ai")
-// so the next time they type the same item, lookupCatalog finds it instantly
-// with no further Gemini call — "حفظ الخيارات والأسعار الجديدة في قاعدة
-// البيانات لتغذية الكاش للأصناف القادمة" from the user's spec.
-export async function saveAiOptionsToCatalog(userId: string, itemName: string, options: AiPriceOption[]) {
-  const name_normalized = normalizeGroceryName(itemName);
-  const { data: existing } = await supabaseAdmin
-    .from("grocery_items")
-    .select("id,name")
-    .eq("user_id", userId)
-    .eq("name_normalized", name_normalized)
-    .maybeSingle();
-
-  let itemId = existing?.id as string | undefined;
-  if (!itemId) {
-    const { data: inserted, error } = await supabaseAdmin
-      .from("grocery_items")
-      .insert({ user_id: userId, name: itemName, name_normalized })
-      .select("id")
-      .single();
-    if (error) throw new Error(error.message);
-    itemId = inserted.id;
-  }
-
-  if (options.length) {
-    const rows = options.map((o) => ({
-      item_id: itemId,
-      brand: o.brand,
-      store_name: o.store_name,
-      price: o.price,
-      currency: o.currency,
-      source: "ai" as const,
-    }));
-    await supabaseAdmin.from("grocery_item_options").insert(rows);
-  }
-
-  const { data: allOptions } = await supabaseAdmin.from("grocery_item_options").select("*").eq("item_id", itemId).order("price", { ascending: true });
-  return { item_id: itemId as string, options: (allOptions as GroceryOptionRow[]) || [] };
-}
-
-// A manual entry — "سجّل السعر يدويًا" — for when there's no AI key yet, or
-// the user just knows the price and doesn't want to wait on a search call.
-// Separate from saveAiOptionsToCatalog (rather than reusing it with a
-// source override afterwards) so the inserted row is tagged "manual" from
-// the start, with no follow-up update needed.
-export async function saveManualOption(userId: string, itemName: string, option: { brand?: string | null; store_name?: string | null; price: number; currency?: string }) {
-  const name_normalized = normalizeGroceryName(itemName);
+// يرجّع item_id بتاع صنف معين لمستخدم — بيلاقيه لو موجود، أو ينشئه لو
+// جديد. مشترك بين save*ToCatalog/save*Option كلهم عشان منفكرش نفس المنطق
+// أكتر من مرة.
+async function findOrCreateItemId(userId: string, itemName: string, name_normalized: string): Promise<string> {
   const { data: existing } = await supabaseAdmin
     .from("grocery_items")
     .select("id")
     .eq("user_id", userId)
     .eq("name_normalized", name_normalized)
     .maybeSingle();
+  if (existing?.id) return existing.id as string;
 
-  let itemId = existing?.id as string | undefined;
-  if (!itemId) {
-    const { data: inserted, error } = await supabaseAdmin
-      .from("grocery_items")
-      .insert({ user_id: userId, name: itemName, name_normalized })
-      .select("id")
-      .single();
-    if (error) throw new Error(error.message);
-    itemId = inserted.id;
+  const { data: inserted, error } = await supabaseAdmin
+    .from("grocery_items")
+    .insert({ user_id: userId, name: itemName, name_normalized })
+    .select("id")
+    .single();
+  if (error) throw new Error(error.message);
+  return inserted.id as string;
+}
+
+// Round 37 — "لو موجود يتم تحديث سعره وتاريخه، لو جديد يتم إدراجه": بدل ما
+// كل استدعاء (بحث AI جديد، فاتورة تانية من نفس المتجر، سعر منسوخ من
+// الكتالوج العام) يضيف صف خيار جديد كل مرة ويكوّم صفوف مكررة لنفس
+// الصنف/المتجر بمرور الوقت، بندوّر على صف موجود بنفس (item_id, store_name)
+// ونعمله تحديث للسعر/التاريخ بدل إدراج جديد. صفوف بمتاجر مختلفة (أو بدون
+// اسم متجر) بتفضل منفصلة زي ما هي — دي مقارنة أسعار بين المتاجر مش تكرار.
+async function upsertOptionRow(
+  itemId: string,
+  opt: { brand?: string | null; store_name?: string | null; price: number; currency?: string; source: "ai" | "manual" | "market"; size_value?: number | null; unit_type?: string | null }
+): Promise<void> {
+  const storeName = opt.store_name || null;
+  let existingQuery = supabaseAdmin.from("grocery_item_options").select("id").eq("item_id", itemId);
+  existingQuery = storeName ? existingQuery.eq("store_name", storeName) : existingQuery.is("store_name", null);
+  const { data: existing } = await existingQuery.maybeSingle();
+
+  const payload = {
+    brand: opt.brand ?? null,
+    store_name: storeName,
+    price: opt.price,
+    currency: opt.currency || "EGP",
+    source: opt.source,
+    size_value: opt.size_value ?? null,
+    unit_type: opt.unit_type ?? null,
+    last_verified_at: new Date().toISOString(),
+  };
+
+  if (existing?.id) {
+    await supabaseAdmin.from("grocery_item_options").update(payload).eq("id", existing.id);
+  } else {
+    await supabaseAdmin.from("grocery_item_options").insert({ item_id: itemId, ...payload });
+  }
+}
+
+// Persists AI-sourced options back to the user's own catalog (source: "ai")
+// so the next time they type the same item, lookupCatalog finds it instantly
+// with no further Gemini call — "حفظ الخيارات والأسعار الجديدة في قاعدة
+// البيانات لتغذية الكاش للأصناف القادمة" from the user's spec.
+export async function saveAiOptionsToCatalog(
+  userId: string,
+  itemName: string,
+  options: (AiPriceOption & { size_value?: number | null; unit_type?: string | null })[]
+) {
+  const name_normalized = normalizeGroceryName(itemName);
+  const itemId = await findOrCreateItemId(userId, itemName, name_normalized);
+
+  for (const o of options) {
+    await upsertOptionRow(itemId, { ...o, source: "ai" });
   }
 
-  const { error: optErr } = await supabaseAdmin.from("grocery_item_options").insert({
-    item_id: itemId,
-    brand: option.brand || null,
-    store_name: option.store_name || "يدوي",
-    price: option.price,
-    currency: option.currency || "EGP",
-    source: "manual",
-  });
-  if (optErr) throw new Error(optErr.message);
+  const { data: allOptions } = await supabaseAdmin.from("grocery_item_options").select("*").eq("item_id", itemId).order("price", { ascending: true });
+  return { item_id: itemId, options: (allOptions as GroceryOptionRow[]) || [] };
+}
+
+// A manual entry — "سجّل السعر يدويًا" — for when there's no AI key yet, or
+// the user just knows the price and doesn't want to wait on a search call.
+export async function saveManualOption(userId: string, itemName: string, option: { brand?: string | null; store_name?: string | null; price: number; currency?: string }) {
+  const name_normalized = normalizeGroceryName(itemName);
+  const itemId = await findOrCreateItemId(userId, itemName, name_normalized);
+  await upsertOptionRow(itemId, { ...option, store_name: option.store_name || "يدوي", source: "manual" });
 
   const { data: allOptions } = await supabaseAdmin.from("grocery_item_options").select("*").eq("item_id", itemId).order("price", { ascending: true });
-  return { item_id: itemId as string, options: (allOptions as GroceryOptionRow[]) || [] };
+  return { item_id: itemId, options: (allOptions as GroceryOptionRow[]) || [] };
+}
+
+// Round 37 — "عند اختيار المنتج، يتم ملء الحقول تلقائيًا": المستخدم اختار
+// نتيجة من الإكمال التلقائي (كتالوج السوق العام market_catalog) — بننسخ
+// السعر/الماركة/الوزن/الوحدة دول لكتالوجه الشخصي (source: "market") بنفس
+// آلية upsertOptionRow، عشان يفضل موجود ليه في history/تصدير القوائم زي
+// أي سعر تاني اختاره.
+export async function saveMarketOption(
+  userId: string,
+  itemName: string,
+  option: { brand?: string | null; store_name: string; price: number; currency?: string; size_value?: number | null; unit_type?: string | null }
+) {
+  const name_normalized = normalizeGroceryName(itemName);
+  const itemId = await findOrCreateItemId(userId, itemName, name_normalized);
+  await upsertOptionRow(itemId, { ...option, source: "market" });
+
+  const { data: allOptions } = await supabaseAdmin.from("grocery_item_options").select("*").eq("item_id", itemId).order("price", { ascending: true });
+  return { item_id: itemId, options: (allOptions as GroceryOptionRow[]) || [] };
 }

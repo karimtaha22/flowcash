@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSessionUserId } from "@/lib/session";
 import { extractReceiptItems } from "@/lib/gemini";
 import { saveAiOptionsToCatalog } from "@/lib/groceryPricing";
+import { parseMarketProductName } from "@/lib/marketCatalogParser";
 
 // Round 33 — "ارفع إيصال السوبر ماركت لتحديث الأسعار ومساعدتك في الشراء
 // المرات القادمة". بيقرأ الإيصال بالذكاء الاصطناعي، وكل صنف طلع بيه اسم
@@ -22,8 +23,14 @@ export async function POST(req: NextRequest) {
   const saved: { name: string; price: number }[] = [];
   for (const item of result.items) {
     try {
+      // Round 37 — "استخراج بياناته وإدراجه تلقائيًا ... مع تصنيف الوحدة
+      // والماركة والمتجر": نفس الـ parser المستخدم لنتائج سكريبت السحب
+      // (lib/marketCatalogParser.ts) بيتشغّل على اسم الصنف زي ما ظهر في
+      // الفاتورة، فيستخرج ماركة/وزن/وحدة لو موجودين في النص، ويتسجلوا مع
+      // السعر بدل ما يتسجل السعر بس زي قبل الراوند ده.
+      const { brand, size_value, unit_type } = parseMarketProductName(item.name);
       await saveAiOptionsToCatalog(userId, item.name, [
-        { brand: null, store_name: result.store_name || "من الإيصال", price: item.price, currency: "EGP" },
+        { brand, store_name: result.store_name || "من الإيصال", price: item.price, currency: "EGP", size_value, unit_type },
       ]);
       saved.push(item);
     } catch {
