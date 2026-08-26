@@ -54,3 +54,24 @@ html {
 .animate-rose-breathe {
   animation: rose-breathe 2.6s ease-in-out infinite;
 }
+
+/* Round 40 — تقرير الطبيب القابل للطباعة (app/(protected)/laha/doctor-report):
+   الصفحة محاطة بشِل التطبيق العادي (Sidebar/BottomNav/Footer/إلخ من
+   ProtectedLayout) اللي مفيش داعي لظهوره في الطباعة. بدل ما نلمس كل مكوّن
+   مشترك ده، بنخفي كل حاجة في الصفحة وقت الطباعة إلا منطقة التقرير نفسها
+   (#print-area) — نفس الحيلة الشائعة لطباعة جزء واحد بس من صفحة أوسع. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #print-area,
+  #print-area * {
+    visibility: visible;
+  }
+  #print-area {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    padding: 1rem;
+  }
+}

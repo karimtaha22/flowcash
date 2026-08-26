@@ -1,13 +1,18 @@
 "use client";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import Card from "@/components/Card";
 import { shrinkImage } from "@/lib/image";
-import { todayISO, daysInMonth, firstWeekdayOfMonth, parseISO, ARABIC_MONTHS } from "@/lib/laha/dates";
-import { cycleInfo, cycleRegularity } from "@/lib/laha/cycle";
+import { todayISO, daysInMonth, firstWeekdayOfMonth, parseISO, ARABIC_MONTHS, addDays } from "@/lib/laha/dates";
+import {
+  cycleInfo, cycleRegularity, PRODUCTIVITY_MAP, detectGapFillers, waterRetentionInsight, describeTravelRange,
+  type CyclePhase,
+} from "@/lib/laha/cycle";
 import { pregnancyInfo, fetalSizeLabel, weekBucket } from "@/lib/laha/pregnancy";
 import {
   Heart, Baby, Calendar, Scale, StickyNote, Footprints, Timer, Stethoscope,
   Sparkles, PartyPopper, Copy, Lock, Unlock, Check, X, Wand2, ChevronRight, ChevronLeft, Search,
+  CalendarRange, Zap, Users, Plane, Printer,
 } from "lucide-react";
 
 // Round 38 — قسم "لها": متابعة الدورة الشهرية والحمل + حفلة "تيم بينك ولا
@@ -47,9 +52,11 @@ interface Settings {
 
 const TABS_CYCLE = [
   { key: "home", label: "الرئيسية", icon: Calendar },
+  { key: "planning", label: "التخطيط", icon: CalendarRange },
   { key: "weight", label: "الوزن", icon: Scale },
   { key: "notes", label: "ملاحظات", icon: StickyNote },
   { key: "advice", label: "نصايح البشرة", icon: Sparkles },
+  { key: "partner", label: "الشريك", icon: Users },
 ] as const;
 
 const TABS_PREGNANCY = [
@@ -62,6 +69,7 @@ const TABS_PREGNANCY = [
   { key: "weight", label: "الوزن", icon: Scale },
   { key: "notes", label: "ملاحظات", icon: StickyNote },
   { key: "advice", label: "نصايح الحمل", icon: Sparkles },
+  { key: "partner", label: "الشريك", icon: Users },
   { key: "reveal", label: "🎈 تيم بينك/بلو", icon: PartyPopper },
 ] as const;
 
@@ -179,7 +187,9 @@ export default function LahaPage() {
 
       {activeTabs === "home" && settings.mode === "cycle" && <CycleHomeTab settings={settings} />}
       {activeTabs === "home" && settings.mode === "pregnancy" && <PregnancyHomeTab settings={settings} />}
-      {activeTabs === "weight" && <WeightTab mode={settings.mode} />}
+      {activeTabs === "planning" && <PlanningTab settings={settings} />}
+      {activeTabs === "partner" && <PartnerSyncTab />}
+      {activeTabs === "weight" && <WeightTab settings={settings} />}
       {activeTabs === "notes" && <NotesTab />}
       {activeTabs === "kicks" && <KicksTab />}
       {activeTabs === "contractions" && <ContractionsTab />}
@@ -200,6 +210,8 @@ function CycleHomeTab({ settings }: { settings: Settings }) {
   const [info, setInfo] = useState<any>(null);
   const [regularity, setRegularity] = useState<string>("unknown");
   const [busy, setBusy] = useState(false);
+  const [gapBusy, setGapBusy] = useState(false);
+  const [dismissedGaps, setDismissedGaps] = useState<string[]>([]);
 
   const load = async () => {
     const d = await api("/api/laha/periods");
@@ -213,6 +225,27 @@ function CycleHomeTab({ settings }: { settings: Settings }) {
   }, [periods, settings.avg_cycle_length]);
 
   const activePeriod = periods.find((p) => !p.end_date);
+
+  // Round 40 — "التقدير الرجعي": فجوات كبيرة بين دورتين متسجلتين، بتتقترح
+  // بس لما المستخدمة توافق عليها صراحة (مفيش إضافة تلقائية أبدًا).
+  const gapFillers = detectGapFillers(periods, settings.avg_cycle_length).filter((g) => !dismissedGaps.includes(g.afterStart + g.beforeStart));
+  const applyGap = async (dates: string[], gapKey: string) => {
+    setGapBusy(true);
+    try {
+      await api("/api/laha/periods/backfill", { method: "POST", body: JSON.stringify({ dates, period_length: settings.avg_period_length }) });
+      setDismissedGaps((prev) => [...prev, gapKey]);
+      load();
+    } catch (e: any) { alert(e.message); } finally { setGapBusy(false); }
+  };
+  const applyAllGaps = async () => {
+    setGapBusy(true);
+    try {
+      const allDates = gapFillers.flatMap((g) => g.proposedDates);
+      await api("/api/laha/periods/backfill", { method: "POST", body: JSON.stringify({ dates: allDates, period_length: settings.avg_period_length }) });
+      setDismissedGaps((prev) => [...prev, ...gapFillers.map((g) => g.afterStart + g.beforeStart)]);
+      load();
+    } catch (e: any) { alert(e.message); } finally { setGapBusy(false); }
+  };
 
   const startPeriodOn = async (dateISO: string) => {
     setBusy(true);
@@ -281,16 +314,42 @@ function CycleHomeTab({ settings }: { settings: Settings }) {
         onDelete={deletePeriod}
       />
 
+      {gapFillers.length > 0 && (
+        <Card className="space-y-2 bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-900">
+          <p className="text-xs font-semibold text-amber-700 dark:text-amber-300">🔎 لاحظنا فجوة كبيرة بين دورتين متسجلتين</p>
+          {gapFillers.map((g) => (
+            <div key={g.afterStart + g.beforeStart} className="text-xs space-y-1.5">
+              <p className="text-neutral-500">بين {fmtDate(g.afterStart)} و{fmtDate(g.beforeStart)} — ممكن يكون فيه {g.proposedDates.length} دورة {g.proposedDates.length === 1 ? "متسجلتش" : "متسجلوش"}. حابة نضيفهم كتقدير؟</p>
+              <div className="flex flex-wrap gap-1.5">
+                {g.proposedDates.map((d) => (
+                  <span key={d} className="bg-white dark:bg-neutral-800 rounded-full px-2 py-0.5 text-[10px] border border-amber-200 dark:border-amber-800">{fmtDate(d)}</span>
+                ))}
+              </div>
+              <button disabled={gapBusy} onClick={() => applyGap(g.proposedDates, g.afterStart + g.beforeStart)} className="text-[11px] bg-amber-500 text-white rounded-lg px-3 py-1">تطبيق هذا التقدير</button>
+            </div>
+          ))}
+          {gapFillers.length > 1 && (
+            <button disabled={gapBusy} onClick={applyAllGaps} className="w-full text-xs bg-amber-600 text-white rounded-lg py-1.5 font-medium">تطبيق كل التقديرات دفعة واحدة</button>
+          )}
+        </Card>
+      )}
+
+      <DailyMicroLogCard />
+
       <Card className="flex items-center justify-between text-xs">
         <span className="text-neutral-400">انتظام الدورة (آخر ٦ دورات)</span>
         <span className="font-medium">{REGULARITY_LABEL[regularity]}</span>
       </Card>
 
+      <Link href="/laha/doctor-report" className="flex items-center justify-center gap-1.5 text-xs bg-neutral-800 dark:bg-neutral-200 text-white dark:text-neutral-900 rounded-xl py-2.5 font-medium">
+        <Printer size={14} /> تقرير جاهز للطبيبة
+      </Link>
+
       <Card className="space-y-2">
         <p className="text-xs font-semibold">آخر الدورات</p>
         {periods.slice(0, 6).map((p) => (
           <div key={p.id} className="flex items-center justify-between text-xs">
-            <span>{fmtDate(p.start_date)}{p.end_date ? ` → ${fmtDate(p.end_date)}` : " (مستمرة)"}</span>
+            <span>{fmtDate(p.start_date)}{p.end_date ? ` → ${fmtDate(p.end_date)}` : " (مستمرة)"}{p.estimated && <span className="text-neutral-400"> (تقدير)</span>}</span>
           </div>
         ))}
         {!periods.length && <p className="text-xs text-neutral-400">مفيش دورات مسجلة لسه</p>}
@@ -306,10 +365,11 @@ function CycleHomeTab({ settings }: { settings: Settings }) {
 const DOW_LABELS = ["أحد", "إثنين", "ثلاثاء", "أربعاء", "خميس", "جمعة", "سبت"];
 
 function CycleCalendar({
-  periods, avgCycleLength, activePeriodId, busy, onStart, onEnd, onDelete,
+  periods, avgCycleLength, activePeriodId, busy, onStart, onEnd, onDelete, travelRange,
 }: {
   periods: any[]; avgCycleLength: number; activePeriodId: string | null; busy: boolean;
   onStart: (d: string) => void; onEnd: (d: string) => void; onDelete: (id: string) => void;
+  travelRange?: { start: string; end: string } | null;
 }) {
   const today = parseISO(todayISO());
   const [viewY, setViewY] = useState(today.y);
@@ -323,6 +383,16 @@ function CycleCalendar({
     setViewY(y); setViewM(m);
     setSelected(null);
   };
+
+  // Round 40 — محاكي توافق السفر بيستخدم نفس مكوّن التقويم ده (`travelRange`
+  // prop) بدل ما يعمل تقويم منفصل — لما المدى يتغيّر، الشهر المعروض بيقفز
+  // تلقائيًا لشهر أول يوم في المدى.
+  useEffect(() => {
+    if (!travelRange?.start) return;
+    const p = parseISO(travelRange.start);
+    setViewY(p.y);
+    setViewM(p.m);
+  }, [travelRange?.start]);
 
   const numDays = daysInMonth(viewY, viewM);
   const startOffset = firstWeekdayOfMonth(viewY, viewM);
@@ -362,14 +432,17 @@ function CycleCalendar({
           const cat = categoryOf(dateISO);
           const isToday = dateISO === todayIso;
           const isSelected = dateISO === selected;
+          const inTravel = !!travelRange?.start && !!travelRange?.end && dateISO >= travelRange.start && dateISO <= travelRange.end;
+          const isTravelEdge = dateISO === travelRange?.start || dateISO === travelRange?.end;
           return (
             <button
               key={dateISO}
               onClick={() => setSelected(isSelected ? null : dateISO)}
-              className={`relative aspect-square rounded-lg text-[11px] flex items-center justify-center transition ${CATEGORY_CLASS[cat]} ${isSelected ? "ring-2 ring-pink-500" : ""} ${isToday ? "font-bold" : ""}`}
+              className={`relative aspect-square rounded-lg text-[11px] flex items-center justify-center transition ${CATEGORY_CLASS[cat]} ${isSelected ? "ring-2 ring-pink-500" : ""} ${isToday ? "font-bold" : ""} ${inTravel ? "ring-2 ring-sky-400" : ""}`}
             >
               {parseISO(dateISO).d}
               {isToday && <span className="absolute bottom-0.5 w-1 h-1 rounded-full bg-current" />}
+              {isTravelEdge && <span className="absolute -top-1 -left-1 text-[10px]">✈️</span>}
             </button>
           );
         })}
@@ -379,6 +452,7 @@ function CycleCalendar({
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-rose-500" /> الدورة</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-purple-500" /> التبويض</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-300" /> نافذة الخصوبة</span>
+        {travelRange?.start && <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full ring-2 ring-sky-400" /> أيام الرحلة</span>}
       </div>
 
       {selected && (
@@ -398,12 +472,248 @@ function CycleCalendar({
   );
 }
 
+// ─────────────────────────────── التخطيط (Round 40) ──────────────────────
+// تبويب "التخطيط" — سب-تابين زي ما وصف المستخدم في الملف المرجعي: ✈️ السفر
+// والمناسبات (محاكي التوافق + نفس مكوّن التقويم بـ overlay) و⚡ الطاقة
+// (خريطة الإنتاجية حسب المرحلة الهرمونية). تبويب "عاوزة بيبي" من نفس قسم
+// الملف المرجعي اتأجل لراوند قادم (خارج نطاق الميزات الست المتفق عليها).
+const SEGMENT_CATEGORY_CLASS: Record<string, string> = {
+  period: "border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/30",
+  ovulation: "border-purple-300 dark:border-purple-800 bg-purple-50 dark:bg-purple-950/30",
+  fertile: "border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30",
+  safe: "border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800",
+};
+
+function PlanningTab({ settings }: { settings: Settings }) {
+  const [sub, setSub] = useState<"travel" | "energy">("travel");
+  const [periods, setPeriods] = useState<any[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [tripStart, setTripStart] = useState("");
+  const [tripEnd, setTripEnd] = useState("");
+
+  const load = async () => { const d = await api("/api/laha/periods"); setPeriods(d.periods || []); };
+  useEffect(() => { load(); }, []);
+
+  const activePeriod = periods.find((p) => !p.end_date);
+  const startPeriodOn = async (dateISO: string) => {
+    setBusy(true);
+    try { await api("/api/laha/periods", { method: "POST", body: JSON.stringify({ start_date: dateISO }) }); load(); }
+    catch (e: any) { alert(e.message); } finally { setBusy(false); }
+  };
+  const endPeriodOn = async (dateISO: string) => {
+    if (!activePeriod) { alert("لازم تحددي بداية الدورة الأول"); return; }
+    setBusy(true);
+    try { await api(`/api/laha/periods/${activePeriod.id}`, { method: "PATCH", body: JSON.stringify({ end_date: dateISO }) }); load(); }
+    catch (e: any) { alert(e.message); } finally { setBusy(false); }
+  };
+  const deletePeriod = async (id: string) => {
+    setBusy(true);
+    try { await api(`/api/laha/periods/${id}`, { method: "DELETE" }); load(); }
+    catch (e: any) { alert(e.message); } finally { setBusy(false); }
+  };
+
+  const plan = tripStart && tripEnd ? describeTravelRange(periods, settings.avg_cycle_length, tripStart, tripEnd) : null;
+  const currentPhase = cycleInfo(periods, settings.avg_cycle_length)?.phase || null;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex rounded-full bg-neutral-100 dark:bg-neutral-800 p-0.5 text-xs">
+        <button onClick={() => setSub("travel")} className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-full font-medium ${sub === "travel" ? "bg-white dark:bg-neutral-700 shadow-sm" : "text-neutral-400"}`}>
+          <Plane size={13} /> السفر والمناسبات
+        </button>
+        <button onClick={() => setSub("energy")} className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-full font-medium ${sub === "energy" ? "bg-white dark:bg-neutral-700 shadow-sm" : "text-neutral-400"}`}>
+          <Zap size={13} /> الطاقة والإنتاجية
+        </button>
+      </div>
+
+      {sub === "travel" && (
+        <div className="space-y-3">
+          <Card className="space-y-2">
+            <p className="text-xs font-semibold">محاكي توافق السفر والمناسبات</p>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[10px] text-neutral-400">من</label>
+                <input type="date" value={tripStart} onChange={(e) => setTripStart(e.target.value)}
+                  className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 mt-0.5 text-xs" />
+              </div>
+              <div>
+                <label className="text-[10px] text-neutral-400">إلى</label>
+                <input type="date" value={tripEnd} onChange={(e) => setTripEnd(e.target.value)}
+                  className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 mt-0.5 text-xs" />
+              </div>
+            </div>
+            {tripStart && tripEnd && !plan && <p className="text-[11px] text-red-500">المدى غير صالح (لازم "إلى" يكون بعد "من"، وبحد أقصى ٦٠ يوم)</p>}
+          </Card>
+
+          {plan && (
+            <>
+              <Card className={`text-xs font-medium text-center ${plan.verdict === "safe" ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300" : "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300"}`}>
+                {plan.verdictText}
+              </Card>
+              <Card className="space-y-2">
+                {plan.segments.map((seg, i) => (
+                  <div key={i} className={`rounded-lg border p-2 text-xs space-y-0.5 ${SEGMENT_CATEGORY_CLASS[seg.category]}`}>
+                    <p className="font-medium">{seg.label}</p>
+                    <p className="text-neutral-500 dark:text-neutral-400">{seg.note}</p>
+                    {seg.extraNote && <p className="text-emerald-600 dark:text-emerald-400">{seg.extraNote}</p>}
+                  </div>
+                ))}
+              </Card>
+            </>
+          )}
+
+          <CycleCalendar
+            periods={periods}
+            avgCycleLength={settings.avg_cycle_length}
+            activePeriodId={activePeriod?.id || null}
+            busy={busy}
+            onStart={startPeriodOn}
+            onEnd={endPeriodOn}
+            onDelete={deletePeriod}
+            travelRange={tripStart && tripEnd ? { start: tripStart, end: tripEnd } : null}
+          />
+        </div>
+      )}
+
+      {sub === "energy" && (
+        <div className="space-y-3">
+          {currentPhase && (
+            <Card className="bg-gradient-to-b from-pink-50 to-purple-50 dark:from-pink-950 dark:to-purple-950 border-none text-center">
+              <p className="text-xs text-neutral-500">دلوقتي في</p>
+              <p className="text-lg font-bold">{PRODUCTIVITY_MAP[currentPhase].emoji} {PRODUCTIVITY_MAP[currentPhase].title}</p>
+            </Card>
+          )}
+          {(Object.keys(PRODUCTIVITY_MAP) as CyclePhase[]).map((ph) => (
+            <Card key={ph} className={`space-y-1.5 text-xs ${currentPhase === ph ? "ring-2 ring-pink-400" : ""}`}>
+              <p className="font-semibold">{PRODUCTIVITY_MAP[ph].emoji} {PHASE_LABEL_AR[ph]} — {PRODUCTIVITY_MAP[ph].title}</p>
+              <p><b>العمل:</b> {PRODUCTIVITY_MAP[ph].work}</p>
+              <p><b>الاجتماعي:</b> {PRODUCTIVITY_MAP[ph].social}</p>
+              <p><b>الرياضة:</b> {PRODUCTIVITY_MAP[ph].fitness}</p>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const PHASE_LABEL_AR: Record<string, string> = { menstrual: "الدورة", follicular: "ما بعد الدورة", ovulation: "فترة التبويض", luteal: "قبل الدورة" };
 
 function fmtDate(iso: string) {
   if (!iso) return "-";
   const [y, m, d] = iso.split("-");
   return `${d}/${m}/${y}`;
+}
+
+// ─────────────────────────── سجل اليوم السريع (Micro-Logs) ───────────────
+// Round 40 — الـ API (`/api/laha/daily-logs`) كان جاهز من راوند ٣٨ بلا أي
+// واجهة تستخدمه؛ دلوقتي بقى ليه بطاقة سريعة في الرئيسية — مطلوبة كمان
+// كأساس بيانات حقيقي لتقرير الطبيب وتحليل الأعراض المتكررة. كل ضغطة بتتحفظ
+// فورًا (autosave، من غير زرار حفظ منفصل) مع تأكيد "تم الحفظ ✓" بسيط.
+const MOOD_OPTIONS = [
+  { key: "happy", label: "مبسوطة 😊" }, { key: "calm", label: "هادية 🙂" }, { key: "tired", label: "متعبة 😴" },
+  { key: "sensitive", label: "حساسة 🥺" }, { key: "anxious", label: "قلقانة 😟" }, { key: "irritable", label: "سريعة الانفعال 😤" },
+];
+const PAIN_OPTIONS = [
+  { key: "headache", label: "صداع" }, { key: "cramps", label: "تشنجات" }, { key: "backache", label: "ألم ظهر" },
+  { key: "bloating", label: "انتفاخ" }, { key: "chest", label: "ثقل صدر" }, { key: "nausea", label: "غثيان" },
+];
+const FLOW_OPTIONS = [{ key: "light", label: "خفيف" }, { key: "medium", label: "متوسط" }, { key: "heavy", label: "غزير" }];
+
+function DailyMicroLogCard() {
+  const [mood, setMood] = useState<string | null>(null);
+  const [painTags, setPainTags] = useState<string[]>([]);
+  const [flow, setFlow] = useState<string | null>(null);
+  const [history, setHistory] = useState<any[]>([]);
+  const [saved, setSaved] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  const load = async () => {
+    try {
+      const from = addDays(todayISO(), -30);
+      const d = await api(`/api/laha/daily-logs?from=${from}`);
+      const logs = d.logs || [];
+      setHistory(logs);
+      const today = logs.find((l: any) => l.log_date === todayISO());
+      if (today) {
+        setMood(today.mood || null);
+        setPainTags(today.pain_tags || []);
+        setFlow(today.flow || null);
+      }
+    } finally {
+      setLoaded(true);
+    }
+  };
+  useEffect(() => { load(); }, []);
+
+  const save = async (patch: { mood?: string | null; pain_tags?: string[]; flow?: string | null }) => {
+    const nextMood = patch.mood !== undefined ? patch.mood : mood;
+    const nextPain = patch.pain_tags !== undefined ? patch.pain_tags : painTags;
+    const nextFlow = patch.flow !== undefined ? patch.flow : flow;
+    try {
+      await api("/api/laha/daily-logs", {
+        method: "POST",
+        body: JSON.stringify({ log_date: todayISO(), mood: nextMood, pain_tags: nextPain, flow: nextFlow }),
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1200);
+      load();
+    } catch {
+      // فشل شبكة عابر — مفيش داعي نزعج المستخدمة بـ alert لحاجة بسيطة زي دي
+    }
+  };
+
+  const toggleMood = (key: string) => { const next = mood === key ? null : key; setMood(next); save({ mood: next }); };
+  const togglePain = (key: string) => {
+    const next = painTags.includes(key) ? painTags.filter((t) => t !== key) : [...painTags, key];
+    setPainTags(next);
+    save({ pain_tags: next });
+  };
+  const toggleFlow = (key: string) => { const next = flow === key ? null : key; setFlow(next); save({ flow: next }); };
+
+  if (!loaded) return null;
+
+  return (
+    <Card className="space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold">إزيك النهاردة؟</p>
+        {saved && <span className="text-[10px] text-emerald-500">تم الحفظ ✓</span>}
+      </div>
+      <p className="text-[10px] text-neutral-400">دوسي على أي حاجة تنطبق عليكي — بيتحفظ فورًا من غير ما تعملي حاجة تانية.</p>
+
+      <div className="flex flex-wrap gap-1.5">
+        {MOOD_OPTIONS.map((o) => (
+          <button key={o.key} onClick={() => toggleMood(o.key)} className={`text-[11px] rounded-full px-2.5 py-1 ${mood === o.key ? "bg-pink-500 text-white" : "bg-neutral-100 dark:bg-neutral-800 text-neutral-500"}`}>{o.label}</button>
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {PAIN_OPTIONS.map((o) => (
+          <button key={o.key} onClick={() => togglePain(o.key)} className={`text-[11px] rounded-full px-2.5 py-1 ${painTags.includes(o.key) ? "bg-purple-500 text-white" : "bg-neutral-100 dark:bg-neutral-800 text-neutral-500"}`}>{o.label}</button>
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {FLOW_OPTIONS.map((o) => (
+          <button key={o.key} onClick={() => toggleFlow(o.key)} className={`text-[11px] rounded-full px-2.5 py-1 ${flow === o.key ? "bg-rose-500 text-white" : "bg-neutral-100 dark:bg-neutral-800 text-neutral-500"}`}>{o.label}</button>
+        ))}
+      </div>
+
+      {history.length > 0 && (
+        <details className="text-xs">
+          <summary className="text-neutral-400 cursor-pointer">سجل الأيام اللي فاتت ({history.length})</summary>
+          <div className="mt-2 space-y-1 max-h-48 overflow-y-auto">
+            {history.map((l) => (
+              <div key={l.log_date} className="flex items-center justify-between text-[11px] text-neutral-500">
+                <span>{fmtDate(l.log_date)}</span>
+                <span>
+                  {[l.mood && MOOD_OPTIONS.find((m) => m.key === l.mood)?.label, ...(l.pain_tags || []).map((t: string) => PAIN_OPTIONS.find((p) => p.key === t)?.label), l.flow && FLOW_OPTIONS.find((f) => f.key === l.flow)?.label].filter(Boolean).join("، ") || "-"}
+                </span>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+    </Card>
+  );
 }
 
 // ─────────────────────────────── متابعة الحمل ────────────────────────────
@@ -440,12 +750,27 @@ function PregnancyHomeTab({ settings }: { settings: Settings }) {
 
 // ─────────────────────────────── الوزن ──────────────────────────────────
 
-function WeightTab({ mode }: { mode: Mode }) {
+function WeightTab({ settings }: { settings: Settings }) {
+  const mode = settings.mode;
   const [weights, setWeights] = useState<any[]>([]);
+  const [phase, setPhase] = useState<CyclePhase | null>(null);
   const [w, setW] = useState("");
 
   const load = async () => { const d = await api("/api/laha/weights"); setWeights(d.weights || []); };
   useEffect(() => { load(); }, []);
+
+  // Round 40 — "ميزان احتباس السوائل" محتاج المرحلة الهرمونية الحالية، وده
+  // مفهوم بيخص وضع الدورة بس (مش الحمل).
+  useEffect(() => {
+    if (mode !== "cycle") { setPhase(null); return; }
+    (async () => {
+      try {
+        const d = await api("/api/laha/periods");
+        const info = cycleInfo(d.periods || [], settings.avg_cycle_length);
+        setPhase(info?.phase || null);
+      } catch { setPhase(null); }
+    })();
+  }, [mode, settings.avg_cycle_length]);
 
   const add = async () => {
     const val = Number(w);
@@ -457,23 +782,39 @@ function WeightTab({ mode }: { mode: Mode }) {
     } catch (e: any) { alert(e.message); }
   };
 
+  const retention = mode === "cycle" ? waterRetentionInsight(weights, phase) : null;
+  const RETENTION_CLASS: Record<string, string> = {
+    reassure: "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900",
+    flag: "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-900",
+    neutral: "bg-neutral-50 dark:bg-neutral-800 text-neutral-500 border-neutral-200 dark:border-neutral-700",
+  };
+
   return (
-    <Card className="space-y-3">
-      <div className="flex gap-2">
-        <input type="number" step="0.1" value={w} onChange={(e) => setW(e.target.value)} placeholder="الوزن اليوم (كجم)"
-          className="flex-1 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
-        <button onClick={add} className="bg-pink-500 text-white rounded-lg px-4 text-sm font-medium">حفظ</button>
-      </div>
-      <div className="space-y-1.5">
-        {[...weights].reverse().slice(0, 15).map((wt) => (
-          <div key={wt.id} className="flex items-center justify-between text-xs">
-            <span className="text-neutral-400">{fmtDate(wt.log_date)}</span>
-            <span className="font-medium">{wt.weight_kg} كجم</span>
-          </div>
-        ))}
-        {!weights.length && <p className="text-xs text-neutral-400 text-center py-2">مفيش تسجيلات وزن لسه</p>}
-      </div>
-    </Card>
+    <div className="space-y-3">
+      <Card className="space-y-3">
+        <div className="flex gap-2">
+          <input type="number" step="0.1" value={w} onChange={(e) => setW(e.target.value)} placeholder="الوزن اليوم (كجم)"
+            className="flex-1 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+          <button onClick={add} className="bg-pink-500 text-white rounded-lg px-4 text-sm font-medium">حفظ</button>
+        </div>
+        <div className="space-y-1.5">
+          {[...weights].reverse().slice(0, 15).map((wt) => (
+            <div key={wt.id} className="flex items-center justify-between text-xs">
+              <span className="text-neutral-400">{fmtDate(wt.log_date)}</span>
+              <span className="font-medium">{wt.weight_kg} كجم</span>
+            </div>
+          ))}
+          {!weights.length && <p className="text-xs text-neutral-400 text-center py-2">مفيش تسجيلات وزن لسه</p>}
+        </div>
+      </Card>
+
+      {retention && (
+        <Card className={`text-xs ${RETENTION_CLASS[retention.type]}`}>
+          <p className="font-medium mb-1">⚖️ ميزان احتباس السوائل</p>
+          <p>{retention.text}</p>
+        </Card>
+      )}
+    </div>
   );
 }
 
@@ -961,6 +1302,79 @@ function PregnancyAdviceTab({ settings }: { settings: Settings }) {
         </div>
       )}
     </Card>
+  );
+}
+
+// ─────────────────────────────── وضع الشريك الهادئ (Round 40) ────────────
+// "Partner Sync" من الملف المرجعي — لينك للشريك يشوف فيه ملخص مطمئن بسيط
+// (مزاج اليوم + المرحلة الهرمونية أو أسبوع الحمل) بدل ما يبقى محتاج يسأل
+// كل شوية. اللينك حقيقي في قاعدة البيانات (`laha_partner_links`) بمدة
+// صلاحية بتختارها المستخدمة، مش base64 مُرمّز جوه الـ URL زي البروتوتايب
+// المرجعي — راجع app/api/laha/partner-link و app/api/partner/[token].
+const VALIDITY_OPTIONS = [
+  { key: "6h", label: "٦ ساعات" },
+  { key: "24h", label: "٢٤ ساعة" },
+  { key: "3d", label: "٣ أيام" },
+  { key: "week", label: "أسبوع" },
+];
+
+function PartnerSyncTab() {
+  const [link, setLink] = useState<{ token: string; expires_at: string } | null>(null);
+  const [validity, setValidity] = useState("24h");
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [origin, setOrigin] = useState("");
+
+  useEffect(() => { setOrigin(window.location.origin); }, []);
+  const load = async () => {
+    try { const d = await api("/api/laha/partner-link"); setLink(d.link); } catch {}
+  };
+  useEffect(() => { load(); }, []);
+
+  const generate = async () => {
+    setBusy(true);
+    try {
+      const d = await api("/api/laha/partner-link", { method: "POST", body: JSON.stringify({ validity }) });
+      setLink(d.link);
+    } catch (e: any) { alert(e.message); } finally { setBusy(false); }
+  };
+
+  const shareLink = link ? `${origin}/partner/${link.token}` : "";
+  const copyLink = async () => {
+    try { await navigator.clipboard.writeText(shareLink); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
+  };
+  const expiresText = link ? new Date(link.expires_at).toLocaleString("ar-EG", { dateStyle: "short", timeStyle: "short" }) : "";
+
+  return (
+    <div className="space-y-3">
+      <Card className="space-y-3 text-center">
+        <Users className="mx-auto text-pink-400" size={28} />
+        <p className="text-sm text-neutral-500">ابعتي لينك لشريكك يشوف فيه ملخص بسيط عن مزاجك والمرحلة اللي فيها — من غير أي تفاصيل حساسة، وبمدة صلاحية تحددينها إنتي.</p>
+
+        <div className="flex flex-wrap gap-1.5 justify-center">
+          {VALIDITY_OPTIONS.map((o) => (
+            <button key={o.key} onClick={() => setValidity(o.key)} className={`text-xs rounded-full px-3 py-1.5 font-medium ${validity === o.key ? "bg-pink-500 text-white" : "bg-neutral-100 dark:bg-neutral-800 text-neutral-500"}`}>{o.label}</button>
+          ))}
+        </div>
+
+        <button onClick={generate} disabled={busy} className="w-full bg-pink-500 text-white rounded-xl py-2.5 text-sm font-medium">
+          {busy ? "لحظة واحدة..." : link ? "توليد لينك جديد" : "توليد لينك"}
+        </button>
+      </Card>
+
+      {link && (
+        <Card className="space-y-2">
+          <p className="text-[11px] text-neutral-400">صالح لحد: {expiresText}</p>
+          <div className="flex items-center gap-2">
+            <input readOnly value={shareLink} className="flex-1 text-xs rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 truncate" />
+            <button onClick={copyLink} className="shrink-0 bg-neutral-800 dark:bg-neutral-200 text-white dark:text-neutral-900 rounded-lg px-3 py-1.5"><Copy size={14} /></button>
+          </div>
+          {copied && <p className="text-[10px] text-emerald-500 text-center">اتنسخ! ✅</p>}
+          <a href={`https://wa.me/?text=${encodeURIComponent(`تابع حالتي: ${shareLink}`)}`} target="_blank" rel="noopener noreferrer"
+            className="block text-center text-xs bg-emerald-500 text-white rounded-lg py-2 font-medium">مشاركة على واتساب</a>
+        </Card>
+      )}
+    </div>
   );
 }
 
