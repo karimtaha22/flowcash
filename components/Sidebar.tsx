@@ -39,6 +39,29 @@ export default function Sidebar() {
       <nav className="flex-1 space-y-1">
         {items.map(({ href, label, icon: Icon }) => {
           const active = pathname === href || pathname?.startsWith(href + "/");
+          // طلب المستخدم صراحة: مفتاح "لها" في القائمة يتلون وردي (مش برتقالي
+          // زي باقي القائمة) لما نكون واقفين عليه أو بنعمله hover، وفي حالته
+          // العادية (مش واقفين عليه) يفضل جواه وردة صغيرة بتتنفس برفق
+          // (.animate-rose-breathe) — "شكل مريح للأعصاب".
+          if (href === "/laha") {
+            return (
+              <Link
+                key={href}
+                href={href}
+                className={`group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition ${
+                  active ? "bg-pink-500 text-white font-medium" : "text-neutral-400 hover:bg-pink-500/15 hover:text-pink-300"
+                }`}
+              >
+                <Icon size={18} />
+                {label}
+                {!active && (
+                  <span className="ms-auto animate-rose-breathe text-sm leading-none select-none" aria-hidden>
+                    🌹
+                  </span>
+                )}
+              </Link>
+            );
+          }
           return (
             <Link
               key={href}

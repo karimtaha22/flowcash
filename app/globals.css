@@ -36,3 +36,21 @@ html {
 .animate-marquee.marquee-paused {
   animation-play-state: paused;
 }
+
+/* Round 39 — قسم "لها": البيبي بيتحرك رايحة جاية جوه زرار اختيار الاسم وقت
+   التحميل، والوردة الصغيرة بتتنفس برفق جوه مفتاح "لها" في القائمة الجانبية
+   لما مايكونش متفعّل (طلب المستخدم صراحة: "شكل مريح للأعصاب"). */
+@keyframes baby-sway {
+  0%, 100% { transform: translateX(-8px) rotate(-6deg); }
+  50% { transform: translateX(8px) rotate(6deg); }
+}
+.animate-baby-sway {
+  animation: baby-sway 1.1s ease-in-out infinite;
+}
+@keyframes rose-breathe {
+  0%, 100% { transform: scale(0.92) rotate(-4deg); opacity: 0.75; }
+  50% { transform: scale(1.08) rotate(4deg); opacity: 1; }
+}
+.animate-rose-breathe {
+  animation: rose-breathe 2.6s ease-in-out infinite;
+}

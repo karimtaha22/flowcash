@@ -17,7 +17,7 @@ import { resolveGeminiConfig } from "@/lib/gemini";
 
 async function callGemini(prompt: string, schema: any, temperature = 0.6): Promise<{ ok: true; data: any } | { ok: false; error: string }> {
   const { apiKey, model } = await resolveGeminiConfig();
-  if (!apiKey) return { ok: false, error: "GEMINI_API_KEY مش متسجل — لا في Vercel ولا من إعدادات التوثيق في /admin. الميزة دي متوقفة مؤقتًا." };
+  if (!apiKey) return { ok: false, error: "الميزة دي متوقفة مؤقتًا، حاولي تاني بعدين." };
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
   try {
@@ -32,10 +32,10 @@ async function callGemini(prompt: string, schema: any, temperature = 0.6): Promi
     const data = await res.json();
     if (!res.ok) return { ok: false, error: data?.error?.message || `Gemini API error (${res.status})` };
     const text: string | undefined = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) return { ok: false, error: "مفيش رد واضح من جيمناي، حاول تاني." };
+    if (!text) return { ok: false, error: "معرفناش نجيب رد واضح دلوقتي، حاول تاني." };
     return { ok: true, data: JSON.parse(text) };
   } catch (e: any) {
-    return { ok: false, error: e?.message || "حصل خطأ ومقدرناش نتواصل مع جيمناي، حاول تاني." };
+    return { ok: false, error: "حصل خطأ ومقدرناش نكمل، حاول تاني." };
   }
 }
 
@@ -153,6 +153,34 @@ ${STRICT_MEDICAL_SAFETY_RULES}
     advice: String(result.data.advice).trim(),
     disclaimer: "نصيحة عامة مش بديلة عن استشارة طبيب/طبيبة جلدية.",
   };
+}
+
+// ─────────────────────────── معنى اسم (بحث حر) ───────────────────────────
+// Round 39 — "حط خانه اسال علي معني اسم": المستخدمة تكتب أي اسم وتسأل عن
+// معناه. نفس مبدأ "ممنوع تخمين" — لو الاسم مش معروف بمعنى موثق، بيرجع
+// found=false بدل ما "يخترع" معنى يبان مقنع.
+export interface NameMeaningResult {
+  ok: boolean;
+  found: boolean;
+  meaning: string;
+  error?: string;
+}
+
+const MEANING_SCHEMA = {
+  type: "object",
+  properties: {
+    found: { type: "boolean", description: "true لو الاسم ده معروف فعلاً ومعناه موثق ومعروف بشكل واسع" },
+    meaning: { type: "string", description: "معنى الاسم باختصار بالعربي — فاضي لو found=false" },
+  },
+  required: ["found", "meaning"],
+};
+
+export async function lookupNameMeaning(name: string): Promise<NameMeaningResult> {
+  const prompt = `ايه معنى الاسم العربي "${name}"؟ لو الاسم ده معروف فعلاً ومعناه موثق ومعروف بشكل واسع، رجّعي found=true ومعناه باختصار (جملة واحدة). لو مش متأكد، أو الاسم مش شائع، أو مالقيتش معنى موثوق له، رجّعي found=false ومعناه فاضي — ممنوع تخترعي معنى يبان مقنع. رجّعي JSON بس زي الـ schema.`;
+  const result = await callGemini(prompt, MEANING_SCHEMA, 0.2);
+  if (!result.ok) return { ok: false, found: false, meaning: "", error: result.error };
+  const found = !!result.data?.found;
+  return { ok: true, found, meaning: found ? String(result.data?.meaning || "").trim() : "" };
 }
 
 export async function getPregnancyAdvice(week: number, topic?: string | null): Promise<WellnessAdviceResult> {

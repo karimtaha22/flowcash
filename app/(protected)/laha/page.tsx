@@ -2,12 +2,12 @@
 import { useEffect, useState } from "react";
 import Card from "@/components/Card";
 import { shrinkImage } from "@/lib/image";
-import { todayISO } from "@/lib/laha/dates";
+import { todayISO, daysInMonth, firstWeekdayOfMonth, parseISO, ARABIC_MONTHS } from "@/lib/laha/dates";
 import { cycleInfo, cycleRegularity } from "@/lib/laha/cycle";
 import { pregnancyInfo, fetalSizeLabel, weekBucket } from "@/lib/laha/pregnancy";
 import {
   Heart, Baby, Calendar, Scale, StickyNote, Footprints, Timer, Stethoscope,
-  Sparkles, PartyPopper, Copy, Lock, Unlock, Check, X, Wand2,
+  Sparkles, PartyPopper, Copy, Lock, Unlock, Check, X, Wand2, ChevronRight, ChevronLeft, Search,
 } from "lucide-react";
 
 // Round 38 — قسم "لها": متابعة الدورة الشهرية والحمل + حفلة "تيم بينك ولا
@@ -22,6 +22,16 @@ import {
 // مشاركة الحالة المزاجية مع الشريك، خريطة الإنتاجية، تنبيه احتباس الماء) —
 // الأولوية اتوجهت للأجزاء اللي طلبها المستخدم صراحة (اقتراح الأسماء
 // والنصايح بالذكاء الاصطناعي، وحفلة الكشف عن نوع الجنين بالتفصيل).
+//
+// Round 39 — تعديلات بعد أول تجربة فعلية: (1) نصوص "من جيمناي"/"بنسأل
+// جيمناي" اتشالت من كل الواجهة — المستخدمة متشوفش تفاصيل إزاي الاقتراح
+// بيتحسب. (2) تقويم تفاعلي حقيقي في تبويب الدورة (`CycleCalendar`) — دوسي
+// على أي يوم تحددي بداية/نهاية الدورة بيه، بدل زرار "اليوم" بس. (3) تبويب
+// أسماء المولود اتعمله ريديزاين: "اختارلي اسم" بدل "اقتراح بالذكاء
+// الاصطناعي"، بيبي متحركة رايحة جاية جوه الزرار وقت التحميل، معالجة أشمل
+// للأخطاء (مفيش alert() بعد كده — رسالة داخل الكارت + إعادة محاولة)، خانة
+// "اسأل عن معنى اسم" جديدة، وخانة اسم الأب هنا نفسها عشان تتشاف الاسم كامل.
+// (4) بانر تذكير قبل الدورة القادمة (PMS/شنطة العناية) في الرئيسية.
 
 type Mode = "cycle" | "pregnancy";
 type Gender = "boy" | "girl";
@@ -175,7 +185,7 @@ export default function LahaPage() {
       {activeTabs === "contractions" && <ContractionsTab />}
       {activeTabs === "appointments" && <AppointmentsTab />}
       {activeTabs === "doctor" && settings.lmp && <DoctorQuestionsTab lmp={settings.lmp} />}
-      {activeTabs === "names" && <BabyNamesTab />}
+      {activeTabs === "names" && <BabyNamesTab settings={settings} saveSettings={saveSettings} />}
       {activeTabs === "advice" && settings.mode === "cycle" && <SkincareAdviceTab settings={settings} />}
       {activeTabs === "advice" && settings.mode === "pregnancy" && <PregnancyAdviceTab settings={settings} />}
       {activeTabs === "reveal" && <GenderRevealTab />}
@@ -204,22 +214,33 @@ function CycleHomeTab({ settings }: { settings: Settings }) {
 
   const activePeriod = periods.find((p) => !p.end_date);
 
-  const startPeriod = async () => {
+  const startPeriodOn = async (dateISO: string) => {
     setBusy(true);
     try {
-      await api("/api/laha/periods", { method: "POST", body: JSON.stringify({ start_date: todayISO() }) });
+      await api("/api/laha/periods", { method: "POST", body: JSON.stringify({ start_date: dateISO }) });
       load();
     } catch (e: any) { alert(e.message); } finally { setBusy(false); }
   };
-  const endPeriod = async () => {
+  const endPeriodOn = async (dateISO: string) => {
+    if (!activePeriod) { alert("لازم تحددي بداية الدورة الأول"); return; }
     setBusy(true);
     try {
-      await api(`/api/laha/periods/${activePeriod.id}`, { method: "PATCH", body: JSON.stringify({ end_date: todayISO() }) });
+      await api(`/api/laha/periods/${activePeriod.id}`, { method: "PATCH", body: JSON.stringify({ end_date: dateISO }) });
       load();
     } catch (e: any) { alert(e.message); } finally { setBusy(false); }
+  };
+  const deletePeriod = async (id: string) => {
+    setBusy(true);
+    try { await api(`/api/laha/periods/${id}`, { method: "DELETE" }); load(); }
+    catch (e: any) { alert(e.message); } finally { setBusy(false); }
   };
 
   const REGULARITY_LABEL: Record<string, string> = { regular: "منتظمة ✅", slight: "فيها تفاوت بسيط", irregular: "غير منتظمة", unknown: "لسه مفيش بيانات كفاية" };
+
+  // "شنطة العناية" — بانر لطيف من ٠-٣ أيام قبل الدورة المتوقعة.
+  const daysToNextPeriod = info?.nextPeriodDate ? Math.round((new Date(info.nextPeriodDate).getTime() - new Date(todayISO()).getTime()) / 86400000) : null;
+  const showCareBag = !activePeriod && daysToNextPeriod !== null && daysToNextPeriod >= 0 && daysToNextPeriod <= 3;
+  const showPms = !activePeriod && daysToNextPeriod !== null && daysToNextPeriod >= 0 && daysToNextPeriod <= 7;
 
   return (
     <div className="space-y-3">
@@ -231,13 +252,34 @@ function CycleHomeTab({ settings }: { settings: Settings }) {
             {info.fertileStart && <p className="text-xs text-neutral-400">فترة الخصوبة: {fmtDate(info.fertileStart)} - {fmtDate(info.fertileEnd)}</p>}
           </>
         ) : (
-          <p className="text-sm text-neutral-400">سجّلي أول دورة عشان يبدأ الحساب</p>
+          <p className="text-sm text-neutral-400">سجّلي أول دورة عشان يبدأ الحساب — دوسي على يوم في التقويم تحت</p>
         )}
-        <button onClick={activePeriod ? endPeriod : startPeriod} disabled={busy}
+        <button onClick={() => (activePeriod ? endPeriodOn(todayISO()) : startPeriodOn(todayISO()))} disabled={busy}
           className={`w-full rounded-xl py-2.5 text-sm font-semibold text-white ${activePeriod ? "bg-neutral-500" : "bg-pink-500"}`}>
           {activePeriod ? "انتهت الدورة اليوم" : "بدأت الدورة اليوم"}
         </button>
       </Card>
+
+      {showCareBag && (
+        <Card className="bg-pink-50 dark:bg-pink-950/40 border-pink-200 dark:border-pink-900 text-center text-xs font-medium text-pink-600 dark:text-pink-300">
+          🎒 جهزي شنطة العناية — الدورة متوقعة خلال {daysToNextPeriod === 0 ? "اليوم" : `${daysToNextPeriod} يوم`}
+        </Card>
+      )}
+      {showPms && !showCareBag && (
+        <Card className="bg-purple-50 dark:bg-purple-950/40 border-purple-200 dark:border-purple-900 text-center text-xs font-medium text-purple-600 dark:text-purple-300">
+          🌙 قربنا على الدورة — لو حاسة بتقلب مزاج أو نفاد صبر، ده طبيعي جدًا، خدي بالك من نفسك شوية
+        </Card>
+      )}
+
+      <CycleCalendar
+        periods={periods}
+        avgCycleLength={settings.avg_cycle_length}
+        activePeriodId={activePeriod?.id || null}
+        busy={busy}
+        onStart={startPeriodOn}
+        onEnd={endPeriodOn}
+        onDelete={deletePeriod}
+      />
 
       <Card className="flex items-center justify-between text-xs">
         <span className="text-neutral-400">انتظام الدورة (آخر ٦ دورات)</span>
@@ -254,6 +296,105 @@ function CycleHomeTab({ settings }: { settings: Settings }) {
         {!periods.length && <p className="text-xs text-neutral-400">مفيش دورات مسجلة لسه</p>}
       </Card>
     </div>
+  );
+}
+
+// تقويم شهري تفاعلي — دوسي على يوم تحددي بداية/نهاية الدورة بيه (طلب صريح:
+// "التقويم يظهر في الدورة وتختار بالضغط بداية الدورة أو نهايتها"). تلوين كل
+// يوم بيتحسب من `cycleInfo` بتاعته هو (مش "اليوم" العام) عشان يشتغل صح لأي
+// شهر ماضي أو مستقبلي.
+const DOW_LABELS = ["أحد", "إثنين", "ثلاثاء", "أربعاء", "خميس", "جمعة", "سبت"];
+
+function CycleCalendar({
+  periods, avgCycleLength, activePeriodId, busy, onStart, onEnd, onDelete,
+}: {
+  periods: any[]; avgCycleLength: number; activePeriodId: string | null; busy: boolean;
+  onStart: (d: string) => void; onEnd: (d: string) => void; onDelete: (id: string) => void;
+}) {
+  const today = parseISO(todayISO());
+  const [viewY, setViewY] = useState(today.y);
+  const [viewM, setViewM] = useState(today.m);
+  const [selected, setSelected] = useState<string | null>(null);
+
+  const changeMonth = (delta: number) => {
+    let m = viewM + delta, y = viewY;
+    if (m < 1) { m = 12; y -= 1; }
+    if (m > 12) { m = 1; y += 1; }
+    setViewY(y); setViewM(m);
+    setSelected(null);
+  };
+
+  const numDays = daysInMonth(viewY, viewM);
+  const startOffset = firstWeekdayOfMonth(viewY, viewM);
+  const cells: (string | null)[] = [...Array(startOffset).fill(null), ...Array.from({ length: numDays }, (_, i) => `${viewY}-${String(viewM).padStart(2, "0")}-${String(i + 1).padStart(2, "0")}`)];
+
+  const categoryOf = (dateISO: string): "period" | "ovulation" | "fertile" | "safe" => {
+    const info = cycleInfo(periods, avgCycleLength, dateISO);
+    if (!info) return "safe";
+    if (info.isPeriodDay) return "period";
+    if (info.ovulationDate === dateISO) return "ovulation";
+    if (info.fertileStart && info.fertileEnd && dateISO >= info.fertileStart && dateISO <= info.fertileEnd) return "fertile";
+    return "safe";
+  };
+
+  const CATEGORY_CLASS: Record<string, string> = {
+    period: "bg-rose-500 text-white",
+    ovulation: "bg-purple-500 text-white",
+    fertile: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300",
+    safe: "bg-neutral-50 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300",
+  };
+
+  const selectedExactPeriod = selected ? periods.find((p) => p.start_date === selected) : null;
+  const todayIso = todayISO();
+
+  return (
+    <Card className="space-y-3">
+      <div className="flex items-center justify-between">
+        <button onClick={() => changeMonth(1)} className="p-1 text-neutral-400"><ChevronRight size={16} /></button>
+        <p className="text-sm font-semibold">{ARABIC_MONTHS[viewM - 1]} {viewY}</p>
+        <button onClick={() => changeMonth(-1)} className="p-1 text-neutral-400"><ChevronLeft size={16} /></button>
+      </div>
+
+      <div className="grid grid-cols-7 gap-1 text-center">
+        {DOW_LABELS.map((d) => <span key={d} className="text-[9px] text-neutral-400">{d}</span>)}
+        {cells.map((dateISO, i) => {
+          if (!dateISO) return <span key={`empty-${i}`} />;
+          const cat = categoryOf(dateISO);
+          const isToday = dateISO === todayIso;
+          const isSelected = dateISO === selected;
+          return (
+            <button
+              key={dateISO}
+              onClick={() => setSelected(isSelected ? null : dateISO)}
+              className={`relative aspect-square rounded-lg text-[11px] flex items-center justify-center transition ${CATEGORY_CLASS[cat]} ${isSelected ? "ring-2 ring-pink-500" : ""} ${isToday ? "font-bold" : ""}`}
+            >
+              {parseISO(dateISO).d}
+              {isToday && <span className="absolute bottom-0.5 w-1 h-1 rounded-full bg-current" />}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="flex flex-wrap gap-x-3 gap-y-1 text-[9px] text-neutral-400">
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-rose-500" /> الدورة</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-purple-500" /> التبويض</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-300" /> نافذة الخصوبة</span>
+      </div>
+
+      {selected && (
+        <div className="rounded-xl bg-neutral-50 dark:bg-neutral-800 p-3 space-y-2">
+          <p className="text-xs font-medium text-center">{fmtDate(selected)}</p>
+          <div className="flex flex-wrap gap-2 justify-center">
+            <button disabled={busy} onClick={() => { onStart(selected); setSelected(null); }} className="text-xs bg-rose-500 text-white rounded-lg px-3 py-1.5">تعيين كبداية الدورة</button>
+            <button disabled={busy || !activePeriodId} onClick={() => { onEnd(selected); setSelected(null); }} className="text-xs bg-neutral-500 text-white rounded-lg px-3 py-1.5 disabled:opacity-40">تعيين كنهاية الدورة</button>
+            {selectedExactPeriod && (
+              <button disabled={busy} onClick={() => { onDelete(selectedExactPeriod.id); setSelected(null); }} className="text-xs bg-red-500 text-white rounded-lg px-3 py-1.5">حذف هذا التسجيل</button>
+            )}
+            <button onClick={() => setSelected(null)} className="text-xs border border-neutral-300 dark:border-neutral-700 rounded-lg px-3 py-1.5">إلغاء</button>
+          </div>
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -599,53 +740,131 @@ function DoctorQuestionsTab({ lmp }: { lmp: string }) {
 
 // ─────────────────────────────── أسماء المولود ───────────────────────────
 
-function BabyNamesTab() {
+function BabyNamesTab({ settings, saveSettings }: { settings: Settings; saveSettings: (patch: Partial<Settings>) => void }) {
   const [names, setNames] = useState<any[]>([]);
   const [gender, setGender] = useState<Gender>("girl");
   const [suggestions, setSuggestions] = useState<{ name: string; meaning: string }[]>([]);
-  const [suggestSource, setSuggestSource] = useState<string>("");
   const [busy, setBusy] = useState(false);
+  const [suggestError, setSuggestError] = useState("");
+  const [fatherName, setFatherName] = useState(settings.father_name || "");
+
+  const [meaningQuery, setMeaningQuery] = useState("");
+  const [meaningBusy, setMeaningBusy] = useState(false);
+  const [meaningResult, setMeaningResult] = useState<{ found: boolean; meaning: string; error?: string } | null>(null);
 
   const load = async () => { const d = await api("/api/laha/baby-names"); setNames(d.names || []); };
   useEffect(() => { load(); }, []);
+  useEffect(() => { setFatherName(settings.father_name || ""); }, [settings.father_name]);
+
+  const fullName = (n: string) => (fatherName.trim() ? `${n} ${fatherName.trim()}` : n);
 
   const suggest = async () => {
     setBusy(true);
+    setSuggestError("");
     try {
       const d = await api("/api/laha/baby-names/suggest", { method: "POST", body: JSON.stringify({ gender }) });
       setSuggestions(d.names || []);
-      setSuggestSource(d.source);
-    } catch (e: any) { alert(e.message); } finally { setBusy(false); }
+      if (!d.names?.length) setSuggestError("معرفناش نقترح أسماء دلوقتي، جربي تاني كمان شوية.");
+    } catch (e: any) {
+      setSuggestError(e.message || "حصل خطأ، جربي تاني.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const save = async (n: { name: string; meaning: string }) => {
-    await api("/api/laha/baby-names", { method: "POST", body: JSON.stringify({ ...n, gender, source: suggestSource === "ai" ? "ai" : "manual" }) });
+    await api("/api/laha/baby-names", { method: "POST", body: JSON.stringify({ ...n, gender, source: "manual" }) });
     setSuggestions((prev) => prev.filter((s) => s.name !== n.name));
     load();
   };
   const toggleSelect = async (id: string, selected: boolean) => { await api(`/api/laha/baby-names/${id}`, { method: "PATCH", body: JSON.stringify({ selected }) }); load(); };
   const del = async (id: string) => { await api(`/api/laha/baby-names/${id}`, { method: "DELETE" }); load(); };
 
+  const lookupMeaning = async () => {
+    const name = meaningQuery.trim();
+    if (!name) return;
+    setMeaningBusy(true);
+    setMeaningResult(null);
+    try {
+      const d = await api("/api/laha/baby-names/meaning", { method: "POST", body: JSON.stringify({ name }) });
+      setMeaningResult(d);
+    } catch (e: any) {
+      setMeaningResult({ found: false, meaning: "", error: e.message || "حصل خطأ" });
+    } finally {
+      setMeaningBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-3">
+      <Card className="space-y-2">
+        <p className="text-xs font-semibold">اسم الأب</p>
+        <input
+          value={fatherName}
+          onChange={(e) => setFatherName(e.target.value)}
+          onBlur={() => { if (fatherName !== (settings.father_name || "")) saveSettings({ father_name: fatherName || null }); }}
+          placeholder="اكتبي اسم الأب عشان تشوفي الاسم كامل"
+          className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm"
+        />
+      </Card>
+
       <Card className="space-y-3">
         <div className="flex gap-1.5">
           <button onClick={() => setGender("girl")} className={`flex-1 rounded-lg py-1.5 text-xs font-medium ${gender === "girl" ? "bg-pink-500 text-white" : "bg-neutral-100 dark:bg-neutral-800"}`}>بنت 💗</button>
           <button onClick={() => setGender("boy")} className={`flex-1 rounded-lg py-1.5 text-xs font-medium ${gender === "boy" ? "bg-sky-500 text-white" : "bg-neutral-100 dark:bg-neutral-800"}`}>ولد 💙</button>
         </div>
-        <button onClick={suggest} disabled={busy} className="w-full flex items-center justify-center gap-1.5 bg-purple-500 text-white rounded-xl py-2.5 text-sm font-medium">
-          <Wand2 size={15} /> {busy ? "بيفكر..." : "اقترح أسماء بالذكاء الاصطناعي"}
+        <button onClick={suggest} disabled={busy} className="relative w-full overflow-hidden flex items-center justify-center gap-1.5 bg-purple-500 text-white rounded-xl py-2.5 text-sm font-medium disabled:opacity-80">
+          {busy ? (
+            <>
+              <span className="inline-block animate-baby-sway text-base">👶</span>
+              <span>لحظة واحدة...</span>
+            </>
+          ) : (
+            <>👶 اختارلي اسم</>
+          )}
         </button>
-        {suggestSource === "fallback" && <p className="text-[10px] text-amber-600 text-center">جيمناي مش متاح دلوقتي — دي أسماء من قائمة احتياطية ثابتة</p>}
+        {suggestError && (
+          <div className="text-center space-y-1">
+            <p className="text-[11px] text-red-500">{suggestError}</p>
+            <button onClick={suggest} className="text-[11px] text-purple-500 underline">حاولي تاني</button>
+          </div>
+        )}
         {suggestions.map((s) => (
           <div key={s.name} className="flex items-center justify-between gap-2 text-xs bg-neutral-50 dark:bg-neutral-800 rounded-lg p-2">
             <div className="flex-1">
               <p className="font-medium">{s.name}</p>
               <p className="text-neutral-400">{s.meaning}</p>
+              {fatherName.trim() && <p className="text-neutral-400 mt-0.5">الاسم كامل: {fullName(s.name)}</p>}
             </div>
             <button onClick={() => save(s)} className="text-pink-500 shrink-0"><Heart size={16} /></button>
           </div>
         ))}
+      </Card>
+
+      <Card className="space-y-2">
+        <p className="text-xs font-semibold">اسألي عن معنى اسم</p>
+        <div className="flex gap-1.5">
+          <input
+            value={meaningQuery}
+            onChange={(e) => setMeaningQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") lookupMeaning(); }}
+            placeholder="اكتبي أي اسم"
+            className="flex-1 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm"
+          />
+          <button onClick={lookupMeaning} disabled={meaningBusy || !meaningQuery.trim()} className="shrink-0 bg-neutral-800 dark:bg-neutral-200 text-white dark:text-neutral-900 rounded-lg px-3 disabled:opacity-50">
+            <Search size={15} />
+          </button>
+        </div>
+        {meaningBusy && <p className="text-[11px] text-neutral-400 text-center">بندور على المعنى...</p>}
+        {!meaningBusy && meaningResult && (
+          meaningResult.found ? (
+            <p className="text-xs bg-neutral-50 dark:bg-neutral-800 rounded-lg p-2">{meaningResult.meaning}</p>
+          ) : (
+            <p className="text-[11px] text-amber-600 text-center">
+              {meaningResult.error ? meaningResult.error : "معرفناش نلاقي معنى موثوق للاسم ده."}
+            </p>
+          )
+        )}
       </Card>
 
       <Card className="space-y-2">
@@ -655,6 +874,7 @@ function BabyNamesTab() {
             <div className="flex-1">
               <p className="font-medium">{n.name} {n.gender === "girl" ? "💗" : "💙"}</p>
               {n.meaning && <p className="text-neutral-400">{n.meaning}</p>}
+              {fatherName.trim() && <p className="text-neutral-400 mt-0.5">الاسم كامل: {fullName(n.name)}</p>}
             </div>
             <button onClick={() => toggleSelect(n.id, !n.selected)} className={n.selected ? "text-pink-500" : "text-neutral-300"}>
               <Heart size={16} fill={n.selected ? "currentColor" : "none"} />
@@ -693,9 +913,9 @@ function SkincareAdviceTab({ settings }: { settings: Settings }) {
   return (
     <Card className="space-y-3 text-center">
       <Sparkles className="mx-auto text-purple-400" size={28} />
-      <p className="text-sm text-neutral-500">نصيحة عناية عامة بالبشرة حسب مرحلتك الهرمونية الحالية، من جيمناي — مبنية على قاعدة صارمة ضد أي معلومة طبية غير موثقة.</p>
+      <p className="text-sm text-neutral-500">نصيحة عناية عامة بالبشرة حسب مرحلتك الهرمونية الحالية.</p>
       <button onClick={ask} disabled={loading} className="w-full bg-purple-500 text-white rounded-xl py-2.5 text-sm font-medium">
-        {loading ? "بنسأل جيمناي..." : "اديني نصيحة"}
+        {loading ? "لحظة واحدة..." : "اديني نصيحة"}
       </button>
       {advice && (
         <div className="text-right space-y-1 bg-purple-50 dark:bg-purple-950/40 rounded-xl p-3">
@@ -728,10 +948,10 @@ function PregnancyAdviceTab({ settings }: { settings: Settings }) {
   return (
     <Card className="space-y-3 text-center">
       <Sparkles className="mx-auto text-purple-400" size={28} />
-      <p className="text-sm text-neutral-500">نصيحة عامة عن نمط الحياة في الأسبوع {week} من الحمل، من جيمناي بقاعدة صارمة ضد أي معلومة طبية غير موثقة.</p>
+      <p className="text-sm text-neutral-500">نصيحة عامة عن نمط الحياة في الأسبوع {week} من الحمل.</p>
       <input value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="موضوع معين (اختياري)" className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm text-right" />
       <button onClick={ask} disabled={loading} className="w-full bg-purple-500 text-white rounded-xl py-2.5 text-sm font-medium">
-        {loading ? "بنسأل جيمناي..." : "اديني نصيحة"}
+        {loading ? "لحظة واحدة..." : "اديني نصيحة"}
       </button>
       {advice && (
         <div className="text-right space-y-1 bg-purple-50 dark:bg-purple-950/40 rounded-xl p-3">

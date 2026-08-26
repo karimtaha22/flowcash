@@ -51,6 +51,17 @@ export function isValidISO(iso: string): boolean {
   return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
 }
 
+// Round 39 — شبكة تقويم شهري تفاعلي (`CycleCalendar`). زي كل تواريخ الملف
+// ده: حساب خالص عن طريق `Date.UTC()` بس، من غير أي `toISOString()` أو
+// اعتماد على توقيت الجهاز — آمن من نفس باج التوقيت الموصوف فوق.
+export function daysInMonth(y: number, m: number): number {
+  return new Date(Date.UTC(y, m, 0)).getUTCDate();
+}
+
+export function firstWeekdayOfMonth(y: number, m: number): number {
+  return new Date(Date.UTC(y, m - 1, 1)).getUTCDay();
+}
+
 export const ARABIC_MONTHS = [
   "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
   "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر",
