@@ -18,6 +18,6 @@
   "shortcuts": [
     { "name": "مصروف جديد", "short_name": "مصروف", "url": "/add?type=expense", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] },
     { "name": "دخل جديد", "short_name": "دخل", "url": "/add?type=income", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] },
-    { "name": "الحركة", "short_name": "الحركة", "url": "/activity", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] }
+    { "name": "الحركات المالية", "short_name": "الحركات", "url": "/activity", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] }
   ]
 }

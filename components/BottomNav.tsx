@@ -8,7 +8,7 @@ import { LayoutDashboard, Wallet, Users, PlusCircle, Repeat, CreditCard, Receipt
 const items = [
   { href: "/dashboard", label: "الرئيسية", icon: LayoutDashboard },
   { href: "/accounts", label: "الحسابات", icon: Wallet },
-  { href: "/activity", label: "الحركة", icon: Receipt },
+  { href: "/activity", label: "الحركات", icon: Receipt },
   { href: "/add", label: "إضافة", icon: PlusCircle },
   { href: "/people", label: "الأشخاص", icon: Users },
   { href: "/planning", label: "التخطيط", icon: Repeat },

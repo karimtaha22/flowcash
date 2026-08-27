@@ -9,7 +9,7 @@ import { checkUnlockToken, UNLOCK_COOKIE_PREFIX } from "@/lib/laha/unlockToken";
 // حتى لو الأم فتحت أدوات المطوّر وشافت رد الـ API، مفيش أي طريقة تعرف بيها
 // النوع أو الـ PIN قبل ما "تفتح" غرفة الأم بنفسها بالرقم اللي الدكتور
 // أعطاها إياه، أو قبل ما "تكشف" هي بنفسها بالضغط على البالون.
-function publicPartyShape(party: any, unlocked: boolean) {
+function publicPartyShape(party: any, unlocked: boolean, selectedName: string | null = null) {
   return {
     id: party.id,
     status: party.status,
@@ -19,6 +19,9 @@ function publicPartyShape(party: any, unlocked: boolean) {
     instapay_link: party.instapay_link,
     share_token: party.share_token,
     unlocked,
+    // Round 46 — لو الكشف حصل وفيه اسم "مختار" بنفس النوع، الواجهة بتحطه
+    // مكان أيقونة الاحتفال بدل ما تفضل أيقونة عامة من غير معنى.
+    selected_name: party.popped ? selectedName : null,
   };
 }
 
@@ -32,17 +35,22 @@ export async function GET(req: NextRequest) {
   const unlockCookie = req.cookies.get(`${UNLOCK_COOKIE_PREFIX}${party.id}`)?.value;
   const unlocked = checkUnlockToken(unlockCookie, party.id);
 
-  const [{ count: boyVotes }, { count: girlVotes }] = await Promise.all([
+  const [{ count: boyVotes }, { count: girlVotes }, { data: selectedNames }] = await Promise.all([
     supabaseAdmin.from("laha_gender_reveal_votes").select("id", { count: "exact", head: true }).eq("party_id", party.id).eq("vote", "boy"),
     supabaseAdmin.from("laha_gender_reveal_votes").select("id", { count: "exact", head: true }).eq("party_id", party.id).eq("vote", "girl"),
+    party.popped
+      ? supabaseAdmin.from("laha_baby_names").select("name,gender").eq("user_id", userId).eq("selected", true).order("created_at", { ascending: false }).limit(20)
+      : Promise.resolve({ data: null }),
   ]);
   const { count: guestbookCount } = await supabaseAdmin
     .from("laha_gender_reveal_guestbook")
     .select("id", { count: "exact", head: true })
     .eq("party_id", party.id);
 
+  const selectedName = party.popped && selectedNames?.length ? (selectedNames.find((n: any) => n.gender === party.gender)?.name || null) : null;
+
   return NextResponse.json({
-    party: publicPartyShape(party, unlocked),
+    party: publicPartyShape(party, unlocked, selectedName),
     votes: { boy: boyVotes || 0, girl: girlVotes || 0 },
     guestbook_count: guestbookCount || 0,
   });

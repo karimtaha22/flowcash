@@ -180,7 +180,7 @@ export default function CalendarPage() {
         <div className="grid grid-cols-1 gap-3">
           {snapshot && (
             <Card className="space-y-2 !bg-neutral-950 !border-neutral-800 text-white">
-              <p className="text-xs font-semibold text-neutral-300 flex items-center gap-1.5"><Wallet size={14} /> كل قرش داخل وخارج — نظرة شاملة</p>
+              <p className="text-xs font-semibold text-neutral-300 flex items-center gap-1.5"><Wallet size={14} /> نظرة شاملة</p>
               <div className="grid grid-cols-2 gap-2 text-[11px]">
                 <div className="bg-neutral-900 rounded-lg p-2">
                   <p className="text-neutral-400">دخلك الشهري التقريبي</p>

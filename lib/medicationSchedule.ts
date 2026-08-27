@@ -32,13 +32,23 @@ export const MEAL_TIMING_LABELS: Record<string, string> = {
   after_dinner: "بعد العشاء",
 };
 
+// Round 46 — طلب المستخدم توسيع قائمة أشكال الدواء (كانت ٦ أشكال بس) لتغطية
+// الأشكال الشائعة كلها، مع تجميع الأشكال المتقاربة (اللي المستخدم كتبها
+// بشرطة مائلة "/" بينها) في خيار واحد بدل ما تتفرق لخيارات منفصلة.
 export const MEDICATION_FORM_LABELS: Record<string, string> = {
-  injection: "حقنة",
-  capsule: "كبسولة",
   tablet: "قرص / برشامة",
-  effervescent: "فوار",
-  syrup: "شراب",
+  capsule: "كبسولة",
+  cream: "كريم / مرهم / جل",
+  lotion: "لوشن",
+  syrup: "شراب / معلق",
   drops: "نقط",
+  injection: "حقنة",
+  suppository: "لبوس (تحاميل)",
+  effervescent: "فوار",
+  spray: "بخاخ",
+  patch: "لصقة طبية",
+  lozenge: "قرص مص / مضغ",
+  strip: "شريط ذائب",
 };
 
 // Round 30 — schedule_type widened beyond meal/interval to also support

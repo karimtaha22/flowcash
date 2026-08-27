@@ -112,6 +112,9 @@ export default function GenderRevealGuestPage({ params }: { params: Promise<{ to
   };
 
   const submitGuestbook = async () => {
+    // Round 46 — بلاغ المستخدم: قدر يبعت تهنئة من غير ما يختار تصويته
+    // (ولد/بنت) خالص. لازم يختار قبل ما نسمحله يبعت.
+    if (!myVote) { setMsg("لازم تختار تصويتك (ولد ولا بنت) الأول فوق قبل ما تبعت التهنئة"); return; }
     if (!message.trim()) { setMsg("اكتبي رسالة تهنئة"); return; }
     setSubmitting(true);
     setMsg("");
@@ -162,7 +165,13 @@ export default function GenderRevealGuestPage({ params }: { params: Promise<{ to
 
       {data.popped ? (
         <Card className="text-center space-y-3 bg-gradient-to-b from-pink-50 to-sky-50 dark:from-pink-950 dark:to-sky-950 border-none">
-          <PartyPopper className={`mx-auto ${data.gender === "boy" ? "text-sky-500" : "text-pink-500"}`} size={40} />
+          {/* Round 46 — لو فيه اسم "مختار" بنفس النوع، يتحط مكان أيقونة
+              الاحتفال بدل ما تفضل أيقونة عامة من غير معنى. */}
+          {data.selected_name ? (
+            <p className={`text-2xl font-extrabold ${data.gender === "boy" ? "text-sky-500" : "text-pink-500"}`}>{data.selected_name}</p>
+          ) : (
+            <PartyPopper className={`mx-auto ${data.gender === "boy" ? "text-sky-500" : "text-pink-500"}`} size={40} />
+          )}
           <p className="text-sm text-neutral-600 dark:text-neutral-300 leading-relaxed">{GENDER_REVEAL_DUA}</p>
           <h2 className="text-xl font-bold">{genderRevealCongrats(data.gender)}</h2>
           {data.media_data_url && (
@@ -185,9 +194,9 @@ export default function GenderRevealGuestPage({ params }: { params: Promise<{ to
             <span className="text-sky-600 dark:text-sky-400">ولد {data.votes.boy}</span>
             <button
               onClick={async () => { setRefreshing(true); try { await load(); } finally { setRefreshing(false); } }}
-              className="text-neutral-400 flex items-center gap-1 text-[10px] font-normal"
+              className="text-neutral-500 dark:text-neutral-300 flex items-center gap-1.5 text-xs font-medium bg-neutral-100 dark:bg-neutral-800 rounded-full px-3 py-1.5"
             >
-              <RefreshCw size={12} className={refreshing ? "animate-spin" : ""} /> تحديث
+              <RefreshCw size={16} className={refreshing ? "animate-spin" : ""} /> تحديث
             </button>
             <span className="text-pink-600 dark:text-pink-400">{data.votes.girl} بنت</span>
           </div>
@@ -275,8 +284,9 @@ export default function GenderRevealGuestPage({ params }: { params: Promise<{ to
             </label>
           )}
 
+          {!myVote && <p className="text-xs text-center text-amber-600 dark:text-amber-400">اختاري تصويتك (ولد ولا بنت) فوق الأول</p>}
           {msg && <p className="text-xs text-center text-red-500">{msg}</p>}
-          <button onClick={submitGuestbook} disabled={submitting} className="w-full bg-pink-500 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50">
+          <button onClick={submitGuestbook} disabled={submitting || !myVote} className="w-full bg-pink-500 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50">
             {submitting ? "جاري الإرسال..." : "إرسال التهنئة"}
           </button>
         </Card>

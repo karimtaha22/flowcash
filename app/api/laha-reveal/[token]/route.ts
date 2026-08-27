@@ -38,5 +38,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ tok
     votes: { boy: boyVotes || 0, girl: girlVotes || 0 },
     instapay_link: party.instapay_link || null,
     gift_label: giftName ? `ابعت نقطة ${giftName}` : "ابعت نقطة البيبي",
+    // Round 46 — نفس اسم "النقطة" الديناميكي، لكن هنا خام (من غير جملة
+    // "ابعت نقطة") عشان الواجهة تحطه مكان أيقونة الاحتفال وقت الكشف.
+    selected_name: giftName,
   });
 }

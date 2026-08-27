@@ -67,6 +67,34 @@ html {
 .animate-neon-tab {
   animation: neon-tab 2.2s ease-in-out infinite;
 }
+/* Round 46 — طلب المستخدم: مفتاح "لها" في القائمة الجانبية (حالته العادية،
+   مش واقف عليه) يتلون وردي فاتح خفيف (مش الرمادي المستخدم لباقي القائمة)،
+   ومعاه إضاءة/توهج بيدور حواليه — نفس فلسفة .animate-neon-tab بس كـbox-shadow
+   حوالين الصف كله (مفيش border هنا فالـborder-color مش هيتلاحظ). */
+@keyframes laha-nav-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(236, 72, 153, 0.18); }
+  50% { box-shadow: 0 0 12px 2.5px rgba(236, 72, 153, 0.45); }
+}
+.animate-laha-nav-glow {
+  animation: laha-nav-glow 2.4s ease-in-out infinite;
+}
+/* Round 46 — "تم اختيار الاسم": لون نيون بينك ونور بيمشي جوه الاسم نفسه —
+   gradient متحرك بـbackground-clip:text (نفس الحيلة الشائعة لتأثير النيون
+   المتحرك) بدل لون ثابت. */
+@keyframes neon-name-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.neon-name-text {
+  background-image: linear-gradient(90deg, #ec4899 0%, #f9a8d4 22%, #ffffff 50%, #f9a8d4 78%, #ec4899 100%);
+  background-size: 220% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: #ec4899;
+  -webkit-text-fill-color: transparent;
+  animation: neon-name-shimmer 2.8s linear infinite;
+  text-shadow: 0 0 14px rgba(236, 72, 153, 0.4);
+}
 
 /* Round 40 — تقرير الطبيب القابل للطباعة (app/(protected)/laha/doctor-report):
    الصفحة محاطة بشِل التطبيق العادي (Sidebar/BottomNav/Footer/إلخ من

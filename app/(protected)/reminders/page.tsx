@@ -1394,8 +1394,6 @@ function GeneralTab() {
 
 /* ============================= أدوية وروشتات ============================= */
 
-const FORM_EMOJI: Record<string, string> = { injection:"", capsule:"", tablet:"", effervescent:"", syrup:"", drops:""};
-
 // Round 30 — full set of schedule types (was meal/interval only).
 const SCHEDULE_TYPES: string[] = ["meal", "interval", "daily", "weekly", "monthly"];
 // "بداية أول جرعة" only matters as an anchor for schedules that repeat by a
@@ -1796,7 +1794,7 @@ function MedicationsTab() {
     const medRows = meds
       .map(
         (m) => `<tr>
-          <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:12px;${cellWrap}">${FORM_EMOJI[m.form] || ""} ${escapeHtml(m.name)}</td>
+          <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:12px;${cellWrap}">${escapeHtml(m.name)}</td>
           <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;${cellWrap}">${medScheduleLabelHtml(m)}</td>
           <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;">${ltrIsolate(`${m.remaining_doses ?? "-"} / ${m.pack_size ?? "-"}`)}</td>
         </tr>`
@@ -1916,7 +1914,7 @@ function MedicationsTab() {
       const rows = groupMeds
         .map(
           (m) => `<tr>
-            <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:12px;${cellWrap}">${FORM_EMOJI[m.form] || ""} ${escapeHtml(m.name)}</td>
+            <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:12px;${cellWrap}">${escapeHtml(m.name)}</td>
             <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;${cellWrap}">${medScheduleLabelHtml(m)}</td>
           </tr>`
         )
@@ -2006,7 +2004,7 @@ function MedicationsTab() {
         <div className="flex flex-wrap gap-1">
           {Object.entries(MEDICATION_FORM_LABELS).map(([key, label]) => (
             <button key={key} onClick={() => setEditMedForm({ ...editMedForm, formType: key })} className={`px-2 py-1 rounded-lg text-xs border ${editMedForm.formType === key ? "bg-orange-500 text-white border-orange-500" : "border-neutral-300 dark:border-neutral-700"}`}>
-              {FORM_EMOJI[key]} {label}
+              {label}
             </button>
           ))}
         </div>
@@ -2074,7 +2072,7 @@ function MedicationsTab() {
     ) : (
       <Card key={m.id} className="space-y-1">
         <div className="flex items-center justify-between">
-          <p className="text-sm font-medium">{FORM_EMOJI[m.form] || <Pill size={14} className="inline" />} {m.name}{m.source === "telegram" ? " (تليجرام)" : ""}</p>
+          <p className="text-sm font-medium"><Pill size={14} className="inline" /> {m.name}{m.source === "telegram" ? " (تليجرام)" : ""}</p>
           <Switch checked={m.reminder_enabled} onChange={(v) => toggleReminder(m.id, v)} />
         </div>
         <p className="text-xs text-neutral-400">
@@ -2107,7 +2105,7 @@ function MedicationsTab() {
         <div className="flex flex-wrap gap-1">
           {Object.entries(MEDICATION_FORM_LABELS).map(([key, label]) => (
             <button key={key} onClick={() => setForm({ ...form, formType: key })} className={`px-2 py-1 rounded-lg text-xs border ${form.formType === key ? "bg-orange-500 text-white border-orange-500" : "border-neutral-300 dark:border-neutral-700"}`}>
-              {FORM_EMOJI[key]} {label}
+              {label}
             </button>
           ))}
         </div>
@@ -2515,9 +2513,20 @@ function HealthSection({ groups }: { groups: any[] }) {
         img.onerror = reject;
         img.src = lab.image;
       });
+      // Round 46 — نفس فلسفة إصلاح باج "الشكل البايظ" في تصدير كارت المتابعة:
+      // صورة التحليل المرفوعة ممكن تكون بدقة عالية (لحد ١٢٨٠ بكسل — راجع
+      // lib/image.ts's MAX_DIM)، ولو استخدمناها كمقاس صفحة PDF زي ما هي
+      // بوحدة "px" (اللي بتفترض ٩٦ نقطة/إنش)، الصفحة بتطلع فعليًا أكبر بكتير
+      // من مقاس ورقة عادي. هنا بنصغّر مقاس الصفحة (مش الصورة نفسها) لحد ما
+      // أطول ضلع يبقى ٨٠٠ بكسل كحد أقصى — الصورة لسه بدقتها الكاملة جوه
+      // الصفحة، بس الصفحة نفسها بمقاس معقول.
+      const MAX_PAGE_DIM = 800;
+      const pageScale = Math.min(1, MAX_PAGE_DIM / Math.max(dims.w, dims.h));
+      const pageW = Math.round(dims.w * pageScale);
+      const pageH = Math.round(dims.h * pageScale);
       const { jsPDF } = await import("jspdf");
-      const pdf = new jsPDF({ unit: "px", format: [dims.w, dims.h] });
-      pdf.addImage(lab.image, "JPEG", 0, 0, dims.w, dims.h);
+      const pdf = new jsPDF({ unit: "px", format: [pageW, pageH] });
+      pdf.addImage(lab.image, "JPEG", 0, 0, pageW, pageH);
       await shareFile(pdf.output("dataurlstring"), `تحليل-${lab.id.slice(0, 8)}.pdf`, "application/pdf");
     } finally {
       setExportingLabId(null);

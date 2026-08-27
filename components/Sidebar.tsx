@@ -8,7 +8,7 @@ import { LayoutDashboard, Wallet, Users, PlusCircle, Settings, Receipt, Wallet2,
 const items = [
   { href: "/dashboard", label: "الرئيسية", icon: LayoutDashboard },
   { href: "/accounts", label: "الحسابات", icon: Wallet },
-  { href: "/activity", label: "الحركة", icon: Receipt },
+  { href: "/activity", label: "الحركات المالية", icon: Receipt },
   { href: "/add", label: "إضافة حركة", icon: PlusCircle },
   { href: "/people", label: "الأشخاص والديون", icon: Users },
   { href: "/planning", label: "التخطيط المالي", icon: Repeat },
@@ -50,7 +50,9 @@ export default function Sidebar() {
                 key={href}
                 href={href}
                 className={`group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition ${
-                  active ? "bg-pink-500 text-white font-medium" : "text-neutral-400 hover:bg-pink-500/15 hover:text-pink-300"
+                  active
+                    ? "bg-pink-500 text-white font-medium"
+                    : "text-pink-300/90 hover:bg-pink-500/15 hover:text-pink-200 animate-laha-nav-glow"
                 }`}
               >
                 <Icon size={18} />

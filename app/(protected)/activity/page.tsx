@@ -45,7 +45,7 @@ export default function ActivityPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-bold">الحركة</h1>
+      <h1 className="text-xl font-bold">الحركات المالية</h1>
 
       <div className="relative">
         <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400" />

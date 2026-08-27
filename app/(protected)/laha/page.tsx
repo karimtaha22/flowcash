@@ -1291,6 +1291,9 @@ function AppointmentsTab() {
   const [scheduleTime, setScheduleTime] = useState("");
   const [scheduleTitle, setScheduleTitle] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  // Round 46 — طلب المستخدم: الدوس على الكارت نفسه يفتحه للعرض/القراءة بس،
+  // والتعديل الفعلي بس لو دوسنا على شكل القلم. قبل كده كانوا نفس الفعل.
+  const [cardMode, setCardMode] = useState<"view" | "edit">("view");
   const [drafts, setDrafts] = useState<Record<string, any>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
@@ -1330,8 +1333,16 @@ function AppointmentsTab() {
     load();
   };
 
-  const startEdit = (a: any) => {
+  const openView = (a: any) => {
+    if (expandedId === a.id && cardMode === "view") { setExpandedId(null); return; }
     setExpandedId(a.id);
+    setCardMode("view");
+  };
+
+  const startEdit = (a: any) => {
+    if (expandedId === a.id && cardMode === "edit") { setExpandedId(null); return; }
+    setExpandedId(a.id);
+    setCardMode("edit");
     setDrafts((d) => ({ ...d, [a.id]: { ...a } }));
   };
 
@@ -1395,7 +1406,15 @@ function AppointmentsTab() {
       const html2canvas = (await import("html2canvas-pro")).default;
       const canvas = await html2canvas(node, { scale: 2, backgroundColor: "#ffffff" });
       const { jsPDF } = await import("jspdf");
-      const w = canvas.width, h = canvas.height;
+      // Round 46 — باج الشكل "البايظ": كنا بنحط canvas.width/height الخام
+      // (بعد تكبير html2canvas بمقياس 2x) كمقاس صفحة PDF بالحرف — ده بيطلّع
+      // صفحة ضخمة فعليًا (أضعاف حجمها الطبيعي)، فيبان النص كبير جدًا ومبعثر
+      // لما يتفتح. الحل: نقسم على الـ2x قبل ما نحدد مقاس الصفحة (نفس النمط
+      // المتبع في كل تصديرات PDF التانية بالتطبيق — reminders/page.tsx،
+      // app/(protected)/export/page.tsx، إلخ) — الصورة نفسها فضلت بالدقة
+      // العالية (عشان تطلع واضحة)، بس مقاس الصفحة بقى بمقاس المحتوى الحقيقي.
+      const w = canvas.width / 2;
+      const h = canvas.height / 2;
       const pdf = new jsPDF({ unit: "px", format: [w, h] });
       pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, w, h);
       await shareFile(pdf.output("dataurlstring"), "تقرير-متابعة-الحمل.pdf", "application/pdf");
@@ -1435,7 +1454,7 @@ function AppointmentsTab() {
         return (
           <Card key={a.id} className="space-y-2">
             <div className="flex items-center justify-between gap-2">
-              <button onClick={() => (expanded ? setExpandedId(null) : startEdit(a))} className="flex-1 flex items-center gap-2 text-right min-w-0">
+              <button onClick={() => openView(a)} className="flex-1 flex items-center gap-2 text-right min-w-0">
                 <ChevronRight size={14} className={`shrink-0 text-neutral-400 transition-transform ${expanded ? "rotate-90" : ""}`} />
                 <span className="min-w-0">
                   <p className="text-sm font-medium truncate">{a.title}</p>
@@ -1443,12 +1462,72 @@ function AppointmentsTab() {
                 </span>
               </button>
               <div className="flex items-center gap-2 shrink-0">
-                <button onClick={() => (expanded ? setExpandedId(null) : startEdit(a))} className="text-neutral-400"><Pencil size={14} /></button>
+                <button onClick={() => startEdit(a)} className="text-neutral-400"><Pencil size={14} /></button>
                 <button onClick={() => del(a.id)} className="text-neutral-400"><Trash2 size={14} /></button>
               </div>
             </div>
 
-            {expanded && (
+            {expanded && cardMode === "view" && (
+              <div className="space-y-3 pt-2 border-t border-neutral-100 dark:border-neutral-800">
+                {(a.doctor_name || a.doctor_address || a.doctor_phone) && (
+                  <div>
+                    <p className="text-xs font-semibold mb-1">بيانات الطبيب</p>
+                    {a.doctor_name && <p className="text-xs">{a.doctor_name}</p>}
+                    <p className="text-[11px] text-neutral-400">{[a.doctor_address, a.doctor_phone].filter(Boolean).join(" — ")}</p>
+                  </div>
+                )}
+
+                {VISIT_FIELDS.some((f) => a[f.key] !== null && a[f.key] !== undefined && a[f.key] !== "") && (
+                  <div>
+                    <p className="text-xs font-semibold mb-2">بيانات الزيارة الطبية</p>
+                    <div className="grid grid-cols-2 gap-x-2 gap-y-2.5">
+                      {VISIT_FIELDS.filter((f) => a[f.key] !== null && a[f.key] !== undefined && a[f.key] !== "").map((f) => (
+                        <div key={f.key} className={f.type === "long" ? "col-span-2" : ""}>
+                          <p className="text-[11px] font-medium text-neutral-700 dark:text-neutral-200" dir="ltr">{f.en}</p>
+                          <p className="text-[10px] text-neutral-400">{f.ar}</p>
+                          <p className="text-xs mt-0.5 whitespace-pre-wrap">{String(a[f.key])}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {(a.sonar_image || a.prescription_image) && (
+                  <div className="grid grid-cols-2 gap-2">
+                    {a.sonar_image && (
+                      <div className="text-center">
+                        <p className="text-[10px] text-neutral-400 mb-1">صورة السونار</p>
+                        <img src={a.sonar_image} className="rounded-lg max-h-32 mx-auto" />
+                      </div>
+                    )}
+                    {a.prescription_image && (
+                      <div className="text-center">
+                        <p className="text-[10px] text-neutral-400 mb-1">صورة الروشتة</p>
+                        <img src={a.prescription_image} className="rounded-lg max-h-32 mx-auto" />
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {a.general_note && (
+                  <div>
+                    <p className="text-xs font-semibold mb-1">ملاحظة عامة</p>
+                    <p className="text-xs whitespace-pre-wrap">{a.general_note}</p>
+                  </div>
+                )}
+
+                {!a.doctor_name && !a.doctor_address && !a.doctor_phone && !a.general_note && !a.sonar_image && !a.prescription_image &&
+                  !VISIT_FIELDS.some((f) => a[f.key] !== null && a[f.key] !== undefined && a[f.key] !== "") && (
+                    <p className="text-xs text-neutral-400">لسه مفيش بيانات زيارة متسجلة في الكارت ده.</p>
+                  )}
+
+                <button onClick={() => startEdit(a)} className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 py-2 text-xs">
+                  <Pencil size={13} /> تعديل بيانات الزيارة
+                </button>
+              </div>
+            )}
+
+            {expanded && cardMode === "edit" && (
               <div className="space-y-3 pt-2 border-t border-neutral-100 dark:border-neutral-800">
                 <div className="grid grid-cols-2 gap-2">
                   <label className="block">
@@ -1724,8 +1803,24 @@ function BabyNamesTab({ settings, saveSettings }: { settings: Settings; saveSett
     }
   };
 
+  // Round 46 — طلب المستخدم: لما الاسم يتحدد (يتحط عليه قلب/يتعمله selected)،
+  // علامة "تم اختيار الاسم" تظهر في مربع لوحدها فوق كارت اسم الأب، بلون نيون
+  // بينك ونور بيمشي جوه الاسم نفسه (`.neon-name-text` في globals.css).
+  const selectedNames = names.filter((n) => n.selected);
+
   return (
     <div className="space-y-3">
+      {selectedNames.length > 0 && (
+        <Card className="text-center space-y-2 border-pink-300/60 dark:border-pink-800/60">
+          <p className="text-[11px] font-semibold text-pink-500 tracking-wide">تم اختيار الاسم</p>
+          <div className="flex flex-wrap justify-center gap-x-5 gap-y-1">
+            {selectedNames.map((n) => (
+              <p key={n.id} className="neon-name-text text-2xl font-extrabold">{n.name}</p>
+            ))}
+          </div>
+        </Card>
+      )}
+
       <Card className="space-y-2">
         <p className="text-xs font-semibold">اسم الأب</p>
         <input
@@ -1814,8 +1909,8 @@ function BabyNamesTab({ settings, saveSettings }: { settings: Settings; saveSett
       <Card className="space-y-2">
         <div className="flex items-center justify-between">
           <p className="text-xs font-semibold">أسماء محفوظة</p>
-          <button onClick={() => { load(); loadPoll(); }} className="text-neutral-400 flex items-center gap-1 text-[10px]">
-            <RefreshCw size={12} /> تحديث
+          <button onClick={() => { load(); loadPoll(); }} className="text-neutral-500 dark:text-neutral-300 flex items-center gap-1.5 text-xs font-medium bg-neutral-100 dark:bg-neutral-800 rounded-full px-3 py-1.5">
+            <RefreshCw size={16} /> تحديث
           </button>
         </div>
  <p className="text-[10px] text-neutral-400">دوسي على القلب عشان ترشحي الاسم للتصويت العائلي تحت — دوسي "تحديث" عشان تشوفي أحدث عدد الأصوات</p>
@@ -2407,7 +2502,13 @@ function MotherRoom({ party, votes, onRefresh }: { party: any; votes: { boy: num
         </Card>
       ) : (
         <Card className="text-center space-y-2 bg-gradient-to-b from-pink-50 to-sky-50 dark:from-pink-950 dark:to-sky-950 border-none">
-          <PartyPopper className={`mx-auto ${party.gender === "boy" ? "text-sky-500" : "text-pink-500"}`} size={36} />
+          {/* Round 46 — طلب المستخدم: لو فيه اسم "مختار" بنفس النوع، يتحط
+              مكان أيقونة الاحتفال بدل ما تفضل أيقونة عامة من غير معنى. */}
+          {party.selected_name ? (
+            <p className={`text-2xl font-extrabold ${party.gender === "boy" ? "text-sky-500" : "text-pink-500"}`}>{party.selected_name}</p>
+          ) : (
+            <PartyPopper className={`mx-auto ${party.gender === "boy" ? "text-sky-500" : "text-pink-500"}`} size={36} />
+          )}
           <p className="text-sm text-neutral-600 dark:text-neutral-300 leading-relaxed">{GENDER_REVEAL_DUA}</p>
           <h2 className="text-lg font-bold">{genderRevealCongrats(party.gender)}</h2>
         </Card>
