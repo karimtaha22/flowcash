@@ -5,5 +5,5 @@
 export const GENDER_REVEAL_DUA = "بارك الله لك في الموهوب لك، وشكرت الواهب، وبلغ أشده، ورزقت بره.";
 
 export function genderRevealCongrats(gender: "boy" | "girl"): string {
-  return gender === "girl" ? "مبروك بنوتة قمر زي ماما" : "مبروك بيبي قمر زي بابا";
+  return gender === "girl" ? "مبروك بنوتة قمر زي ماما" : "مبروك ولد قمر زي بابا";
 }

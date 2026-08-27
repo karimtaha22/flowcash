@@ -17,12 +17,23 @@ const VALIDITY_MS: Record<string, number> = {
   week: 7 * 24 * 3600000,
 };
 
+// Round 45 — "سوتش يقوله يشوف إيه" لكل لينك شريك: كل مفتاح هنا معناه "اظهري
+// الفئة دي للشريك"، مختلف حسب وضع الحمل/الدورة الحالي (الواجهة بتعرض بس
+// السوتشات اللي تخص الوضع الحالي، لكن كلهم بيتخزنوا مع بعض في نفس العمود).
+const REVEAL_KEYS = ["kicks", "heartbeat", "ovulation", "fertile", "mood", "notes", "sonar"] as const;
+type RevealKey = (typeof REVEAL_KEYS)[number];
+function sanitizeReveal(input: any): Record<RevealKey, boolean> {
+  const out = {} as Record<RevealKey, boolean>;
+  for (const k of REVEAL_KEYS) out[k] = !!input?.[k];
+  return out;
+}
+
 export async function GET() {
   const userId = await getSessionUserId();
   if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const { data } = await supabaseAdmin.from("laha_partner_links").select("token,expires_at").eq("user_id", userId).maybeSingle();
+  const { data } = await supabaseAdmin.from("laha_partner_links").select("token,expires_at,reveal_config").eq("user_id", userId).maybeSingle();
   if (!data || new Date(data.expires_at).getTime() < Date.now()) return NextResponse.json({ link: null });
-  return NextResponse.json({ link: data });
+  return NextResponse.json({ link: { ...data, reveal_config: sanitizeReveal(data.reveal_config) } });
 }
 
 export async function POST(req: NextRequest) {
@@ -32,10 +43,25 @@ export async function POST(req: NextRequest) {
   const validity = typeof body.validity === "string" && VALIDITY_MS[body.validity] ? body.validity : "24h";
   const expiresAt = new Date(Date.now() + VALIDITY_MS[validity]).toISOString();
   const token = newShareToken();
+  const revealConfig = sanitizeReveal(body.reveal_config);
 
   const { error } = await supabaseAdmin
     .from("laha_partner_links")
-    .upsert({ user_id: userId, token, expires_at: expiresAt }, { onConflict: "user_id" });
+    .upsert({ user_id: userId, token, expires_at: expiresAt, reveal_config: revealConfig }, { onConflict: "user_id" });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ link: { token, expires_at: expiresAt } });
+  return NextResponse.json({ link: { token, expires_at: expiresAt, reveal_config: revealConfig } });
+}
+
+// PATCH — تحديث سوتشات "يشوف إيه" من غير ما تولّد لينك جديد (اللينك الحالي
+// يفضل زي ما هو، بس الفئات الظاهرة للشريك تتغيّر فورًا).
+export async function PATCH(req: NextRequest) {
+  const userId = await getSessionUserId();
+  if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const body = await req.json().catch(() => ({}));
+  const revealConfig = sanitizeReveal(body.reveal_config);
+  const { data: existing } = await supabaseAdmin.from("laha_partner_links").select("id").eq("user_id", userId).maybeSingle();
+  if (!existing) return NextResponse.json({ error: "مفيش لينك متولّد لسه" }, { status: 404 });
+  const { error } = await supabaseAdmin.from("laha_partner_links").update({ reveal_config: revealConfig }).eq("user_id", userId);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ ok: true });
 }

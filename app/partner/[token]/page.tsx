@@ -75,17 +75,36 @@ export default function PartnerViewPage({ params }: { params: Promise<{ token: s
         </Card>
       )}
 
+      {data.note && (
+        <Card className="text-center text-sm text-neutral-600 dark:text-neutral-300">{data.note}</Card>
+      )}
+
       {data.mode === "pregnancy" && (
         <Card className="text-center space-y-2 bg-gradient-to-b from-pink-50 to-purple-50 dark:from-pink-950 dark:to-purple-950 border-none">
           <p className="text-sm">الأسبوع <b>{data.week}</b> من الحمل — الترايمستر {data.trimester === 1 ? "الأول" : data.trimester === 2 ? "الثاني" : "الثالث"}</p>
         </Card>
       )}
 
+      {data.lastKicks && (
+        <Card className="text-center text-sm">آخر تسجيل ركل: {data.lastKicks.session_date} — {data.lastKicks.minutes_to_ten} دقيقة لحد ما وصلت لـ١٠ ركلات</Card>
+      )}
+      {data.fetalHeartRate?.value && (
+        <Card className="text-center text-sm">آخر نبض للجنين: {data.fetalHeartRate.value} — بتاريخ {data.fetalHeartRate.date}</Card>
+      )}
+      {data.lastSonar?.image && (
+        <Card className="text-center space-y-2">
+          <p className="text-xs text-neutral-400">آخر صورة سونار — {data.lastSonar.date}</p>
+          <img src={data.lastSonar.image} alt="سونار" className="rounded-xl w-full" />
+        </Card>
+      )}
+
       {data.mode === "cycle" && data.phase && (
         <Card className="text-center space-y-2">
-          <p className="text-sm">دلوقتي في <b>{data.phaseLabel}</b> {data.phaseGuide?.emoji}</p>
+          <p className="text-sm">دلوقتي في <b>{data.phaseLabel}</b></p>
           {data.phaseGuide?.title && <p className="text-xs text-neutral-400">{data.phaseGuide.title}</p>}
           {data.nextPeriodDate && <p className="text-xs text-neutral-400">الدورة الجاية متوقعة قريبًا — خليك متفهم لو مزاجها اتقلب شوية.</p>}
+          {data.ovulationDate && <p className="text-xs text-neutral-400">يوم التبويض المتوقع: {data.ovulationDate}</p>}
+          {data.fertileStart && data.fertileEnd && <p className="text-xs text-neutral-400">نافذة الخصوبة: من {data.fertileStart} لـ{data.fertileEnd}</p>}
         </Card>
       )}
 

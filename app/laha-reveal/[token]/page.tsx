@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, use as usePromise } from "react";
 import Card from "@/components/Card";
 import Footer from "@/components/Footer";
 import { shrinkImage } from "@/lib/image";
-import { CheckCircle2, PartyPopper, Copy, ExternalLink } from "lucide-react";
+import { CheckCircle2, PartyPopper, Copy, ExternalLink, RefreshCw } from "lucide-react";
 import { GENDER_REVEAL_DUA, genderRevealCongrats } from "@/lib/laha/genderReveal";
 
 // PUBLIC صفحة — من غير جلسة، من غير Sidebar/BottomNav (برّه (protected)
@@ -62,6 +62,7 @@ export default function GenderRevealGuestPage({ params }: { params: Promise<{ to
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [msg, setMsg] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
 
   const guestKeyRef = useRef<string>("");
   useEffect(() => {
@@ -180,8 +181,14 @@ export default function GenderRevealGuestPage({ params }: { params: Promise<{ to
 
       <Card className="space-y-3">
         <div className="space-y-2">
-          <div className="flex justify-between text-xs font-medium">
+          <div className="flex items-center justify-between text-xs font-medium">
             <span className="text-sky-600 dark:text-sky-400">ولد {data.votes.boy}</span>
+            <button
+              onClick={async () => { setRefreshing(true); try { await load(); } finally { setRefreshing(false); } }}
+              className="text-neutral-400 flex items-center gap-1 text-[10px] font-normal"
+            >
+              <RefreshCw size={12} className={refreshing ? "animate-spin" : ""} /> تحديث
+            </button>
             <span className="text-pink-600 dark:text-pink-400">{data.votes.girl} بنت</span>
           </div>
           <div className="h-4 rounded-full overflow-hidden flex bg-neutral-100 dark:bg-neutral-800">

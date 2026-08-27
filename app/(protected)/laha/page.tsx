@@ -4,6 +4,7 @@ import Link from "next/link";
 import Card from "@/components/Card";
 import Switch from "@/components/Switch";
 import { shrinkImage } from "@/lib/image";
+import { shareFile } from "@/lib/shareFile";
 import { todayISO, daysInMonth, firstWeekdayOfMonth, parseISO, ARABIC_MONTHS, addDays } from "@/lib/laha/dates";
 import {
   cycleInfo, cycleRegularity, PRODUCTIVITY_MAP, detectGapFillers, waterRetentionInsight, describeTravelRange,
@@ -14,7 +15,7 @@ import { GENDER_REVEAL_DUA, genderRevealCongrats } from "@/lib/laha/genderReveal
 import {
   Heart, Baby, Calendar, Scale, StickyNote, Footprints, Timer, Stethoscope,
   Sparkles, PartyPopper, Copy, Lock, Unlock, Check, X, Wand2, ChevronRight, ChevronLeft, Search,
-  CalendarRange, Zap, Users, Plane, Printer,
+  CalendarRange, Zap, Users, Plane, Printer, RefreshCw, ExternalLink, FileDown, Trash2, Pencil,
   type LucideIcon,
 } from "lucide-react";
 
@@ -40,6 +41,12 @@ import {
 // للأخطاء (مفيش alert() بعد كده — رسالة داخل الكارت + إعادة محاولة)، خانة
 // "اسأل عن معنى اسم" جديدة، وخانة اسم الأب هنا نفسها عشان تتشاف الاسم كامل.
 // (4) بانر تذكير قبل الدورة القادمة (PMS/شنطة العناية) في الرئيسية.
+
+// Round 45 — لأي نص حر بيتحط في innerHTML مباشرة (تصدير PDF)، عشان علامات
+// زي < أو & متكسرش الرسم. نفس الدالة المستخدمة في reminders/page.tsx.
+function escapeHtml(s: string): string {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
+}
 
 type Mode = "cycle" | "pregnancy";
 type Gender = "boy" | "girl";
@@ -82,9 +89,9 @@ const TABS_PREGNANCY_GROUPS: TabGroup[] = [
     ],
   },
   {
-    key: "medical", label: "الطبية", icon: Stethoscope,
+    key: "medical", label: "متابعة الطبيب", icon: Stethoscope,
     items: [
-      { key: "appointments", label: "المواعيد", icon: Stethoscope },
+      { key: "appointments", label: "كارت المتابعة", icon: Stethoscope },
       { key: "doctor", label: "أسئلة للدكتور", icon: Stethoscope },
     ],
   },
@@ -276,7 +283,7 @@ export default function LahaPage() {
       {activeTabs === "home" && settings.mode === "cycle" && <CycleHomeTab settings={settings} />}
       {activeTabs === "home" && settings.mode === "pregnancy" && <PregnancyHomeTab settings={settings} />}
       {activeTabs === "planning" && <PlanningTab settings={settings} />}
-      {activeTabs === "partner" && <PartnerSyncTab />}
+      {activeTabs === "partner" && <PartnerSyncTab mode={settings.mode} />}
       {activeTabs === "weight" && <WeightTab settings={settings} />}
       {activeTabs === "notes" && <NotesTab />}
       {activeTabs === "kicks" && <KicksTab />}
@@ -766,6 +773,7 @@ function DailyMicroLogCard() {
   const [mood, setMood] = useState<string | null>(null);
   const [painTags, setPainTags] = useState<string[]>([]);
   const [flow, setFlow] = useState<string | null>(null);
+  const [note, setNote] = useState("");
   const [history, setHistory] = useState<any[]>([]);
   const [saved, setSaved] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -781,6 +789,7 @@ function DailyMicroLogCard() {
         setMood(today.mood || null);
         setPainTags(today.pain_tags || []);
         setFlow(today.flow || null);
+        setNote(today.note || "");
       }
     } finally {
       setLoaded(true);
@@ -788,14 +797,15 @@ function DailyMicroLogCard() {
   };
   useEffect(() => { load(); }, []);
 
-  const save = async (patch: { mood?: string | null; pain_tags?: string[]; flow?: string | null }) => {
+  const save = async (patch: { mood?: string | null; pain_tags?: string[]; flow?: string | null; note?: string }) => {
     const nextMood = patch.mood !== undefined ? patch.mood : mood;
     const nextPain = patch.pain_tags !== undefined ? patch.pain_tags : painTags;
     const nextFlow = patch.flow !== undefined ? patch.flow : flow;
+    const nextNote = patch.note !== undefined ? patch.note : note;
     try {
       await api("/api/laha/daily-logs", {
         method: "POST",
-        body: JSON.stringify({ log_date: todayISO(), mood: nextMood, pain_tags: nextPain, flow: nextFlow }),
+        body: JSON.stringify({ log_date: todayISO(), mood: nextMood, pain_tags: nextPain, flow: nextFlow, note: nextNote || null }),
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 1200);
@@ -812,13 +822,16 @@ function DailyMicroLogCard() {
     save({ pain_tags: next });
   };
   const toggleFlow = (key: string) => { const next = flow === key ? null : key; setFlow(next); save({ flow: next }); };
+  // Round 45 — الملاحظة نص حر، فالحفظ بيحصل عند ما تسيبي الخانة (onBlur) مش
+  // مع كل حرف زي الشيبس اللي بتتحفظ فورًا لما تختاريها.
+  const saveNoteIfChanged = () => { if (note !== (history.find((l) => l.log_date === todayISO())?.note || "")) save({ note }); };
 
   if (!loaded) return null;
 
   return (
     <Card className="space-y-3">
       <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold">إزيك النهاردة؟</p>
+        <p className="text-xs font-semibold">إزيك النهاردة؟ — حالتي النفسية والصحية</p>
  {saved && <span className="text-[10px] text-emerald-500">تم الحفظ </span>}
       </div>
       <p className="text-[10px] text-neutral-400">دوسي على أي حاجة تنطبق عليكي — بيتحفظ فورًا من غير ما تعملي حاجة تانية.</p>
@@ -838,17 +851,31 @@ function DailyMicroLogCard() {
           <button key={o.key} onClick={() => toggleFlow(o.key)} className={`text-[11px] rounded-full px-2.5 py-1 ${flow === o.key ? "bg-rose-500 text-white" : "bg-neutral-100 dark:bg-neutral-800 text-neutral-500"}`}>{o.label}</button>
         ))}
       </div>
+      <div>
+        <label className="text-[10px] text-neutral-400">ملاحظة (اختياري)</label>
+        <textarea
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          onBlur={saveNoteIfChanged}
+          rows={2}
+          placeholder="اكتبي أي ملاحظة عن حالتك النهاردة..."
+          className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-transparent px-3 py-2 text-xs"
+        />
+      </div>
 
       {history.length > 0 && (
         <details className="text-xs">
           <summary className="text-neutral-400 cursor-pointer">سجل الأيام اللي فاتت ({history.length})</summary>
-          <div className="mt-2 space-y-1 max-h-48 overflow-y-auto">
+          <div className="mt-2 space-y-1.5 max-h-48 overflow-y-auto">
             {history.map((l) => (
-              <div key={l.log_date} className="flex items-center justify-between text-[11px] text-neutral-500">
-                <span>{fmtDate(l.log_date)}</span>
-                <span>
-                  {[l.mood && MOOD_OPTIONS.find((m) => m.key === l.mood)?.label, ...(l.pain_tags || []).map((t: string) => PAIN_OPTIONS.find((p) => p.key === t)?.label), l.flow && FLOW_OPTIONS.find((f) => f.key === l.flow)?.label].filter(Boolean).join("، ") || "-"}
-                </span>
+              <div key={l.log_date} className="text-[11px] text-neutral-500">
+                <div className="flex items-center justify-between">
+                  <span>{fmtDate(l.log_date)}</span>
+                  <span>
+                    {[l.mood && MOOD_OPTIONS.find((m) => m.key === l.mood)?.label, ...(l.pain_tags || []).map((t: string) => PAIN_OPTIONS.find((p) => p.key === t)?.label), l.flow && FLOW_OPTIONS.find((f) => f.key === l.flow)?.label].filter(Boolean).join("، ") || "-"}
+                  </span>
+                </div>
+                {l.note && <p className="text-neutral-400 mt-0.5">{l.note}</p>}
               </div>
             ))}
           </div>
@@ -925,8 +952,11 @@ function PregnancyHomeTab({ settings }: { settings: Settings }) {
 
 // Round 41 —"ألبوم صور السونار": مفيش جدول منفصل للصور (قرار Round 38
 // المتعمد — الصور بتتحط داخل المواعيد بس، راجع claude/laha-feature.md's
-// قسم "نطاق مبسّط")، فالألبوم هنا بيلمّ أي موعد له صورة (`laha_appointments.
-// image`) ويرتبهم تصاعديًا بتاريخ الزيارة، بدل جدول/API جديد بالكامل.
+// قسم "نطاق مبسّط")، فالألبوم هنا بيلمّ أي موعد له صورة ويرتبهم تصاعديًا
+// بتاريخ الزيارة، بدل جدول/API جديد بالكامل.
+// Round 45 — بعد ما "كارت المتابعة" بقى ليه حقل مخصص `sonar_image`، الألبوم
+// بقى بيقرا من `sonar_image` الأول وبيرجع لـ`image` القديم (fallback) لأي
+// كارت اتسجل قبل الحقل الجديد ده — عشان صور اتسجلت في راوندات قبل كده متختفيش.
 function UltrasoundGallery() {
   const [appointments, setAppointments] = useState<any[]>([]);
   const [openIdx, setOpenIdx] = useState<number | null>(null);
@@ -937,23 +967,26 @@ function UltrasoundGallery() {
     })();
   }, []);
 
-  const withImages = appointments.filter((a) => a.image).sort((a, b) => (a.appt_date < b.appt_date ? -1 : 1));
+  const withImages = appointments
+    .map((a) => ({ ...a, _img: a.sonar_image || a.image }))
+    .filter((a) => a._img)
+    .sort((a, b) => (a.appt_date < b.appt_date ? -1 : 1));
   if (!withImages.length) return null;
 
   return (
     <Card className="space-y-2">
- <p className="text-xs font-semibold"> ألبوم صور السونار</p>
+ <p className="text-xs font-semibold"> ألبوم صور السونار — البيبي بيكبر قصادك</p>
       <div className="flex gap-2 overflow-x-auto pb-1">
         {withImages.map((a, i) => (
           <button key={a.id} onClick={() => setOpenIdx(i)} className="shrink-0 w-16 h-16 rounded-lg overflow-hidden border border-neutral-200 dark:border-neutral-700">
-            <img src={a.image} alt={a.title} className="w-full h-full object-cover" />
+            <img src={a._img} alt={a.title} className="w-full h-full object-cover" />
           </button>
         ))}
       </div>
 
       {openIdx !== null && withImages[openIdx] && (
         <div className="fixed inset-0 z-50 bg-black/80 flex flex-col items-center justify-center p-4" onClick={() => setOpenIdx(null)}>
-          <img src={withImages[openIdx].image} alt={withImages[openIdx].title} className="max-w-full max-h-[70vh] rounded-xl object-contain" onClick={(e) => e.stopPropagation()} />
+          <img src={withImages[openIdx]._img} alt={withImages[openIdx].title} className="max-w-full max-h-[70vh] rounded-xl object-contain" onClick={(e) => e.stopPropagation()} />
           <div className="text-center text-white mt-3 space-y-1" onClick={(e) => e.stopPropagation()}>
             <p className="text-sm font-medium">{fmtDate(withImages[openIdx].appt_date)} — {withImages[openIdx].title}</p>
             {withImages[openIdx].notes && <p className="text-xs text-neutral-300">{withImages[openIdx].notes}</p>}
@@ -1179,64 +1212,341 @@ function ContractionsTab() {
   );
 }
 
-// ─────────────────────────────── المواعيد ────────────────────────────────
+// ─────────────────────────────── متابعة الطبيب (كارت المتابعة) ────────────
+// Round 45 — من "المواعيد" البسيطة لكارت متابعة حمل قريب من شكل "كارت
+// المتابعة" الطبي المصري المعروف. اتنى على مرحلتين حسب طلب المستخدمة: (1)
+// حجز الميعاد بس (تاريخ + وقت) وبيتفعل عليه تذكير البوت زي ما هو أصلًا —
+// (2) تسجيل بيانات الزيارة التفصيلية (الحقول تحت) بعد/وقت الزيارة الفعلية،
+// من غير ما تتحبس المستخدمة في فورم طويل وهي بس بتحجز ميعاد.
+// كل حقل شكله: تسمية إنجليزية فوق (اللي الدكتور بيفهمها) وتحتها ترجمة عربية
+// باهتة صغيرة (اللي الأم بتفهمها) — طلب صريح من المستخدمة.
+//
+// ملحوظة أمان مقصودة: حقل SEX هنا نص/اختيار معلوماتي بس، ومش بيتزامن تلقائيًا
+// مع laha_gender_reveal_parties.gender — عشان الأم نفسها هي اللي بتسجل بيانات
+// الكارت، ولو الحقل ده اتزامن كان هيبقى نفس معنى إنها تقدر تكتب/تشوف نوع
+// الجنين بنفسها من غير ما تدوس على رابط الكشف بالرقم السري، وده بيكسر كل
+// الفلسفة الأمنية بتاعة "تيم بينك ولا تيم بلو؟" (راجع تعليقات app/api/laha/
+// gender-reveal/*). فبالتالي الحقل ده بيتحط كإشارة/تكست حر بس مع تنويه بالرجوع
+// لقسم الكشف، مش مصدر حقيقي لنوع الجنين.
+const VISIT_FIELDS: { key: string; en: string; ar: string; type: "short" | "long" | "date" | "weight"; note?: string }[] = [
+  { key: "lmp_date", en: "Date / LMP", ar: "تاريخ الزيارة الحالية أو أول يوم آخر دورة شهرية", type: "date" },
+  { key: "gestational_age", en: "Maturity / M.w", ar: "عمر الحمل ونضج الجنين بالأسابيع أو الشهور", type: "short" },
+  { key: "edd_date", en: "EDD", ar: "موعد الولادة المتوقع", type: "date" },
+  { key: "gravida", en: "G (Gravida)", ar: "إجمالي عدد مرات الحمل السابقة والحالية", type: "short" },
+  { key: "para", en: "P (Para)", ar: "عدد مرات الولادات السابقة بعد اكتمال نمو الجنين", type: "short" },
+  { key: "abortions", en: "A (Abortion)", ar: "عدد مرات الإجهاض السابقة", type: "short" },
+  { key: "prev_delivery_mode", en: "Mode of Previous Delivery", ar: "طريقة الولادات السابقة (طبيعي NVD أو قيصري CS)", type: "short" },
+  { key: "maternal_weight_kg", en: "Weight (kg)", ar: "وزن الأم — بيتزامن تلقائيًا مع يوميات الوزن", type: "weight" },
+  { key: "blood_pressure", en: "B.P / Bpa", ar: "قياس ضغط دم الأم لمراقبة أي ارتفاع مفاجئ", type: "short" },
+  { key: "hemoglobin_pct", en: "Hb%", ar: "نسبة الهيموجلوبين في الدم لمتابعة الأنيميا", type: "short" },
+  { key: "blood_group", en: "Blood Group & Rh", ar: "فصيلة دم الأم وعامل ريزوس", type: "short" },
+  { key: "blood_sugar", en: "RBS / FBS", ar: "تحليل سكر الدم العشوائي أو الصائم", type: "short" },
+  { key: "urine_sugar", en: "Urine - Sugar", ar: "فحص السكر في البول", type: "short" },
+  { key: "urine_albumin", en: "Urine - Albumin", ar: "فحص الزلال في البول للكشف عن تسمم الحمل", type: "short" },
+  { key: "oedema", en: "Oedema", ar: "درجة تورم واحتباس السوائل (القدمين واليدين)", type: "short" },
+  { key: "fundal_height", en: "Fundal Height (FH)", ar: "ارتفاع قاع الرحم بالسنتيمتر", type: "short" },
+  { key: "cervical_assessment", en: "Cervical Assessment", ar: "تقييم طول وحالة عنق الرحم (مغلق أو مفتوح)", type: "short" },
+  { key: "fetal_sex", en: "SEX", ar: "نوع الجنين — ده معلومة حرة بس، الكشف الفعلي في قسم «تيم بينك ولا تيم بلو؟»", type: "short" },
+  { key: "fetal_weight_g", en: "F.W (Fetal Weight)", ar: "الوزن التقديري للجنين بالجرام عبر السونار", type: "short" },
+  { key: "fetal_heart_rate", en: "Fetal H.R.", ar: "معدل نبضات قلب الجنين في الدقيقة", type: "short" },
+  { key: "fetal_position", en: "Presentation & Position", ar: "وضعية الجنين واتجاه رأسه (رأسي، مقعدي، مستعرض)", type: "short" },
+  { key: "bpd", en: "BPD", ar: "قطر رأس الجنين المقاس بالسونار", type: "short" },
+  { key: "hc", en: "HC", ar: "محيط رأس الجنين عبر السونار", type: "short" },
+  { key: "ac", en: "AC", ar: "محيط بطن الجنين عبر السونار", type: "short" },
+  { key: "fl", en: "FL", ar: "طول عظم فخذ الجنين", type: "short" },
+  { key: "afi", en: "AFI", ar: "منسوب وكمية السائل الأمينوسي", type: "short" },
+  { key: "placenta", en: "Placenta", ar: "موقع المشيمة في الرحم ودرجة نضجها", type: "short" },
+  { key: "fetal_movement", en: "Fetal Movement", ar: "متابعة نشاط وحركة الجنين (Quickening)", type: "short" },
+  { key: "investigation", en: "Investigation", ar: "التحاليل والفحوصات الإضافية المطلوبة", type: "long" },
+  { key: "treatment", en: "Treatment", ar: "الأدوية والمكملات والفيتامينات الموصوفة", type: "long" },
+  { key: "tetanus_toxoid", en: "Tetanus Toxoid (TT)", ar: "جرعات وتواريخ تطعيم التيتانوس", type: "short" },
+  { key: "high_risk_factors", en: "High Risk Factors", ar: "أي عوامل خطورة مصاحبة للحمل", type: "long" },
+  { key: "next_visit_date", en: "Next Visit", ar: "الموعد المحدد للمتابعة والزيارة القادمة", type: "date" },
+];
+
+function VisitField({ f, value, onChange }: { f: (typeof VISIT_FIELDS)[number]; value: any; onChange: (v: string) => void }) {
+  return (
+    <label className="block">
+      <span className="block text-[11px] font-medium text-neutral-700 dark:text-neutral-200" dir="ltr">{f.en}</span>
+      <span className="block text-[10px] text-neutral-400 mb-1">{f.ar}</span>
+      {f.type === "long" ? (
+        <textarea value={value ?? ""} onChange={(e) => onChange(e.target.value)} rows={2} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2.5 py-1.5 text-xs" />
+      ) : (
+        <input
+          type={f.type === "date" ? "date" : f.type === "weight" ? "number" : "text"}
+          inputMode={f.type === "weight" ? "decimal" : undefined}
+          value={value ?? ""}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2.5 py-1.5 text-xs"
+        />
+      )}
+    </label>
+  );
+}
 
 function AppointmentsTab() {
   const [appts, setAppts] = useState<any[]>([]);
-  const [title, setTitle] = useState("");
-  const [date, setDate] = useState("");
-  const [notes, setNotes] = useState("");
-  const [image, setImage] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [scheduleDate, setScheduleDate] = useState("");
+  const [scheduleTime, setScheduleTime] = useState("");
+  const [scheduleTitle, setScheduleTitle] = useState("");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, any>>({});
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportSelected, setExportSelected] = useState<Record<string, boolean>>({});
+  const [exporting, setExporting] = useState(false);
 
   const load = async () => { const d = await api("/api/laha/appointments"); setAppts(d.appointments || []); };
   useEffect(() => { load(); }, []);
 
-  const add = async () => {
-    if (!title.trim() || !date) { alert("العنوان والتاريخ مطلوبين"); return; }
+  // آخر بيانات دكتور اتسجلت بتتملي أوتوماتيك في كارت جديد — غالبًا نفس
+  // الدكتور بيتكرر طول المتابعة، فده بيوفر إعادة الكتابة كل مرة.
+  const lastDoctor = appts.find((a) => a.doctor_name);
+
+  const schedule = async () => {
+    if (!scheduleDate) { alert("تاريخ الزيارة مطلوب"); return; }
     try {
-      await api("/api/laha/appointments", { method: "POST", body: JSON.stringify({ appt_date: date, title, notes, image }) });
-      setTitle(""); setDate(""); setNotes(""); setImage(null); setShowForm(false);
+      await api("/api/laha/appointments", {
+        method: "POST",
+        body: JSON.stringify({
+          appt_date: scheduleDate,
+          appt_time: scheduleTime || null,
+          title: scheduleTitle.trim() || "زيارة متابعة",
+          doctor_name: lastDoctor?.doctor_name || null,
+          doctor_phone: lastDoctor?.doctor_phone || null,
+          doctor_address: lastDoctor?.doctor_address || null,
+        }),
+      });
+      setScheduleDate(""); setScheduleTime(""); setScheduleTitle(""); setShowForm(false);
       load();
     } catch (e: any) { alert(e.message); }
   };
-  const del = async (id: string) => { await api(`/api/laha/appointments/${id}`, { method: "DELETE" }); load(); };
+
+  const del = async (id: string) => {
+    if (!confirm("متأكدة إنك عايزة تمسحي الكارت ده؟")) return;
+    await api(`/api/laha/appointments/${id}`, { method: "DELETE" });
+    if (expandedId === id) setExpandedId(null);
+    load();
+  };
+
+  const startEdit = (a: any) => {
+    setExpandedId(a.id);
+    setDrafts((d) => ({ ...d, [a.id]: { ...a } }));
+  };
+
+  const setField = (id: string, key: string, value: any) => {
+    setDrafts((d) => ({ ...d, [id]: { ...d[id], [key]: value } }));
+  };
+
+  const saveDetails = async (id: string) => {
+    const draft = drafts[id];
+    if (!draft) return;
+    setSavingId(id);
+    try {
+      const patch: Record<string, any> = {
+        title: draft.title?.trim() || "زيارة متابعة",
+        appt_date: draft.appt_date,
+        appt_time: draft.appt_time || null,
+        doctor_name: draft.doctor_name || null,
+        doctor_phone: draft.doctor_phone || null,
+        doctor_address: draft.doctor_address || null,
+        general_note: draft.general_note || null,
+        sonar_image: draft.sonar_image || null,
+        prescription_image: draft.prescription_image || null,
+      };
+      for (const f of VISIT_FIELDS) {
+        patch[f.key] = f.key === "maternal_weight_kg"
+          ? (draft.maternal_weight_kg === "" || draft.maternal_weight_kg == null ? null : Number(draft.maternal_weight_kg))
+          : (draft[f.key] || null);
+      }
+      await api(`/api/laha/appointments/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+      setExpandedId(null);
+      load();
+    } catch (e: any) { alert(e.message); } finally { setSavingId(null); }
+  };
+
+  const exportPdf = async () => {
+    const selected = appts.filter((a) => exportSelected[a.id]);
+    if (!selected.length) return;
+    setExporting(true);
+    const node = document.createElement("div");
+    node.style.cssText = "position:fixed;left:-9999px;width:700px;background:#fff;padding:24px;font-family:sans-serif;direction:rtl;color:#111";
+    const cards = selected
+      .slice()
+      .sort((a, b) => (a.appt_date < b.appt_date ? 1 : -1))
+      .map((a) => {
+        const rows = VISIT_FIELDS
+          .filter((f) => a[f.key] !== null && a[f.key] !== undefined && a[f.key] !== "")
+          .map((f) => `<tr><td style="padding:3px 8px;color:#555;font-size:11px;white-space:nowrap" dir="ltr">${escapeHtml(f.en)}</td><td style="padding:3px 8px;font-size:12px">${escapeHtml(String(a[f.key]))}</td></tr>`)
+          .join("");
+        return `
+          <div style="margin-bottom:18px;border:1px solid #ddd;border-radius:10px;padding:14px;page-break-inside:avoid">
+            <p style="font-weight:bold;font-size:14px;margin:0 0 4px">${escapeHtml(a.title)} — ${escapeHtml(fmtDate(a.appt_date))}${a.appt_time ? " " + escapeHtml(a.appt_time) : ""}</p>
+            ${a.doctor_name ? `<p style="font-size:11px;color:#666;margin:0 0 8px">د. ${escapeHtml(a.doctor_name)}${a.doctor_phone ? " — " + escapeHtml(a.doctor_phone) : ""}${a.doctor_address ? " — " + escapeHtml(a.doctor_address) : ""}</p>` : ""}
+            ${rows ? `<table style="width:100%;border-collapse:collapse">${rows}</table>` : `<p style="font-size:11px;color:#999">لسه مفيش بيانات طبية متسجلة في الكارت ده</p>`}
+            ${a.general_note ? `<p style="font-size:12px;margin-top:8px"><b>ملاحظة:</b> ${escapeHtml(a.general_note)}</p>` : ""}
+          </div>`;
+      })
+      .join("");
+    node.innerHTML = `<h2 style="text-align:center;margin-bottom:16px">تقرير متابعة الحمل</h2>${cards}`;
+    document.body.appendChild(node);
+    try {
+      const html2canvas = (await import("html2canvas-pro")).default;
+      const canvas = await html2canvas(node, { scale: 2, backgroundColor: "#ffffff" });
+      const { jsPDF } = await import("jspdf");
+      const w = canvas.width, h = canvas.height;
+      const pdf = new jsPDF({ unit: "px", format: [w, h] });
+      pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, w, h);
+      await shareFile(pdf.output("dataurlstring"), "تقرير-متابعة-الحمل.pdf", "application/pdf");
+    } catch {
+      alert("حصل خطأ في التصدير");
+    } finally {
+      document.body.removeChild(node);
+      setExporting(false);
+    }
+  };
 
   return (
     <div className="space-y-3">
       {!showForm ? (
-        <button onClick={() => setShowForm(true)} className="w-full bg-pink-500 text-white rounded-xl py-2.5 text-sm font-medium">+ موعد جديد</button>
+        <button onClick={() => setShowForm(true)} className="w-full bg-pink-500 text-white rounded-xl py-2.5 text-sm font-medium">+ حجز زيارة جديدة</button>
       ) : (
         <Card className="space-y-2">
-          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="عنوان الموعد" className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+          <p className="text-xs font-semibold">حجز ميعاد الزيارة</p>
+          <input value={scheduleTitle} onChange={(e) => setScheduleTitle(e.target.value)} placeholder="عنوان الزيارة (اختياري)" className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+          <div className="grid grid-cols-2 gap-2">
+            <input type="date" value={scheduleDate} onChange={(e) => setScheduleDate(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+            <input type="time" value={scheduleTime} onChange={(e) => setScheduleTime(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+          </div>
           {/* Round 42 — لينك المواعيد بتذكير تليجرام تلقائي (يوم قبل + يوم
               الموعد نفسه)، بشرط إن الحساب متربط بالبوت من الإعدادات. */}
- <p className="text-[11px] text-neutral-400"> لو حسابك متربط بتليجرام، هنفكّرك بالموعد ده يوم قبله وصبح يوم الموعد نفسه.</p>
-          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="ملاحظات (اختياري)" rows={2} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
-          <label className="flex items-center gap-2 text-xs border border-dashed border-neutral-300 dark:border-neutral-700 rounded-lg px-3 py-2 cursor-pointer">
- {image ?"صورة اتضافت":"صورة سونار/روشتة (اختياري)"}
-            <input type="file" accept="image/*" className="hidden" onChange={async (e) => { const f = e.target.files?.[0]; if (f) setImage(await shrinkImage(f)); }} />
-          </label>
+          <p className="text-[11px] text-neutral-400">لو حسابك متربط بتليجرام، هنفكّرك بالزيارة دي يوم قبلها وصبح يومها — وبعد الزيارة تقدري تفتحي الكارت وتسجلي بيانات الزيارة بالتفصيل.</p>
           <div className="flex gap-2">
             <button onClick={() => setShowForm(false)} className="flex-1 rounded-lg border border-neutral-300 dark:border-neutral-700 py-2 text-sm">إلغاء</button>
-            <button onClick={add} className="flex-1 bg-pink-500 text-white rounded-lg py-2 text-sm font-medium">حفظ</button>
+            <button onClick={schedule} className="flex-1 bg-pink-500 text-white rounded-lg py-2 text-sm font-medium">حجز</button>
           </div>
         </Card>
       )}
-      {appts.map((a) => (
-        <Card key={a.id} className="space-y-1">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-medium">{a.title}</p>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-neutral-400">{fmtDate(a.appt_date)}</span>
-              <button onClick={() => del(a.id)} className="text-neutral-400"><X size={12} /></button>
+
+      {appts.map((a) => {
+        const expanded = expandedId === a.id;
+        const draft = drafts[a.id] || a;
+        return (
+          <Card key={a.id} className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <button onClick={() => (expanded ? setExpandedId(null) : startEdit(a))} className="flex-1 flex items-center gap-2 text-right min-w-0">
+                <ChevronRight size={14} className={`shrink-0 text-neutral-400 transition-transform ${expanded ? "rotate-90" : ""}`} />
+                <span className="min-w-0">
+                  <p className="text-sm font-medium truncate">{a.title}</p>
+                  <p className="text-[11px] text-neutral-400 truncate">{fmtDate(a.appt_date)}{a.appt_time ? ` — ${a.appt_time}` : ""}{a.doctor_name ? ` · د. ${a.doctor_name}` : ""}</p>
+                </span>
+              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                <button onClick={() => (expanded ? setExpandedId(null) : startEdit(a))} className="text-neutral-400"><Pencil size={14} /></button>
+                <button onClick={() => del(a.id)} className="text-neutral-400"><Trash2 size={14} /></button>
+              </div>
             </div>
+
+            {expanded && (
+              <div className="space-y-3 pt-2 border-t border-neutral-100 dark:border-neutral-800">
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="block">
+                    <span className="block text-[11px] text-neutral-500 mb-1">تاريخ الزيارة</span>
+                    <input type="date" value={draft.appt_date || ""} onChange={(e) => setField(a.id, "appt_date", e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2.5 py-1.5 text-xs" />
+                  </label>
+                  <label className="block">
+                    <span className="block text-[11px] text-neutral-500 mb-1">الوقت</span>
+                    <input type="time" value={draft.appt_time || ""} onChange={(e) => setField(a.id, "appt_time", e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2.5 py-1.5 text-xs" />
+                  </label>
+                </div>
+                <label className="block">
+                  <span className="block text-[11px] text-neutral-500 mb-1">عنوان الكارت</span>
+                  <input value={draft.title || ""} onChange={(e) => setField(a.id, "title", e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2.5 py-1.5 text-xs" />
+                </label>
+
+                <p className="text-xs font-semibold pt-1">بيانات الطبيب</p>
+                <label className="block">
+                  <span className="block text-[11px] text-neutral-500 mb-1">اسم الدكتور</span>
+                  <input value={draft.doctor_name || ""} onChange={(e) => setField(a.id, "doctor_name", e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2.5 py-1.5 text-xs" />
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="block">
+                    <span className="block text-[11px] text-neutral-500 mb-1">العنوان</span>
+                    <input value={draft.doctor_address || ""} onChange={(e) => setField(a.id, "doctor_address", e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2.5 py-1.5 text-xs" />
+                  </label>
+                  <label className="block">
+                    <span className="block text-[11px] text-neutral-500 mb-1">رقم التليفون</span>
+                    <input value={draft.doctor_phone || ""} onChange={(e) => setField(a.id, "doctor_phone", e.target.value)} dir="ltr" className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2.5 py-1.5 text-xs" />
+                  </label>
+                </div>
+
+                <p className="text-xs font-semibold pt-1">بيانات الزيارة الطبية</p>
+                <div className="grid grid-cols-2 gap-x-2 gap-y-3">
+                  {VISIT_FIELDS.map((f) => (
+                    <div key={f.key} className={f.type === "long" ? "col-span-2" : ""}>
+                      <VisitField f={f} value={draft[f.key]} onChange={(v) => setField(a.id, f.key, v)} />
+                    </div>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="flex flex-col items-center gap-1 text-[11px] text-neutral-400 border border-dashed border-neutral-300 dark:border-neutral-700 rounded-lg px-2 py-3 cursor-pointer text-center">
+                    {draft.sonar_image ? <img src={draft.sonar_image} className="max-h-16 rounded" /> : <span>رفع صورة السونار</span>}
+                    <input type="file" accept="image/*" className="hidden" onChange={async (e) => { const file = e.target.files?.[0]; if (file) setField(a.id, "sonar_image", await shrinkImage(file)); }} />
+                  </label>
+                  <label className="flex flex-col items-center gap-1 text-[11px] text-neutral-400 border border-dashed border-neutral-300 dark:border-neutral-700 rounded-lg px-2 py-3 cursor-pointer text-center">
+                    {draft.prescription_image ? <img src={draft.prescription_image} className="max-h-16 rounded" /> : <span>رفع صورة الروشتة</span>}
+                    <input type="file" accept="image/*" className="hidden" onChange={async (e) => { const file = e.target.files?.[0]; if (file) setField(a.id, "prescription_image", await shrinkImage(file)); }} />
+                  </label>
+                </div>
+
+                <label className="block">
+                  <span className="block text-xs font-semibold mb-1">ملاحظة عامة</span>
+                  <textarea value={draft.general_note || ""} onChange={(e) => setField(a.id, "general_note", e.target.value)} rows={3} placeholder="أي حاجة تانية عايزة تسجليها عن الزيارة دي" className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2.5 py-1.5 text-xs" />
+                </label>
+
+                <div className="flex gap-2 pt-1">
+                  <button onClick={() => setExpandedId(null)} className="flex-1 rounded-lg border border-neutral-300 dark:border-neutral-700 py-2 text-xs">إلغاء</button>
+                  <button onClick={() => saveDetails(a.id)} disabled={savingId === a.id} className="flex-1 bg-pink-500 text-white rounded-lg py-2 text-xs font-medium disabled:opacity-60">
+                    {savingId === a.id ? "جاري الحفظ..." : "حفظ بيانات الزيارة"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </Card>
+        );
+      })}
+
+      {appts.length > 0 && (
+        <Card className="space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold">تصدير للطبيب</p>
+            <button onClick={() => setExportOpen((v) => !v)} className="text-neutral-400 text-[11px]">{exportOpen ? "إخفاء" : "اختيار الكروت"}</button>
           </div>
-          {a.notes && <p className="text-xs text-neutral-500">{a.notes}</p>}
-          {a.image && <img src={a.image} className="rounded-lg max-h-40" />}
+          {exportOpen && (
+            <div className="space-y-1.5 max-h-48 overflow-y-auto">
+              <label className="flex items-center gap-2 text-xs font-medium">
+                <input
+                  type="checkbox"
+                  checked={appts.length > 0 && appts.every((a) => exportSelected[a.id])}
+                  onChange={(e) => { const all: Record<string, boolean> = {}; appts.forEach((a) => (all[a.id] = e.target.checked)); setExportSelected(all); }}
+                />
+                الكل
+              </label>
+              {appts.map((a) => (
+                <label key={a.id} className="flex items-center gap-2 text-xs text-neutral-500">
+                  <input type="checkbox" checked={!!exportSelected[a.id]} onChange={(e) => setExportSelected((s) => ({ ...s, [a.id]: e.target.checked }))} />
+                  {fmtDate(a.appt_date)} — {a.title}
+                </label>
+              ))}
+            </div>
+          )}
+          <button onClick={exportPdf} disabled={exporting || !appts.some((a) => exportSelected[a.id])} className="w-full flex items-center justify-center gap-1.5 bg-neutral-800 dark:bg-neutral-200 text-white dark:text-neutral-900 rounded-lg py-2 text-xs font-medium disabled:opacity-50">
+            <FileDown size={14} /> {exporting ? "جاري التصدير..." : "تصدير PDF"}
+          </button>
         </Card>
-      ))}
+      )}
     </div>
   );
 }
@@ -1287,7 +1597,7 @@ function DoctorQuestionsTab({ lmp }: { lmp: string }) {
             <button onClick={() => toggle(q.id, "is_important", !q.is_important)}>
               <Sparkles size={13} className={q.is_important ? "text-amber-500" : "text-neutral-300"} />
             </button>
-            {q.is_custom && <button onClick={() => del(q.id)} className="text-neutral-400"><X size={12} /></button>}
+            <button onClick={() => del(q.id)} className="text-neutral-400 shrink-0"><X size={12} /></button>
           </div>
         ))}
         <div className="flex gap-2 pt-1">
@@ -1502,8 +1812,13 @@ function BabyNamesTab({ settings, saveSettings }: { settings: Settings; saveSett
       </Card>
 
       <Card className="space-y-2">
-        <p className="text-xs font-semibold">أسماء محفوظة</p>
- <p className="text-[10px] text-neutral-400">دوسي على القلب عشان ترشحي الاسم للتصويت العائلي تحت</p>
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-semibold">أسماء محفوظة</p>
+          <button onClick={() => { load(); loadPoll(); }} className="text-neutral-400 flex items-center gap-1 text-[10px]">
+            <RefreshCw size={12} /> تحديث
+          </button>
+        </div>
+ <p className="text-[10px] text-neutral-400">دوسي على القلب عشان ترشحي الاسم للتصويت العائلي تحت — دوسي "تحديث" عشان تشوفي أحدث عدد الأصوات</p>
         {names.map((n) => (
           <div key={n.id} className="flex items-center justify-between gap-2 text-xs">
             <div className="flex-1">
@@ -1636,8 +1951,28 @@ const VALIDITY_OPTIONS = [
   { key: "week", label: "أسبوع" },
 ];
 
-function PartnerSyncTab() {
+// Round 45 — تسميات وترتيب سوتشات "يشوف إيه" لكل وضع (نفس مفاتيح
+// REVEAL_KEYS في app/api/laha/partner-link/route.ts). كل وضع بيعرض بس
+// السوتشات اللي تخصه + "المزاج" و"الملاحظات" المشتركين بين الاتنين.
+const PARTNER_REVEAL_FIELDS: Record<"cycle" | "pregnancy", { key: string; label: string }[]> = {
+  pregnancy: [
+    { key: "heartbeat", label: "نبض قلب الجنين" },
+    { key: "kicks", label: "تسجيل الركل" },
+    { key: "sonar", label: "آخر صورة سونار" },
+    { key: "mood", label: "المزاج والحالة" },
+    { key: "notes", label: "الملاحظات" },
+  ],
+  cycle: [
+    { key: "ovulation", label: "أيام التبويض" },
+    { key: "fertile", label: "أيام الخصوبة" },
+    { key: "mood", label: "المزاج والحالة" },
+    { key: "notes", label: "الملاحظات" },
+  ],
+};
+
+function PartnerSyncTab({ mode }: { mode: "cycle" | "pregnancy" }) {
   const [link, setLink] = useState<{ token: string; expires_at: string } | null>(null);
+  const [reveal, setReveal] = useState<Record<string, boolean>>({});
   const [validity, setValidity] = useState("24h");
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -1645,16 +1980,28 @@ function PartnerSyncTab() {
 
   useEffect(() => { setOrigin(window.location.origin); }, []);
   const load = async () => {
-    try { const d = await api("/api/laha/partner-link"); setLink(d.link); } catch {}
+    try {
+      const d = await api("/api/laha/partner-link");
+      setLink(d.link);
+      if (d.link?.reveal_config) setReveal(d.link.reveal_config);
+    } catch {}
   };
   useEffect(() => { load(); }, []);
 
   const generate = async () => {
     setBusy(true);
     try {
-      const d = await api("/api/laha/partner-link", { method: "POST", body: JSON.stringify({ validity }) });
+      const d = await api("/api/laha/partner-link", { method: "POST", body: JSON.stringify({ validity, reveal_config: reveal }) });
       setLink(d.link);
+      if (d.link?.reveal_config) setReveal(d.link.reveal_config);
     } catch (e: any) { alert(e.message); } finally { setBusy(false); }
+  };
+
+  const toggleReveal = async (key: string) => {
+    const next = { ...reveal, [key]: !reveal[key] };
+    setReveal(next);
+    if (!link) return; // هيتبعت مع أول توليد لينك
+    try { await api("/api/laha/partner-link", { method: "PATCH", body: JSON.stringify({ reveal_config: next }) }); } catch {}
   };
 
   const shareLink = link ? `${origin}/partner/${link.token}` : "";
@@ -1662,12 +2009,13 @@ function PartnerSyncTab() {
     try { await navigator.clipboard.writeText(shareLink); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
   };
   const expiresText = link ? new Date(link.expires_at).toLocaleString("ar-EG", { dateStyle: "short", timeStyle: "short" }) : "";
+  const fields = PARTNER_REVEAL_FIELDS[mode] || PARTNER_REVEAL_FIELDS.pregnancy;
 
   return (
     <div className="space-y-3">
       <Card className="space-y-3 text-center">
         <Users className="mx-auto text-pink-400" size={28} />
-        <p className="text-sm text-neutral-500">ابعتي لينك لشريكك يشوف فيه ملخص بسيط عن مزاجك والمرحلة اللي فيها — من غير أي تفاصيل حساسة، وبمدة صلاحية تحددينها إنتي.</p>
+        <p className="text-sm text-neutral-500">ابعتي لينك لشريكك يشوف فيه ملخص بسيط عن حالتك — إنتي اللي بتحددي إيه اللي يظهر له تحت، وبمدة صلاحية تحددينها إنتي.</p>
 
         <div className="flex flex-wrap gap-1.5 justify-center">
           {VALIDITY_OPTIONS.map((o) => (
@@ -1678,6 +2026,16 @@ function PartnerSyncTab() {
         <button onClick={generate} disabled={busy} className="w-full bg-pink-500 text-white rounded-xl py-2.5 text-sm font-medium">
           {busy ? "لحظة واحدة..." : link ? "توليد لينك جديد" : "توليد لينك"}
         </button>
+      </Card>
+
+      <Card className="space-y-2.5">
+        <p className="text-xs font-semibold">شريكك يشوف إيه؟</p>
+        {fields.map((f) => (
+          <div key={f.key} className="flex items-center justify-between">
+            <p className="text-xs text-neutral-500">{f.label}</p>
+            <Switch checked={!!reveal[f.key]} onChange={() => toggleReveal(f.key)} />
+          </div>
+        ))}
       </Card>
 
       {link && (
@@ -1744,11 +2102,16 @@ function GenderRevealTab() {
     );
   }
 
-  // Round 43 — "رابط انستاباي يظهر بره، الأم تحطه قبل ما تفتح تعرف ولد ولا
-  // بنت": بقى ظاهر هنا فوق أي حاجة تانية، بغض النظر عن حالة الحفلة (حتى لو
-  // لسه awaiting_setup أو لسه مقفولة) — بدل ما كان محبوس جوه "غرفة الأم" بس.
+  // Round 45 — "اول ما الدكتورة تحط نوع الجنين وتعمل الرقم السري يظهر لينك
+  // التصويت... فوق لينك الانستاباي": رابط التصويت/الهدية بقى ظاهر (مع تعداد
+  // الأصوات) بمجرد ما الحفلة تتسجل (status !== awaiting_setup) — بغض النظر
+  // عن فتح غرفة الأم بالـ PIN — لأن الفكرة إن الناس تصوّت قبل ما الأم نفسها
+  // تعرف، فمينفعش يتحبس وراء نفس القفل اللي بيحجب نوع الجنين. رتّبناه فوق
+  // InstapayCard زي ما اتطلب بالظبط.
   return (
     <div className="space-y-3">
+      {party.status !== "awaiting_setup" && <ShareVoteCard party={party} votes={votes} onRefresh={load} />}
+
       <InstapayCard instapayLink={party.instapay_link} onSaved={load} />
 
       {party.status === "awaiting_setup" && <GenderRevealSetupCard onDone={load} />}
@@ -1770,6 +2133,63 @@ function GenderRevealTab() {
           فمش جوه شرط party.unlocked. */}
       {party.status !== "awaiting_setup" && <ResetPartySection onReset={load} />}
     </div>
+  );
+}
+
+// Round 45 — استُخرج من "غرفة الأم" (كان محبوس وراء الـ PIN) لنفس سبب
+// InstapayCard: الفكرة كلها إن الناس تصوّت قبل ما الأم تعرف — فلينك
+// التصويت وتعداد الأصوات لازم يكونوا متاحين من غير ما تحتاج تفتح غرفة الأم
+// بالرقم السري (اللي أصلًا معاها معرفتش نوع الجنين نفسه محبوس وراه، مش
+// مجرد كونها تشوف اللينك أو التصويت).
+function ShareVoteCard({ party, votes, onRefresh }: { party: any; votes: { boy: number; girl: number }; onRefresh: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const [linkOrigin, setLinkOrigin] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+
+  useEffect(() => { setLinkOrigin(window.location.origin); }, []);
+
+  const shareLink = `${linkOrigin}/laha-reveal/${party.share_token}`;
+  const totalVotes = votes.boy + votes.girl;
+  const boyPct = totalVotes ? Math.round((votes.boy / totalVotes) * 100) : 50;
+  const girlPct = totalVotes ? 100 - boyPct : 50;
+
+  const copyLink = async () => {
+    try { await navigator.clipboard.writeText(shareLink); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
+  };
+  const refresh = async () => {
+    setRefreshing(true);
+    try { await onRefresh(); } finally { setRefreshing(false); }
+  };
+
+  return (
+    <>
+      <Card className="space-y-2">
+        <p className="text-xs font-semibold">رابط الدعوة — ابعتيه لأهلك وصحابك يصوّتوا</p>
+        <div className="flex gap-2">
+          <input readOnly value={shareLink} className="flex-1 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-xs" />
+          <button onClick={copyLink} className="bg-pink-500 text-white rounded-lg px-3"><Copy size={14} /></button>
+        </div>
+        {copied && <p className="text-[10px] text-emerald-500">اتنسخ!</p>}
+        <a href={`https://wa.me/?text=${encodeURIComponent(`صوّتوا معايا: تيم بينك ولا تيم بلو؟ ${shareLink}`)}`} target="_blank" rel="noopener noreferrer"
+          className="block text-center text-xs bg-emerald-500 text-white rounded-lg py-2 font-medium">مشاركة على واتساب</a>
+      </Card>
+
+      <Card className="space-y-2">
+        <div className="flex items-center justify-between">
+          <div className="flex justify-between gap-3 text-xs font-medium">
+            <span className="text-sky-600 dark:text-sky-400">ولد {votes.boy}</span>
+            <span className="text-pink-600 dark:text-pink-400">{votes.girl} بنت</span>
+          </div>
+          <button onClick={refresh} className="text-neutral-400 flex items-center gap-1 text-[10px]">
+            <RefreshCw size={12} className={refreshing ? "animate-spin" : ""} /> تحديث
+          </button>
+        </div>
+        <div className="h-4 rounded-full overflow-hidden flex bg-neutral-100 dark:bg-neutral-800">
+          <div className="h-full bg-sky-400 transition-all" style={{ width: `${boyPct}%` }} />
+          <div className="h-full bg-pink-400 transition-all" style={{ width: `${girlPct}%` }} />
+        </div>
+      </Card>
+    </>
   );
 }
 
@@ -1923,23 +2343,12 @@ function MotherRoom({ party, votes, onRefresh }: { party: any; votes: { boy: num
   const [confirmReveal, setConfirmReveal] = useState(false);
   const [entries, setEntries] = useState<any[]>([]);
   const [openEntry, setOpenEntry] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [linkOrigin, setLinkOrigin] = useState("");
+  const [exportingGuestbook, setExportingGuestbook] = useState(false);
 
-  useEffect(() => { setLinkOrigin(window.location.origin); }, []);
   const loadGuestbook = async () => {
     try { const d = await api("/api/laha/gender-reveal/guestbook"); setEntries(d.entries || []); } catch {}
   };
   useEffect(() => { loadGuestbook(); }, [party?.id]);
-
-  const shareLink = `${linkOrigin}/laha-reveal/${party.share_token}`;
-  const totalVotes = votes.boy + votes.girl;
-  const boyPct = totalVotes ? Math.round((votes.boy / totalVotes) * 100) : 50;
-  const girlPct = totalVotes ? 100 - boyPct : 50;
-
-  const copyLink = async () => {
-    try { await navigator.clipboard.writeText(shareLink); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
-  };
 
   const reveal = async () => {
     if (!confirmReveal) { setConfirmReveal(true); return; }
@@ -1948,30 +2357,47 @@ function MotherRoom({ party, votes, onRefresh }: { party: any; votes: { boy: num
     setConfirmReveal(false);
   };
 
+  // Round 45 — "مفتاح تصدير الجيست بوك كامل بي دي إف": تصدير كل رسائل
+  // الضيوف (اسم/رسالة/تخمين/حالة الهدية) لملف PDF واحد — نفس نمط
+  // exportGroupReferral في reminders/page.tsx (بناء عقدة HTML مخفية،
+  // html2canvas-pro لتحويلها لصورة، jsPDF لتغليفها).
+  const exportGuestbook = async () => {
+    if (!entries.length) return;
+    setExportingGuestbook(true);
+    const node = document.createElement("div");
+    node.style.cssText = "position:fixed;left:-9999px;top:0;width:700px;background:#fff;direction:rtl;font-family:Cairo,sans-serif;padding:24px;";
+    const rowsHtml = entries.map((e) => `
+      <div style="border:1px solid #e5e5e5;border-radius:10px;padding:12px;margin-bottom:10px;">
+        <p style="font-weight:700;font-size:14px;margin:0 0 4px;">${escapeHtml(e.guest_name)}</p>
+        <p style="font-size:12px;color:#444;margin:0 0 6px;">${escapeHtml(e.message)}</p>
+        <p style="font-size:11px;color:#777;margin:0;">
+          ${e.guess_vote ? `خمّنت: ${e.guess_vote === "boy" ? "ولد" : "بنت"}${e.guess_correct !== null ? (e.guess_correct ? " — صح!" : " — غلط") : ""}` : ""}
+          ${e.sent_gift && e.payment_screenshot ? " · بعتت نقطة" : ""}
+        </p>
+      </div>`).join("");
+    node.innerHTML = `
+      <h1 style="font-size:18px;font-weight:700;margin:0 0 4px;">جيست بوك حفلة تيم بينك ولا تيم بلو؟</h1>
+      <p style="font-size:12px;color:#888;margin:0 0 16px;">${entries.length} تهنئة</p>
+      ${rowsHtml}`;
+    document.body.appendChild(node);
+    try {
+      const html2canvas = (await import("html2canvas-pro")).default;
+      if (document.fonts?.ready) await document.fonts.ready;
+      const canvas = await html2canvas(node, { scale: 2, backgroundColor: "#ffffff" });
+      const { jsPDF } = await import("jspdf");
+      const w = canvas.width / 2;
+      const h = canvas.height / 2;
+      const pdf = new jsPDF({ unit: "px", format: [w, h] });
+      pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, w, h);
+      await shareFile(pdf.output("dataurlstring"), "جيست-بوك-الحفلة.pdf", "application/pdf");
+    } finally {
+      document.body.removeChild(node);
+      setExportingGuestbook(false);
+    }
+  };
+
   return (
     <div className="space-y-3">
-      <Card className="space-y-2">
-        <p className="text-xs font-semibold">رابط الدعوة — ابعتيه لأهلك وصحابك يصوّتوا</p>
-        <div className="flex gap-2">
-          <input readOnly value={shareLink} className="flex-1 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-xs" />
-          <button onClick={copyLink} className="bg-pink-500 text-white rounded-lg px-3"><Copy size={14} /></button>
-        </div>
-        {copied && <p className="text-[10px] text-emerald-500">اتنسخ!</p>}
-        <a href={`https://wa.me/?text=${encodeURIComponent(`صوّتوا معايا: تيم بينك ولا تيم بلو؟ ${shareLink}`)}`} target="_blank" rel="noopener noreferrer"
-          className="block text-center text-xs bg-emerald-500 text-white rounded-lg py-2 font-medium">مشاركة على واتساب</a>
-      </Card>
-
-      <Card className="space-y-2">
-        <div className="flex justify-between text-xs font-medium">
-          <span className="text-sky-600 dark:text-sky-400">ولد {votes.boy}</span>
-          <span className="text-pink-600 dark:text-pink-400">{votes.girl} بنت</span>
-        </div>
-        <div className="h-4 rounded-full overflow-hidden flex bg-neutral-100 dark:bg-neutral-800">
-          <div className="h-full bg-sky-400 transition-all" style={{ width: `${boyPct}%` }} />
-          <div className="h-full bg-pink-400 transition-all" style={{ width: `${girlPct}%` }} />
-        </div>
-      </Card>
-
       {!party.popped ? (
         <Card className="text-center space-y-2">
           <button onClick={reveal} className={`w-full rounded-xl py-3 text-sm font-bold text-white ${confirmReveal ? "bg-red-500" : "bg-pink-500"}`}>
@@ -1988,14 +2414,22 @@ function MotherRoom({ party, votes, onRefresh }: { party: any; votes: { boy: num
       )}
 
       <Card className="space-y-2">
-        <p className="text-xs font-semibold">جيست بوك الضيوف ({entries.length})</p>
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-semibold">جيست بوك الضيوف ({entries.length})</p>
+          {!!entries.length && (
+            <button onClick={exportGuestbook} disabled={exportingGuestbook} className="text-pink-500 flex items-center gap-1 text-[10px] disabled:opacity-50">
+              <FileDown size={12} /> {exportingGuestbook ? "جاري التصدير..." : "تصدير PDF"}
+            </button>
+          )}
+        </div>
         <div className="grid grid-cols-2 gap-2">
           {entries.map((e) => (
             <button key={e.id} onClick={() => setOpenEntry(openEntry === e.id ? null : e.id)}
               className="text-right rounded-lg border border-neutral-200 dark:border-neutral-800 p-2.5 space-y-1">
               <p className="text-xs font-semibold truncate">{e.guest_name}</p>
               <p className="text-[10px] text-neutral-400 line-clamp-2">{e.message}</p>
-              {e.sent_gift && <span className="text-[10px] text-emerald-500">بعت نقطة</span>}
+              {/* Round 45 — "ميظهرش إن الضيف بعت نقطة إلا لو رفع صورة الإيصال": بدل ما نعتمد على الـ checkbox بس. */}
+              {e.sent_gift && e.payment_screenshot && <span className="text-[10px] text-emerald-500">بعت نقطة</span>}
             </button>
           ))}
         </div>

@@ -14,9 +14,12 @@ import { verifyPin, newShareToken } from "@/lib/laha/pin";
 //
 // اللي بيحصل عند النجاح: الحفلة بترجع لـ "awaiting_setup" (يعني الدكتورة/
 // الصديقة لازم تسجّل النوع والـ PIN من الأول)، share_token بيتغيّر (أي
-// لينك قديم بيبقى منتهي الصلاحية)، وكل الأصوات المسجلة بتتمسح. الجيست بوك
-// (تهاني الضيوف) وريط الانستاباي بيفضلوا زي ما هم — مش جزء من "نوع الجنين"
-// اللي بيتمسح، ومش مذكورين في طلب المستخدمة كحاجة المفروض تتمسح.
+// لينك قديم بيبقى منتهي الصلاحية)، وكل الأصوات المسجلة بتتمسح.
+// Round 45 — تصحيح: المستخدمة جرّبت مسح شامل فعليًا ولاقت الجيست بوك (تهاني
+// الضيوف) من التجربة القديمة لسه موجود بعد ما بدأت حفلة جديدة — أكدت صراحة
+// إن ده غلط والمفروض يتمسح هو كمان ("كله يتمسح حتى الجيست بوك"). دلوقتي
+// بيتمسح مع الأصوات. لينك الانستاباي وحده فضل زي ما هو — مش مرتبط بحفلة/
+// تجربة معينة، ومحدش اتكلم عنه في البلاغ الجديد.
 export async function POST(req: NextRequest) {
   const userId = await getSessionUserId();
   if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -55,6 +58,7 @@ export async function POST(req: NextRequest) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   await supabaseAdmin.from("laha_gender_reveal_votes").delete().eq("party_id", party.id);
+  await supabaseAdmin.from("laha_gender_reveal_guestbook").delete().eq("party_id", party.id);
 
   return NextResponse.json({ ok: true });
 }

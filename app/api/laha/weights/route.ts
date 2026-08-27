@@ -32,3 +32,17 @@ export async function POST(req: NextRequest) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });
 }
+
+// Round 45 — لازمة عشان "كارت المتابعة" (متابعة الطبيب) يقدر يمسح وزن اتسجل
+// من كارت زيارة اتمسح أو اتشال منه الوزن (راجع syncApptWeight في
+// app/api/laha/appointments — الوزن المتزامن من الكارت بيتحذف بنفس الطريقة
+// لو المستخدمة مسحت القيمة أو مسحت الكارت نفسه).
+export async function DELETE(req: NextRequest) {
+  const userId = await getSessionUserId();
+  if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const logDate = req.nextUrl.searchParams.get("log_date");
+  if (!logDate || !isValidISO(logDate)) return NextResponse.json({ error: "تاريخ غير صالح" }, { status: 400 });
+  const { error } = await supabaseAdmin.from("laha_weights").delete().eq("user_id", userId).eq("log_date", logDate);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ ok: true });
+}
