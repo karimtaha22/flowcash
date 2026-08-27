@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { getSessionUserId } from "@/lib/session";
 
-// "تم دفع القسط" — from the app or from the ✅ button under the Telegram
+//"تم دفع القسط"— from the app or from the button under the Telegram
 // reminder (see lib/telegramBot.ts's installment_paid callback). Marks one
 // specific month's row paid; if that was the last unpaid row, the whole plan
 // flips to completed.

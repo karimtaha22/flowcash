@@ -392,7 +392,7 @@ export default function InstallmentCalculatorModal({
 
           {tab === "singlePlan" && (
             <div className="space-y-4">
-              {planA.error && <p className="text-xs font-medium text-red-600 bg-red-50 dark:bg-red-950 rounded-lg p-2.5">⚠️ {planA.error}</p>}
+ {planA.error && <p className="text-xs font-medium text-red-600 bg-red-50 dark:bg-red-950 rounded-lg p-2.5"> {planA.error}</p>}
 
               <div>
                 <label className={labelCls}>اسم السلعة</label>
@@ -460,7 +460,7 @@ export default function InstallmentCalculatorModal({
                       className={inputCls}
                     />
                     {derivedRate.error ? (
-                      <p className="text-[10px] text-red-500 mt-1">⚠️ {derivedRate.error}</p>
+ <p className="text-[10px] text-red-500 mt-1"> {derivedRate.error}</p>
                     ) : Number(knownMonthly) > 0 ? (
                       <p className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-1">
                         الفايدة السنوية المستنتجة ({interestType === "flat" ? "ثابتة" : "متناقصة"}): <b>{derivedRate.rate}%</b>
@@ -636,7 +636,7 @@ export default function InstallmentCalculatorModal({
               {negotiationProposals ? (
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                   <div className="rounded-xl border border-orange-200 dark:border-orange-900 bg-orange-50/60 dark:bg-orange-950/60 p-3 space-y-2">
-                    <p className="text-xs font-bold text-orange-800 dark:text-orange-300">1️⃣ زيادة مدة السداد</p>
+ <p className="text-xs font-bold text-orange-800 dark:text-orange-300">1⃣ زيادة مدة السداد</p>
                     <p className="text-[11px] text-neutral-500 leading-relaxed">اطلب تمديد فترة التقسيط لحد ما القسط يوصل للمبلغ المستهدف.</p>
                     <div className="bg-white dark:bg-neutral-900 rounded-lg p-2 text-center border border-orange-200 dark:border-orange-900">
                       <span className="text-[10px] text-neutral-400 block">المدة المقترحة</span>
@@ -646,7 +646,7 @@ export default function InstallmentCalculatorModal({
                   </div>
 
                   <div className="rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50/60 dark:bg-amber-950/40 p-3 space-y-2">
-                    <p className="text-xs font-bold text-amber-800 dark:text-amber-300">2️⃣ إضافة دفعة سنوية</p>
+ <p className="text-xs font-bold text-amber-800 dark:text-amber-300">2⃣ إضافة دفعة سنوية</p>
                     <p className="text-[11px] text-neutral-500 leading-relaxed">احتفظ بنفس المدة، وادفع دفعة سنوية إضافية بدل ما القسط الشهري يزيد.</p>
                     <div className="bg-white dark:bg-neutral-900 rounded-lg p-2 text-center border border-amber-200 dark:border-amber-900">
                       <span className="text-[10px] text-neutral-400 block">الدفعة السنوية المقترحة</span>
@@ -655,7 +655,7 @@ export default function InstallmentCalculatorModal({
                   </div>
 
                   <div className="rounded-xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50/60 dark:bg-emerald-950/40 p-3 space-y-2">
-                    <p className="text-xs font-bold text-emerald-800 dark:text-emerald-300">3️⃣ زيادة المقدم</p>
+ <p className="text-xs font-bold text-emerald-800 dark:text-emerald-300">3⃣ زيادة المقدم</p>
                     <p className="text-[11px] text-neutral-500 leading-relaxed">زوّد الدفعة الأولى مقدمًا عشان يقل المبلغ المُقسّط ويوصل القسط للهدف.</p>
                     <div className="bg-white dark:bg-neutral-900 rounded-lg p-2 text-center border border-emerald-200 dark:border-emerald-900">
                       <span className="text-[10px] text-neutral-400 block">المقدم الجديد المقترح</span>
@@ -730,7 +730,7 @@ export default function InstallmentCalculatorModal({
           {tab === "reverse" && (
             <div className="space-y-4">
               <p className="text-[11px] text-neutral-400">اكتشف الفايدة الفعلية اللي هتدفعها لو حد عرض عليك سلعة بالتقسيط — من غير ما يقولك نسبة الفايدة صراحة.</p>
-              {calcReverse.error && <p className="text-xs font-medium text-red-600 bg-red-50 dark:bg-red-950 rounded-lg p-2.5">⚠️ {calcReverse.error}</p>}
+ {calcReverse.error && <p className="text-xs font-medium text-red-600 bg-red-50 dark:bg-red-950 rounded-lg p-2.5"> {calcReverse.error}</p>}
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className={labelCls}>سعر السلعة كاش</label>

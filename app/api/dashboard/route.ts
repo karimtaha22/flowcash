@@ -57,7 +57,7 @@ export async function GET() {
   const byCat: Record<string, { name: string; icon: string; total: number }> = {};
   for (const t of spendables.filter((t) => new Date(t.occurred_at) >= monthStart)) {
     const key = t.categories?.name || "غير مصنف";
-    if (!byCat[key]) byCat[key] = { name: key, icon: t.categories?.icon || "📦", total: 0 };
+ if (!byCat[key]) byCat[key] = { name: key, icon: t.categories?.icon ||"", total: 0};
     byCat[key].total += toEGP(Math.abs(Number(t.amount)), t.currency, rates);
   }
 

@@ -10,10 +10,12 @@ import {
   type CyclePhase,
 } from "@/lib/laha/cycle";
 import { pregnancyInfo, fetalSizeLabel, weekBucket, gestationalMonth } from "@/lib/laha/pregnancy";
+import { GENDER_REVEAL_DUA, genderRevealCongrats } from "@/lib/laha/genderReveal";
 import {
   Heart, Baby, Calendar, Scale, StickyNote, Footprints, Timer, Stethoscope,
   Sparkles, PartyPopper, Copy, Lock, Unlock, Check, X, Wand2, ChevronRight, ChevronLeft, Search,
   CalendarRange, Zap, Users, Plane, Printer,
+  type LucideIcon,
 } from "lucide-react";
 
 // Round 38 — قسم "لها": متابعة الدورة الشهرية والحمل + حفلة "تيم بينك ولا
@@ -60,19 +62,53 @@ const TABS_CYCLE = [
   { key: "partner", label: "الشريك", icon: Users },
 ] as const;
 
-const TABS_PREGNANCY = [
-  { key: "home", label: "الرئيسية", icon: Baby },
-  { key: "kicks", label: "الركلات", icon: Footprints },
-  { key: "contractions", label: "الانقباضات", icon: Timer },
-  { key: "appointments", label: "المواعيد", icon: Stethoscope },
-  { key: "doctor", label: "أسئلة للدكتور", icon: Stethoscope },
-  { key: "names", label: "أسماء المولود", icon: Wand2 },
-  { key: "weight", label: "الوزن", icon: Scale },
-  { key: "notes", label: "ملاحظات", icon: StickyNote },
-  { key: "advice", label: "نصايح الحمل", icon: Sparkles },
-  { key: "partner", label: "الشريك", icon: Users },
-  { key: "reveal", label: "🎈 تيم بينك/بلو", icon: PartyPopper },
-] as const;
+// Round 44 — "تبويبات جوه متابعة الحمل هما تقريبا ١١، خليهم مثلا ٥ وتحتهم
+// ٤ علشان كله يبقى ظاهر": صف تبويبات مسطّح من ١١ عنصر كان بيحتاج سحب أفقي
+// طويل. اتجمّعوا هنا في ٥ مجموعات (الرئيسية مستقلة + ٤ مجموعات فيها من
+// عنصرين لتلاتة كل واحدة) — نفس الـ keys اللي بتتقرا في منطق عرض التبويب
+// تحت (activeTabs === "kicks" إلخ) فضلت زي ما هي بالظبط، بس اتلفّت في
+// مجموعات للعرض بس. اتكتب النوع صراحة (بدل as const) عشان الاتحاد بين
+// مجموعات فيها items مختلفة الطول ميعملش تعارض في أنواع TypeScript.
+type TabItem = { key: string; label: string; icon: LucideIcon };
+type TabGroup = { key: string; label: string; icon: LucideIcon; items: TabItem[] | null };
+
+const TABS_PREGNANCY_GROUPS: TabGroup[] = [
+  { key: "home", label: "الرئيسية", icon: Baby, items: null },
+  {
+    key: "tracking", label: "المتابعة", icon: Footprints,
+    items: [
+      { key: "kicks", label: "الركلات", icon: Footprints },
+      { key: "contractions", label: "الانقباضات", icon: Timer },
+    ],
+  },
+  {
+    key: "medical", label: "الطبية", icon: Stethoscope,
+    items: [
+      { key: "appointments", label: "المواعيد", icon: Stethoscope },
+      { key: "doctor", label: "أسئلة للدكتور", icon: Stethoscope },
+    ],
+  },
+  {
+    key: "daily", label: "اليوميات", icon: StickyNote,
+    items: [
+      { key: "weight", label: "الوزن", icon: Scale },
+      { key: "notes", label: "ملاحظات", icon: StickyNote },
+      { key: "advice", label: "نصايح الحمل", icon: Sparkles },
+    ],
+  },
+  {
+    key: "family", label: "المولود والعائلة", icon: Wand2,
+    items: [
+      { key: "names", label: "أسماء المولود", icon: Wand2 },
+      { key: "reveal", label: "تيم بينك/بلو", icon: PartyPopper },
+      { key: "partner", label: "الشريك", icon: Users },
+    ],
+  },
+];
+
+// كل مفاتيح التبويبات المسطّحة (نفس الاستخدام القديم) — مستخرجة من
+// TABS_PREGNANCY_GROUPS تلقائيًا عشان ميحصلش تكرار/نسيان مفتاح.
+const TABS_PREGNANCY: TabItem[] = TABS_PREGNANCY_GROUPS.flatMap((g) => (g.items ? g.items : [{ key: g.key, label: g.label, icon: g.icon }]));
 
 async function api(url: string, opts?: RequestInit) {
   const res = await fetch(url, { ...opts, headers: { "Content-Type": "application/json", ...(opts?.headers || {}) } });
@@ -173,25 +209,69 @@ export default function LahaPage() {
       </Card>
 
       {/* Round 42 — "نيون بيلف حوالين التبويب لو مش واقف عليها": المستخدم
-          مكنش بيلاحظ إن فيه تبويبات تانية (زي "🎈 تيم بينك/بلو" اللي كان
+          مكنش بيلاحظ إن فيه تبويبات تانية (زي "تيم بينك/بلو" اللي كان
           فاكرها "مش موجودة" أصلاً مع إنها متعملة من راوند 38) — توهج نيون
           خفيف بيلف حوالين كل تبويب مش واقف عليه بيلفت النظر إن فيه محتوى
-          تاني يستاهل يتفتح. */}
-      <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
-        {tabs.map(({ key, label, icon: Icon }) => (
-          <button
-            key={key}
-            onClick={() => setTab(key)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap shrink-0 transition border ${
-              activeTabs === key
-                ? "bg-pink-500 text-white border-transparent"
-                : "bg-neutral-100 dark:bg-neutral-800 text-neutral-500 border-pink-300/70 dark:border-pink-700/60 animate-neon-tab"
-            }`}
-          >
-            <Icon size={13} /> {label}
-          </button>
-        ))}
-      </div>
+          تاني يستاهل يتفتح.
+          Round 44 — في وضع الحمل، صف التبويبات كان ١١ عنصر مسطّح (سحب أفقي
+          طويل) — اتلفّ في ٥ مجموعات (TABS_PREGNANCY_GROUPS)، وأي مجموعة
+          فيها أكتر من عنصر بيظهر تحتها صف تبويبات فرعي (بنفس توهج النيون). */}
+      {settings.mode === "pregnancy" ? (
+        <>
+          <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
+            {TABS_PREGNANCY_GROUPS.map((g) => {
+              const isActiveGroup = g.items ? g.items.some((i) => i.key === activeTabs) : g.key === activeTabs;
+              const Icon = g.icon;
+              return (
+                <button
+                  key={g.key}
+                  onClick={() => setTab(g.items ? g.items[0].key : g.key)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap shrink-0 transition border ${
+                    isActiveGroup
+                      ? "bg-pink-500 text-white border-transparent"
+                      : "bg-neutral-100 dark:bg-neutral-800 text-neutral-500 border-pink-300/70 dark:border-pink-700/60 animate-neon-tab"
+                  }`}
+                >
+                  <Icon size={13} /> {g.label}
+                </button>
+              );
+            })}
+          </div>
+          {TABS_PREGNANCY_GROUPS.filter((g) => g.items && g.items.some((i) => i.key === activeTabs)).map((g) => (
+            <div key={g.key} className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
+              {g.items!.map(({ key, label, icon: Icon }) => (
+                <button
+                  key={key}
+                  onClick={() => setTab(key)}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium whitespace-nowrap shrink-0 transition border ${
+                    activeTabs === key
+                      ? "bg-pink-400 text-white border-transparent"
+                      : "bg-white dark:bg-neutral-900 text-neutral-400 border-pink-200/70 dark:border-pink-800/50 animate-neon-tab"
+                  }`}
+                >
+                  <Icon size={12} /> {label}
+                </button>
+              ))}
+            </div>
+          ))}
+        </>
+      ) : (
+        <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
+          {tabs.map(({ key, label, icon: Icon }) => (
+            <button
+              key={key}
+              onClick={() => setTab(key)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap shrink-0 transition border ${
+                activeTabs === key
+                  ? "bg-pink-500 text-white border-transparent"
+                  : "bg-neutral-100 dark:bg-neutral-800 text-neutral-500 border-pink-300/70 dark:border-pink-700/60 animate-neon-tab"
+              }`}
+            >
+              <Icon size={13} /> {label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {activeTabs === "home" && settings.mode === "cycle" && <CycleHomeTab settings={settings} />}
       {activeTabs === "home" && settings.mode === "pregnancy" && <PregnancyHomeTab settings={settings} />}
@@ -276,7 +356,7 @@ function CycleHomeTab({ settings }: { settings: Settings }) {
     catch (e: any) { alert(e.message); } finally { setBusy(false); }
   };
 
-  const REGULARITY_LABEL: Record<string, string> = { regular: "منتظمة ✅", slight: "فيها تفاوت بسيط", irregular: "غير منتظمة", unknown: "لسه مفيش بيانات كفاية" };
+ const REGULARITY_LABEL: Record<string, string> = { regular:"منتظمة", slight:"فيها تفاوت بسيط", irregular:"غير منتظمة", unknown:"لسه مفيش بيانات كفاية"};
 
   // "شنطة العناية" — بانر لطيف من ٠-٣ أيام قبل الدورة المتوقعة.
   const daysToNextPeriod = info?.nextPeriodDate ? Math.round((new Date(info.nextPeriodDate).getTime() - new Date(todayISO()).getTime()) / 86400000) : null;
@@ -303,12 +383,12 @@ function CycleHomeTab({ settings }: { settings: Settings }) {
 
       {showCareBag && (
         <Card className="bg-pink-50 dark:bg-pink-950/40 border-pink-200 dark:border-pink-900 text-center text-xs font-medium text-pink-600 dark:text-pink-300">
-          🎒 جهزي شنطة العناية — الدورة متوقعة خلال {daysToNextPeriod === 0 ? "اليوم" : `${daysToNextPeriod} يوم`}
+ جهزي شنطة العناية — الدورة متوقعة خلال {daysToNextPeriod === 0 ?"اليوم":`${daysToNextPeriod} يوم`}
         </Card>
       )}
       {showPms && !showCareBag && (
         <Card className="bg-purple-50 dark:bg-purple-950/40 border-purple-200 dark:border-purple-900 text-center text-xs font-medium text-purple-600 dark:text-purple-300">
-          🌙 قربنا على الدورة — لو حاسة بتقلب مزاج أو نفاد صبر، ده طبيعي جدًا، خدي بالك من نفسك شوية
+ قربنا على الدورة — لو حاسة بتقلب مزاج أو نفاد صبر، ده طبيعي جدًا، خدي بالك من نفسك شوية
         </Card>
       )}
 
@@ -324,7 +404,7 @@ function CycleHomeTab({ settings }: { settings: Settings }) {
 
       {gapFillers.length > 0 && (
         <Card className="space-y-2 bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-900">
-          <p className="text-xs font-semibold text-amber-700 dark:text-amber-300">🔎 لاحظنا فجوة كبيرة بين دورتين متسجلتين</p>
+ <p className="text-xs font-semibold text-amber-700 dark:text-amber-300"> لاحظنا فجوة كبيرة بين دورتين متسجلتين</p>
           {gapFillers.map((g) => (
             <div key={g.afterStart + g.beforeStart} className="text-xs space-y-1.5">
               <p className="text-neutral-500">بين {fmtDate(g.afterStart)} و{fmtDate(g.beforeStart)} — ممكن يكون فيه {g.proposedDates.length} دورة {g.proposedDates.length === 1 ? "متسجلتش" : "متسجلوش"}. حابة نضيفهم كتقدير؟</p>
@@ -454,10 +534,10 @@ function CycleCalendar({
                 isSelected ? "border-pink-500 bg-pink-50 dark:bg-pink-950/40" : "border-transparent"
               } ${isToday ? "ring-1 ring-pink-400 font-bold" : ""} text-neutral-600 dark:text-neutral-300`}
             >
-              {isTravelEdge && <span className="absolute -top-2 text-[10px] leading-none">✈️</span>}
+              {isTravelEdge && <Plane size={11} className="absolute -top-2 text-sky-500" />}
               <span>{parseISO(dateISO).d}</span>
               {inTravel ? (
-                <span className="text-[8px] leading-none">✈️</span>
+                <Plane size={8} className="text-sky-400" />
               ) : (
                 DOT_CLASS[cat] && <span className={`w-1.5 h-1.5 rounded-full ${DOT_CLASS[cat]}`} />
               )}
@@ -471,7 +551,7 @@ function CycleCalendar({
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-purple-500" /> التبويض</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-400" /> نافذة الخصوبة</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-sky-300" /> أيام آمنة</span>
-        {travelRange?.start && <span className="flex items-center gap-1">✈️ أيام الرحلة</span>}
+ {travelRange?.start && <span className="flex items-center gap-1"> أيام الرحلة</span>}
       </div>
 
       {selected && (
@@ -492,8 +572,8 @@ function CycleCalendar({
 }
 
 // ─────────────────────────────── التخطيط (Round 40) ──────────────────────
-// تبويب "التخطيط" — سب-تابين زي ما وصف المستخدم في الملف المرجعي: ✈️ السفر
-// والمناسبات (محاكي التوافق + نفس مكوّن التقويم بـ overlay) و⚡ الطاقة
+// تبويب"التخطيط"— سب-تابين زي ما وصف المستخدم في الملف المرجعي: السفر
+// والمناسبات (محاكي التوافق + نفس مكوّن التقويم بـ overlay) و الطاقة
 // (خريطة الإنتاجية حسب المرحلة الهرمونية). تبويب "عاوزة بيبي" من نفس قسم
 // الملف المرجعي اتأجل لراوند قادم (خارج نطاق الميزات الست المتفق عليها).
 const SEGMENT_CATEGORY_CLASS: Record<string, string> = {
@@ -538,14 +618,17 @@ function PlanningTab({ settings }: { settings: Settings }) {
 
   return (
     <div className="space-y-3">
-      <div className="flex rounded-full bg-neutral-100 dark:bg-neutral-800 p-0.5 text-xs">
-        <button onClick={() => setSub("travel")} className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-full font-medium ${sub === "travel" ? "bg-white dark:bg-neutral-700 shadow-sm" : "text-neutral-400"}`}>
+      {/* Round 44 — "تبويبات جوه التخطيط برضوا حواليها نيون": نفس توهج
+          النيون المستخدم في صف التبويبات الرئيسي، هنا حوالين أي سب-تاب مش
+          مفعّل، عشان يبقى شكل متسق في كل التطبيق. */}
+      <div className="flex gap-1 rounded-full bg-neutral-100 dark:bg-neutral-800 p-0.5 text-xs">
+        <button onClick={() => setSub("travel")} className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-full font-medium border ${sub === "travel" ? "bg-white dark:bg-neutral-700 shadow-sm border-transparent" : "text-neutral-400 border-pink-300/70 dark:border-pink-700/60 animate-neon-tab"}`}>
           <Plane size={13} /> السفر والمناسبات
         </button>
-        <button onClick={() => setSub("energy")} className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-full font-medium ${sub === "energy" ? "bg-white dark:bg-neutral-700 shadow-sm" : "text-neutral-400"}`}>
+        <button onClick={() => setSub("energy")} className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-full font-medium border ${sub === "energy" ? "bg-white dark:bg-neutral-700 shadow-sm border-transparent" : "text-neutral-400 border-pink-300/70 dark:border-pink-700/60 animate-neon-tab"}`}>
           <Zap size={13} /> الطاقة والإنتاجية
         </button>
-        <button onClick={() => setSub("baby")} className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-full font-medium ${sub === "baby" ? "bg-white dark:bg-neutral-700 shadow-sm" : "text-neutral-400"}`}>
+        <button onClick={() => setSub("baby")} className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-full font-medium border ${sub === "baby" ? "bg-white dark:bg-neutral-700 shadow-sm border-transparent" : "text-neutral-400 border-pink-300/70 dark:border-pink-700/60 animate-neon-tab"}`}>
           <Baby size={13} /> عاوزة بيبي
         </button>
       </div>
@@ -604,12 +687,12 @@ function PlanningTab({ settings }: { settings: Settings }) {
           {currentPhase && (
             <Card className="bg-gradient-to-b from-pink-50 to-purple-50 dark:from-pink-950 dark:to-purple-950 border-none text-center">
               <p className="text-xs text-neutral-500">دلوقتي في</p>
-              <p className="text-lg font-bold">{PRODUCTIVITY_MAP[currentPhase].emoji} {PRODUCTIVITY_MAP[currentPhase].title}</p>
+              <p className="text-lg font-bold">{PRODUCTIVITY_MAP[currentPhase].title}</p>
             </Card>
           )}
           {(Object.keys(PRODUCTIVITY_MAP) as CyclePhase[]).map((ph) => (
             <Card key={ph} className={`space-y-1.5 text-xs ${currentPhase === ph ? "ring-2 ring-pink-400" : ""}`}>
-              <p className="font-semibold">{PRODUCTIVITY_MAP[ph].emoji} {PHASE_LABEL_AR[ph]} — {PRODUCTIVITY_MAP[ph].title}</p>
+              <p className="font-semibold">{PHASE_LABEL_AR[ph]} — {PRODUCTIVITY_MAP[ph].title}</p>
               <p><b>العمل:</b> {PRODUCTIVITY_MAP[ph].work}</p>
               <p><b>الاجتماعي:</b> {PRODUCTIVITY_MAP[ph].social}</p>
               <p><b>الرياضة:</b> {PRODUCTIVITY_MAP[ph].fitness}</p>
@@ -668,10 +751,10 @@ function fmtDate(iso: string) {
 // Round 40 — الـ API (`/api/laha/daily-logs`) كان جاهز من راوند ٣٨ بلا أي
 // واجهة تستخدمه؛ دلوقتي بقى ليه بطاقة سريعة في الرئيسية — مطلوبة كمان
 // كأساس بيانات حقيقي لتقرير الطبيب وتحليل الأعراض المتكررة. كل ضغطة بتتحفظ
-// فورًا (autosave، من غير زرار حفظ منفصل) مع تأكيد "تم الحفظ ✓" بسيط.
+// فورًا (autosave، من غير زرار حفظ منفصل) مع تأكيد"تم الحفظ"بسيط.
 const MOOD_OPTIONS = [
-  { key: "happy", label: "مبسوطة 😊" }, { key: "calm", label: "هادية 🙂" }, { key: "tired", label: "متعبة 😴" },
-  { key: "sensitive", label: "حساسة 🥺" }, { key: "anxious", label: "قلقانة 😟" }, { key: "irritable", label: "سريعة الانفعال 😤" },
+ { key:"happy", label:"مبسوطة"}, { key:"calm", label:"هادية"}, { key:"tired", label:"متعبة"},
+ { key:"sensitive", label:"حساسة"}, { key:"anxious", label:"قلقانة"}, { key:"irritable", label:"سريعة الانفعال"},
 ];
 const PAIN_OPTIONS = [
   { key: "headache", label: "صداع" }, { key: "cramps", label: "تشنجات" }, { key: "backache", label: "ألم ظهر" },
@@ -736,7 +819,7 @@ function DailyMicroLogCard() {
     <Card className="space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-xs font-semibold">إزيك النهاردة؟</p>
-        {saved && <span className="text-[10px] text-emerald-500">تم الحفظ ✓</span>}
+ {saved && <span className="text-[10px] text-emerald-500">تم الحفظ </span>}
       </div>
       <p className="text-[10px] text-neutral-400">دوسي على أي حاجة تنطبق عليكي — بيتحفظ فورًا من غير ما تعملي حاجة تانية.</p>
 
@@ -805,7 +888,7 @@ function PregnancyHomeTab({ settings }: { settings: Settings }) {
     <div className="space-y-3">
       <Card className="space-y-2">
         <div className="flex items-center justify-between">
-          <p className="text-sm font-semibold">🤰 متابعة الحمل</p>
+ <p className="text-sm font-semibold"> متابعة الحمل</p>
           <p className="text-xs text-neutral-400">الشهر {month} من 10</p>
         </div>
         <div className="relative flex items-center justify-center my-2">
@@ -826,7 +909,7 @@ function PregnancyHomeTab({ settings }: { settings: Settings }) {
         <div className="grid grid-cols-2 gap-2 text-center">
           <div className="bg-sky-50 dark:bg-sky-950/40 rounded-xl p-2.5">
             <p className="text-[10px] text-neutral-400">حجم الجنين تقريبًا</p>
-            <p className="font-bold text-sm">🍇 بحجم {fetalSize}</p>
+ <p className="font-bold text-sm"> بحجم {fetalSize}</p>
           </div>
           <div className="bg-sky-50 dark:bg-sky-950/40 rounded-xl p-2.5">
             <p className="text-[10px] text-neutral-400">الموعد المتوقع للولادة</p>
@@ -840,7 +923,7 @@ function PregnancyHomeTab({ settings }: { settings: Settings }) {
   );
 }
 
-// Round 41 — "🖼️ ألبوم صور السونار": مفيش جدول منفصل للصور (قرار Round 38
+// Round 41 —"ألبوم صور السونار": مفيش جدول منفصل للصور (قرار Round 38
 // المتعمد — الصور بتتحط داخل المواعيد بس، راجع claude/laha-feature.md's
 // قسم "نطاق مبسّط")، فالألبوم هنا بيلمّ أي موعد له صورة (`laha_appointments.
 // image`) ويرتبهم تصاعديًا بتاريخ الزيارة، بدل جدول/API جديد بالكامل.
@@ -859,7 +942,7 @@ function UltrasoundGallery() {
 
   return (
     <Card className="space-y-2">
-      <p className="text-xs font-semibold">🖼️ ألبوم صور السونار</p>
+ <p className="text-xs font-semibold"> ألبوم صور السونار</p>
       <div className="flex gap-2 overflow-x-auto pb-1">
         {withImages.map((a, i) => (
           <button key={a.id} onClick={() => setOpenIdx(i)} className="shrink-0 w-16 h-16 rounded-lg overflow-hidden border border-neutral-200 dark:border-neutral-700">
@@ -944,7 +1027,7 @@ function WeightTab({ settings }: { settings: Settings }) {
 
       {retention && (
         <Card className={`text-xs ${RETENTION_CLASS[retention.type]}`}>
-          <p className="font-medium mb-1">⚖️ ميزان احتباس السوائل</p>
+ <p className="font-medium mb-1"> ميزان احتباس السوائل</p>
           <p>{retention.text}</p>
         </Card>
       )}
@@ -1071,7 +1154,7 @@ function ContractionsTab() {
     <div className="space-y-3">
       {analysis?.shouldGoToHospital && (
         <Card className="bg-red-50 dark:bg-red-950 border-red-200 dark:border-red-900 text-center text-sm font-semibold text-red-600 dark:text-red-400">
-          ⚠️ الانقباضات بقت متقاربة ومستمرة — قربي وقتها، كلمي الدكتور أو روحي المستشفى
+ الانقباضات بقت متقاربة ومستمرة — قربي وقتها، كلمي الدكتور أو روحي المستشفى
         </Card>
       )}
       <Card className="text-center space-y-3 py-6">
@@ -1129,10 +1212,10 @@ function AppointmentsTab() {
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
           {/* Round 42 — لينك المواعيد بتذكير تليجرام تلقائي (يوم قبل + يوم
               الموعد نفسه)، بشرط إن الحساب متربط بالبوت من الإعدادات. */}
-          <p className="text-[11px] text-neutral-400">📲 لو حسابك متربط بتليجرام، هنفكّرك بالموعد ده يوم قبله وصبح يوم الموعد نفسه.</p>
+ <p className="text-[11px] text-neutral-400"> لو حسابك متربط بتليجرام، هنفكّرك بالموعد ده يوم قبله وصبح يوم الموعد نفسه.</p>
           <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="ملاحظات (اختياري)" rows={2} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
           <label className="flex items-center gap-2 text-xs border border-dashed border-neutral-300 dark:border-neutral-700 rounded-lg px-3 py-2 cursor-pointer">
-            {image ? "✅ صورة اتضافت" : "صورة سونار/روشتة (اختياري)"}
+ {image ?"صورة اتضافت":"صورة سونار/روشتة (اختياري)"}
             <input type="file" accept="image/*" className="hidden" onChange={async (e) => { const f = e.target.files?.[0]; if (f) setImage(await shrinkImage(f)); }} />
           </label>
           <div className="flex gap-2">
@@ -1346,17 +1429,17 @@ function BabyNamesTab({ settings, saveSettings }: { settings: Settings; saveSett
 
       <Card className="space-y-3">
         <div className="flex gap-1.5">
-          <button onClick={() => setGender("girl")} className={`flex-1 rounded-lg py-1.5 text-xs font-medium ${gender === "girl" ? "bg-pink-500 text-white" : "bg-neutral-100 dark:bg-neutral-800"}`}>بنت 💗</button>
-          <button onClick={() => setGender("boy")} className={`flex-1 rounded-lg py-1.5 text-xs font-medium ${gender === "boy" ? "bg-sky-500 text-white" : "bg-neutral-100 dark:bg-neutral-800"}`}>ولد 💙</button>
+          <button onClick={() => setGender("girl")} className={`flex-1 rounded-lg py-1.5 text-xs font-medium ${gender === "girl" ? "bg-pink-500 text-white" : "bg-neutral-100 dark:bg-neutral-800"}`}>بنت</button>
+          <button onClick={() => setGender("boy")} className={`flex-1 rounded-lg py-1.5 text-xs font-medium ${gender === "boy" ? "bg-sky-500 text-white" : "bg-neutral-100 dark:bg-neutral-800"}`}>ولد</button>
         </div>
         <button onClick={suggest} disabled={busy} className="relative w-full overflow-hidden flex items-center justify-center gap-1.5 bg-purple-500 text-white rounded-xl py-2.5 text-sm font-medium disabled:opacity-80">
           {busy ? (
             <>
-              <span className="inline-block animate-baby-sway text-base">👶</span>
+              <Baby size={16} className="animate-baby-sway" />
               <span>لحظة واحدة...</span>
             </>
           ) : (
-            <>👶 اختارلي اسم</>
+            <>اختارلي اسم</>
           )}
         </button>
         {suggestError && (
@@ -1420,15 +1503,15 @@ function BabyNamesTab({ settings, saveSettings }: { settings: Settings; saveSett
 
       <Card className="space-y-2">
         <p className="text-xs font-semibold">أسماء محفوظة</p>
-        <p className="text-[10px] text-neutral-400">دوسي على القلب ❤️ عشان ترشحي الاسم للتصويت العائلي تحت</p>
+ <p className="text-[10px] text-neutral-400">دوسي على القلب عشان ترشحي الاسم للتصويت العائلي تحت</p>
         {names.map((n) => (
           <div key={n.id} className="flex items-center justify-between gap-2 text-xs">
             <div className="flex-1">
-              <p className="font-medium">{n.name} {n.gender === "girl" ? "💗" : "💙"}</p>
+              <p className="font-medium">{n.name}</p>
               {n.meaning && <p className="text-neutral-400">{n.meaning}</p>}
               {fatherName.trim() && <p className="text-neutral-400 mt-0.5">الاسم كامل: {fullName(n.name)}</p>}
               {n.selected && voteCounts[n.id] !== undefined && (
-                <p className="text-pink-500 mt-0.5">🗳️ {voteCounts[n.id]} صوت من العيلة</p>
+                <p className="text-pink-500 mt-0.5">{voteCounts[n.id]} صوت من العيلة</p>
               )}
             </div>
             <button onClick={() => toggleSelect(n.id, !n.selected)} className={n.selected ? "text-pink-500" : "text-neutral-300"}>
@@ -1441,8 +1524,8 @@ function BabyNamesTab({ settings, saveSettings }: { settings: Settings; saveSett
       </Card>
 
       <Card className="space-y-2">
-        <p className="text-xs font-semibold">🗳️ تصويت العيلة على الأسماء</p>
-        <p className="text-[10px] text-neutral-400">ابعتي اللينك ده لأي حد في العيلة يصوّت على الأسماء اللي رشحتيها (اللي عليها ❤️ فوق).</p>
+ <p className="text-xs font-semibold"> تصويت العيلة على الأسماء</p>
+ <p className="text-[10px] text-neutral-400">ابعتي اللينك ده لأي حد في العيلة يصوّت على الأسماء اللي رشحتيها (اللي عليها فوق).</p>
         {!pollToken ? (
           <button onClick={() => generatePollLink(false)} disabled={pollBusy} className="w-full bg-pink-500 text-white rounded-xl py-2.5 text-sm font-medium">
             {pollBusy ? "لحظة واحدة..." : "توليد لينك تصويت العيلة"}
@@ -1453,7 +1536,7 @@ function BabyNamesTab({ settings, saveSettings }: { settings: Settings; saveSett
               <input readOnly value={pollShareLink} className="flex-1 text-xs rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 truncate" />
               <button onClick={copyPollLink} className="shrink-0 bg-neutral-800 dark:bg-neutral-200 text-white dark:text-neutral-900 rounded-lg px-3 py-1.5"><Copy size={14} /></button>
             </div>
-            {pollCopied && <p className="text-[10px] text-emerald-500 text-center">اتنسخ! ✅</p>}
+ {pollCopied && <p className="text-[10px] text-emerald-500 text-center">اتنسخ! </p>}
             <a href={`https://wa.me/?text=${encodeURIComponent(`ساعدونا نختار اسم البيبي! صوّتوا هنا: ${pollShareLink}`)}`} target="_blank" rel="noopener noreferrer"
               className="block text-center text-xs bg-emerald-500 text-white rounded-lg py-2 font-medium">مشاركة على واتساب</a>
             <button onClick={() => generatePollLink(true)} disabled={pollBusy} className="w-full text-[11px] text-neutral-400 underline">توليد لينك جديد (بيلغي القديم)</button>
@@ -1604,7 +1687,7 @@ function PartnerSyncTab() {
             <input readOnly value={shareLink} className="flex-1 text-xs rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 truncate" />
             <button onClick={copyLink} className="shrink-0 bg-neutral-800 dark:bg-neutral-200 text-white dark:text-neutral-900 rounded-lg px-3 py-1.5"><Copy size={14} /></button>
           </div>
-          {copied && <p className="text-[10px] text-emerald-500 text-center">اتنسخ! ✅</p>}
+ {copied && <p className="text-[10px] text-emerald-500 text-center">اتنسخ! </p>}
           <a href={`https://wa.me/?text=${encodeURIComponent(`تابع حالتي: ${shareLink}`)}`} target="_blank" rel="noopener noreferrer"
             className="block text-center text-xs bg-emerald-500 text-white rounded-lg py-2 font-medium">مشاركة على واتساب</a>
         </Card>
@@ -1613,7 +1696,7 @@ function PartnerSyncTab() {
   );
 }
 
-// ─────────────────────────────── 🎈 تيم بينك ولا تيم بلو؟ ────────────────
+// ─────────────────────────────── تيم بينك ولا تيم بلو؟ ────────────────
 // حفلة الكشف عن نوع الجنين. راجع تعليقات app/api/laha/gender-reveal/* —
 // الفلسفة الأمنية بالتفصيل هناك (الـ PIN بيتحطه الدكتور/الصديقة، وميترجعش
 // ولا حتى كـ hash لأي حد، وطبقة الحماية إن الـ gender ميترجعش قبل الكشف).
@@ -1632,8 +1715,10 @@ function GenderRevealTab() {
   };
   useEffect(() => { load().finally(() => setLoading(false)); }, []);
   useEffect(() => {
+    // Round 44 — "ريفرش في الخلفية كل ٣ ثواني وقت الحفلة": بدل ٥ ثواني،
+    // عشان الأم تشوف التصويتات لايف بشكل أسرع وهي فاتحة غرفة الأم.
     if (!party?.unlocked) return;
-    const t = setInterval(load, 5000);
+    const t = setInterval(load, 3000);
     return () => clearInterval(t);
   }, [party?.unlocked]);
 
@@ -1699,7 +1784,7 @@ function InstapayCard({ instapayLink, onSaved }: { instapayLink: string | null; 
     try {
       await api("/api/laha/gender-reveal/instapay", { method: "POST", body: JSON.stringify({ instapay_link: instapay }) });
       setSaved(true);
-      setTimeout(() => setSaved(false), 1500);
+      setTimeout(() => setSaved(false), 2500);
       onSaved();
     } catch (e: any) { alert(e.message); }
   };
@@ -1711,7 +1796,8 @@ function InstapayCard({ instapayLink, onSaved }: { instapayLink: string | null; 
         <input value={instapay} onChange={(e) => setInstapay(e.target.value)} placeholder="ipn.eg/S/..." className="flex-1 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-xs" />
         <button onClick={saveInstapay} className="bg-pink-500 text-white rounded-lg px-3 text-xs font-medium">حفظ</button>
       </div>
-      {saved && <p className="text-[10px] text-emerald-500">اتحفظ ✅</p>}
+      {saved && <p className="text-[10px] text-emerald-500">اتحفظ — بيظهر دلوقتي للضيوف كرابط قابل للفتح</p>}
+      {!saved && instapayLink && <p className="text-[10px] text-neutral-400">الرابط المحفوظ حاليًا: {instapayLink}</p>}
     </Card>
   );
 }
@@ -1755,7 +1841,7 @@ function ResetPartySection({ onReset }: { onReset: () => void }) {
       {wantReset && (
         <div className="space-y-2 pt-2 border-t border-neutral-100 dark:border-neutral-800">
           <p className="text-[11px] text-amber-600 dark:text-amber-400 leading-relaxed">
-            ⚠️ ده هيمسح نوع الجنين والرقم السري الحاليين، وهيتطلب من الدكتورة أو الصديقة المقربة تسجيلهم من جديد. هيتولّد رابط تصويت جديد للحفلة، وهتتمسح كل الأصوات المسجلة حاليًا.
+            تنبيه: ده هيمسح نوع الجنين والرقم السري الحاليين، وهيتطلب من الدكتورة أو الصديقة المقربة تسجيلهم من جديد. هيتولّد رابط تصويت جديد للحفلة، وهتتمسح كل الأصوات المسجلة حاليًا.
           </p>
           <input
             value={authCode}
@@ -1797,7 +1883,7 @@ function GenderRevealSetupCard({ onDone }: { onDone: () => void }) {
     return (
       <Card className="text-center space-y-2 py-8">
         <Check className="mx-auto text-emerald-500" size={32} />
-        <p className="text-sm font-semibold">تم تسجيل البيانات بأمان ✅</p>
+        <p className="text-sm font-semibold">تم تسجيل البيانات بأمان</p>
         <p className="text-xs text-neutral-400">دلوقتي رجّعي الموبايل لصاحبة البرنامج — الرقم السري متسجلش في أي مكان تاني، متقوليهولهاش إلا يوم الحفلة.</p>
       </Card>
     );
@@ -1806,7 +1892,7 @@ function GenderRevealSetupCard({ onDone }: { onDone: () => void }) {
   if (!showForm) {
     return (
       <Card className="text-center space-y-3 py-8">
-        <p className="text-sm font-semibold">📱 دلوقتي دّي الموبايل للدكتور أو صديقتك المقربة</p>
+        <p className="text-sm font-semibold">دلوقتي دّي الموبايل للدكتور أو صديقتك المقربة</p>
         <p className="text-xs text-neutral-400 leading-relaxed">
           قوليلها: "افتحي الشاشة دي، سجّلي نوع الجنين، وحطي رقم سري من عندك — وممنوع تقوليلي الرقم إلا يوم حفلة الكشف!" وترفع صورة السونار لو حابة (اختياري).
         </p>
@@ -1819,13 +1905,13 @@ function GenderRevealSetupCard({ onDone }: { onDone: () => void }) {
     <Card className="space-y-3">
       <p className="text-xs text-neutral-400 text-center">دي بياناتك يا دكتورة/يا صديقة — متقوليش الرقم السري لصاحبة البرنامج إلا يوم الحفلة!</p>
       <div className="flex gap-1.5">
-        <button onClick={() => setGender("girl")} className={`flex-1 rounded-lg py-2 text-sm font-medium ${gender === "girl" ? "bg-pink-500 text-white" : "bg-neutral-100 dark:bg-neutral-800"}`}>بنت 💗</button>
-        <button onClick={() => setGender("boy")} className={`flex-1 rounded-lg py-2 text-sm font-medium ${gender === "boy" ? "bg-sky-500 text-white" : "bg-neutral-100 dark:bg-neutral-800"}`}>ولد 💙</button>
+        <button onClick={() => setGender("girl")} className={`flex-1 rounded-lg py-2 text-sm font-medium ${gender === "girl" ? "bg-pink-500 text-white" : "bg-neutral-100 dark:bg-neutral-800"}`}>بنت</button>
+        <button onClick={() => setGender("boy")} className={`flex-1 rounded-lg py-2 text-sm font-medium ${gender === "boy" ? "bg-sky-500 text-white" : "bg-neutral-100 dark:bg-neutral-800"}`}>ولد</button>
       </div>
       <input value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} type="password" inputMode="numeric" placeholder="اختاري رقم سري (٤ أرقام على الأقل)" className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm text-center tracking-widest" />
       <input value={pinConfirm} onChange={(e) => setPinConfirm(e.target.value.replace(/\D/g, ""))} type="password" inputMode="numeric" placeholder="أعيدي كتابة الرقم" className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm text-center tracking-widest" />
       <label className="flex items-center gap-2 text-xs border border-dashed border-neutral-300 dark:border-neutral-700 rounded-lg px-3 py-2 cursor-pointer">
-        {media ? "✅ صورة السونار اتضافت" : "صورة السونار (اختياري)"}
+        {media ? "صورة السونار اتضافت" : "صورة السونار (اختياري)"}
         <input type="file" accept="image/*" className="hidden" onChange={async (e) => { const f = e.target.files?.[0]; if (f) setMedia(await shrinkImage(f)); }} />
       </label>
       <button onClick={submit} disabled={busy} className="w-full bg-pink-500 text-white rounded-xl py-2.5 text-sm font-medium">{busy ? "جاري الحفظ..." : "حفظ وإغلاق"}</button>
@@ -1870,15 +1956,15 @@ function MotherRoom({ party, votes, onRefresh }: { party: any; votes: { boy: num
           <input readOnly value={shareLink} className="flex-1 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-xs" />
           <button onClick={copyLink} className="bg-pink-500 text-white rounded-lg px-3"><Copy size={14} /></button>
         </div>
-        {copied && <p className="text-[10px] text-emerald-500">اتنسخ! ✅</p>}
-        <a href={`https://wa.me/?text=${encodeURIComponent(`صوّتوا معايا: تيم بينك ولا تيم بلو؟ 🎈 ${shareLink}`)}`} target="_blank" rel="noopener noreferrer"
+        {copied && <p className="text-[10px] text-emerald-500">اتنسخ!</p>}
+        <a href={`https://wa.me/?text=${encodeURIComponent(`صوّتوا معايا: تيم بينك ولا تيم بلو؟ ${shareLink}`)}`} target="_blank" rel="noopener noreferrer"
           className="block text-center text-xs bg-emerald-500 text-white rounded-lg py-2 font-medium">مشاركة على واتساب</a>
       </Card>
 
       <Card className="space-y-2">
         <div className="flex justify-between text-xs font-medium">
-          <span className="text-sky-600 dark:text-sky-400">ولد 💙 {votes.boy}</span>
-          <span className="text-pink-600 dark:text-pink-400">{votes.girl} 💗 بنت</span>
+          <span className="text-sky-600 dark:text-sky-400">ولد {votes.boy}</span>
+          <span className="text-pink-600 dark:text-pink-400">{votes.girl} بنت</span>
         </div>
         <div className="h-4 rounded-full overflow-hidden flex bg-neutral-100 dark:bg-neutral-800">
           <div className="h-full bg-sky-400 transition-all" style={{ width: `${boyPct}%` }} />
@@ -1889,14 +1975,15 @@ function MotherRoom({ party, votes, onRefresh }: { party: any; votes: { boy: num
       {!party.popped ? (
         <Card className="text-center space-y-2">
           <button onClick={reveal} className={`w-full rounded-xl py-3 text-sm font-bold text-white ${confirmReveal ? "bg-red-500" : "bg-pink-500"}`}>
-            {confirmReveal ? "دوسي تاني للتأكيد — هيتكشف النوع لكل اللي معاهم اللينك فورًا 🎈" : "دوسي علشان تكشفي النوع دلوقتي 🎈"}
+            {confirmReveal ? "دوسي تاني للتأكيد — هيتكشف النوع لكل اللي معاهم اللينك فورًا" : "دوسي علشان تكشفي النوع دلوقتي"}
           </button>
           {confirmReveal && <button onClick={() => setConfirmReveal(false)} className="text-xs text-neutral-400">إلغاء</button>}
         </Card>
       ) : (
         <Card className="text-center space-y-2 bg-gradient-to-b from-pink-50 to-sky-50 dark:from-pink-950 dark:to-sky-950 border-none">
           <PartyPopper className={`mx-auto ${party.gender === "boy" ? "text-sky-500" : "text-pink-500"}`} size={36} />
-          <h2 className="text-xl font-bold">{party.gender === "boy" ? "🎉 إنه ولد! 💙" : "🎉 إنها بنت! 💗"}</h2>
+          <p className="text-sm text-neutral-600 dark:text-neutral-300 leading-relaxed">{GENDER_REVEAL_DUA}</p>
+          <h2 className="text-lg font-bold">{genderRevealCongrats(party.gender)}</h2>
         </Card>
       )}
 
@@ -1908,7 +1995,7 @@ function MotherRoom({ party, votes, onRefresh }: { party: any; votes: { boy: num
               className="text-right rounded-lg border border-neutral-200 dark:border-neutral-800 p-2.5 space-y-1">
               <p className="text-xs font-semibold truncate">{e.guest_name}</p>
               <p className="text-[10px] text-neutral-400 line-clamp-2">{e.message}</p>
-              {e.sent_gift && <span className="text-[10px] text-emerald-500">💰 بعت نقطة</span>}
+              {e.sent_gift && <span className="text-[10px] text-emerald-500">بعت نقطة</span>}
             </button>
           ))}
         </div>
@@ -1923,8 +2010,8 @@ function MotherRoom({ party, votes, onRefresh }: { party: any; votes: { boy: num
                   <p>{e.message}</p>
                   {e.guess_vote && (
                     <p>
-                      خمّنت: {e.guess_vote === "boy" ? "ولد 💙" : "بنت 💗"}
-                      {e.guess_correct !== null && (e.guess_correct ? " — صح! ✅" : " — غلط ❌")}
+                      خمّنت: {e.guess_vote === "boy" ? "ولد" : "بنت"}
+                      {e.guess_correct !== null && (e.guess_correct ? " — صح!" : " — غلط")}
                     </p>
                   )}
                   {e.payment_screenshot && <img src={e.payment_screenshot} className="rounded-lg max-h-48" />}

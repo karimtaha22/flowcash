@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
   if (botToken) {
     for (const r of recipients || []) {
       try {
-        await sendText(botToken, r.telegram_chat_id as string, `📢 ${message}`);
+ await sendText(botToken, r.telegram_chat_id as string,`${message}`);
         sent++;
       } catch {
         failed++;

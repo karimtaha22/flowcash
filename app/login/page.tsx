@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Footer from "@/components/Footer";
-import { Fingerprint } from "lucide-react";
+import { Fingerprint, Wallet } from "lucide-react";
 
 interface U {
   id: string;
@@ -110,7 +110,7 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center gap-6 px-6 bg-gradient-to-b from-orange-50 to-white dark:from-neutral-950 dark:to-neutral-900">
       <div className="text-center">
-        <div className="text-4xl mb-2">💰</div>
+        <Wallet className="mx-auto mb-2 text-orange-600 dark:text-orange-400" size={40} />
         <h1 className="text-2xl font-bold text-orange-700 dark:text-orange-400">FlowCash</h1>
         <p className="text-neutral-500 text-sm mt-1">إدارة الحسابات الشخصية</p>
       </div>

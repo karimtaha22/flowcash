@@ -98,8 +98,8 @@ interface Debt {
 
 const WITNESS_MODE_LABEL: Record<string, string> = { two_men: "رجلين", man_two_women: "رجل وامرأتان" };
 const EVENT_ICON: Record<string, string> = {
-  created: "📜", payment_recorded: "💰", due_date_extended: "📅",
-  witness_acknowledged: "✅", objection_raised: "⚠️", objection_resolved: "✅", link_revoked: "🚫",
+ created:"", payment_recorded:"", due_date_extended:"",
+ witness_acknowledged:"", objection_raised:"", objection_resolved:"", link_revoked:"",
 };
 const LINK_ROLE_LABEL: Record<string, string> = { debtor: "رابط المدين", creditor_view: "رابط صاحب الدين (يشوف بس)", witness: "رابط شاهد" };
 const VALUE_TYPE_LABEL: Record<string, string> = { currency: "مبلغ مالي", gold: "ذهب", silver: "فضة", other: "أخرى" };
@@ -362,7 +362,7 @@ function PeopleInner() {
   // being part of the copied/pasted link itself.
   const copyLink = async (l: { url: string }, _label: string) => {
     const ok = await copyText(l.url);
-    setCopyMsg(ok ? "✅ تم نسخ الرابط" : `تعذّر النسخ التلقائي — الرابط: ${l.url}`);
+ setCopyMsg(ok ?"تم نسخ الرابط":`تعذّر النسخ التلقائي — الرابط: ${l.url}`);
     setTimeout(() => setCopyMsg(""), ok ? 2500 : 8000);
   };
 
@@ -541,8 +541,8 @@ function PeopleInner() {
             ? `<div style="border-top:1px solid #e5e7eb;margin-top:10px;padding-top:10px;">
                  <p style="font-size:12px;font-weight:700;margin:0 0 6px;">بيانات ${d.direction === "owed_to_me" ? "المدين" : "الدائن"}</p>
                  <div style="font-size:11px;color:#6b7280;line-height:1.8;">
-                   ${exportIncludePhones && d.people?.phone ? `<div>📱 ${d.people.phone}</div>` : ""}
-                   ${exportIncludeAddresses && d.people?.address ? `<div>📍 ${d.people.address}</div>` : ""}
+ ${exportIncludePhones && d.people?.phone ?`<div> ${d.people.phone}</div>`:""}
+ ${exportIncludeAddresses && d.people?.address ?`<div> ${d.people.address}</div>`:""}
                  </div>
                </div>`
             : ""
@@ -562,9 +562,9 @@ function PeopleInner() {
                  ${d.debt_witnesses
                    .map((w) => {
                      const link = d.debt_links?.find((l) => l.witness_id === w.id);
-                     const status = link?.acknowledged_at ? "أشهد ✅" : "لسه ماأشهدش";
+ const status = link?.acknowledged_at ?"أشهد":"لسه ماأشهدش";
                      const name = w.name?.trim() || `شاهد ${w.slot_index}`;
-                     const contact = [exportIncludePhones && w.phone ? `📱 ${w.phone}` : "", exportIncludeAddresses && w.address ? `📍 ${w.address}` : ""].filter(Boolean).join(" · ");
+ const contact = [exportIncludePhones && w.phone ?`${w.phone}`:"", exportIncludeAddresses && w.address ?`${w.address}`:""].filter(Boolean).join("·");
                      return `
                        <div style="display:flex;justify-content:space-between;font-size:11px;color:#6b7280;padding:2px 0;"><span>${name}</span><b>${status}</b></div>
                        ${contact ? `<div style="font-size:10px;color:#9ca3af;padding:0 0 4px;">${contact}</div>` : ""}
@@ -832,7 +832,7 @@ function PeopleInner() {
 
             <label className="flex items-center gap-2 text-xs text-neutral-600 dark:text-neutral-300 border border-dashed border-neutral-300 dark:border-neutral-700 rounded-lg px-3 py-2 cursor-pointer">
               <Camera size={14} />
-              {advForm.id_photo_front ? "✅ صورة البطاقة اتصورت — دوس لتغييرها" : "صورة وش البطاقة (اختياري)"}
+ {advForm.id_photo_front ?"صورة البطاقة اتصورت — دوس لتغييرها":"صورة وش البطاقة (اختياري)"}
               <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onAdvIdPhotoPicked(f); }} />
             </label>
             {advForm.id_photo_front && (

@@ -161,7 +161,7 @@ function PlanningPageInner() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { showMsg(data.error || "حصل خطأ ومتسجلش، حاول تاني", true); setPayConfirm(null); return; }
-      showMsg(`⚠️ اتسجل إن "${payConfirm.name}" اتدفع (${fmt(Number(payConfirm.amount), payConfirm.currency)}) بس متسجلش في مصروفاتك ولا اتخصم من أي حساب.`, true);
+ showMsg(`اتسجل إن"${payConfirm.name}"اتدفع (${fmt(Number(payConfirm.amount), payConfirm.currency)}) بس متسجلش في مصروفاتك ولا اتخصم من أي حساب.`, true);
       setPayConfirm(null);
       loadAll();
     } catch {
@@ -183,8 +183,8 @@ function PlanningPageInner() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { showMsg(data.error || "حصل خطأ ومتسجلش، حاول تاني", true); setPayConfirm(null); return; }
       const accName = accounts.find((a) => a.id === payAccountId)?.name || "الحساب";
-      if (payConfirm.kind === "income") showMsg(`✅ اتسجل الإيداع في حساب ${accName} — ${fmt(Number(payConfirm.amount), payConfirm.currency)}`);
-      else showMsg(`✅ اتخصم من حساب ${accName} — ${fmt(Number(payConfirm.amount), payConfirm.currency)}`);
+ if (payConfirm.kind ==="income") showMsg(`اتسجل الإيداع في حساب ${accName} — ${fmt(Number(payConfirm.amount), payConfirm.currency)}`);
+ else showMsg(`اتخصم من حساب ${accName} — ${fmt(Number(payConfirm.amount), payConfirm.currency)}`);
       setPayConfirm(null);
       loadAll();
     } catch {
@@ -540,7 +540,7 @@ function PlanningPageInner() {
               <RecurringCard key={r.id} r={r} />
             ))}
             {paidRecurring.length > 0 && (
-              <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 pt-2">عمليات مدفوعة ✅</p>
+ <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 pt-2">عمليات مدفوعة </p>
             )}
             {paidRecurring.map((r) => (
               <RecurringCard key={r.id} r={r} />
@@ -592,7 +592,7 @@ function PlanningPageInner() {
                   </div>
                   <div className="flex items-center justify-between text-xs">
                     <span className={over ? "text-red-500 font-medium" : "text-neutral-500"}>{fmt(b.spent, b.currency)} من {fmt(Number(b.monthly_limit), b.currency)} ({b.pct}%)</span>
-                    {over && <span className="text-red-500 font-medium">تخطيت {b.alert_threshold_pct}% ⚠️</span>}
+ {over && <span className="text-red-500 font-medium">تخطيت {b.alert_threshold_pct}% </span>}
                   </div>
                   {editingB === b.id && (
                     <div className="space-y-2 border-t border-neutral-100 dark:border-neutral-800 pt-2">

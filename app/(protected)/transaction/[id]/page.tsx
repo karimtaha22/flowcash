@@ -102,7 +102,7 @@ export default function TransactionDetailPage() {
       if (!res.ok) { showMsg(data.error || "حصل خطأ ومتحفظش التعديل، حاول تاني", true); return; }
       setTx(data.transaction);
       setEditing(false);
-      showMsg("تم حفظ التعديل ✅");
+ showMsg("تم حفظ التعديل");
     } catch {
       showMsg("مفيش اتصال بالإنترنت، حاول تاني", true);
     } finally {
@@ -122,7 +122,7 @@ export default function TransactionDetailPage() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { showMsg(data.error || "حصل خطأ في رفع الإيصال، حاول تاني", true); return; }
       setTx(data.transaction);
-      showMsg("تم رفع الإيصال ✅");
+ showMsg("تم رفع الإيصال");
     } catch {
       showMsg("حصلت مشكلة في رفع الإيصال، حاول تاني", true);
     } finally {
@@ -179,7 +179,7 @@ export default function TransactionDetailPage() {
         </p>
         {tx.source === "bot" && (
           <span className="inline-block text-[11px] bg-sky-50 dark:bg-sky-950 text-sky-600 dark:text-sky-400 rounded-full px-2.5 py-1">
-            📨 جت من تليجرام
+ جت من تليجرام
           </span>
         )}
       </Card>

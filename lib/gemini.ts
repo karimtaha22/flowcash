@@ -91,7 +91,7 @@ export async function verifyIdAgainstSelfie(idFrontDataUrl: string, selfieDataUr
   });
 
   if (!apiKey) {
-    return fallback({ error: "GEMINI_API_KEY مش متسجل — لا في Vercel ولا من إعدادات التوثيق في /admin. التوثيق التلقائي متوقف مؤقتًا." });
+    return fallback({ error: "التوثيق التلقائي متوقف مؤقتًا — حاول تاني لاحقًا أو تواصل مع مسؤول الحساب." });
   }
 
   const idPart = dataUrlToInlinePart(idFrontDataUrl);
@@ -127,7 +127,7 @@ export async function verifyIdAgainstSelfie(idFrontDataUrl: string, selfieDataUr
 
     const data = await res.json();
     if (!res.ok) {
-      return fallback({ error: data?.error?.message || `Gemini API error (${res.status})` });
+      return fallback({ error: data?.error?.message || `تعذر إتمام الطلب (${res.status})، حاول تاني لاحقًا.` });
     }
 
     const text: string | undefined = data?.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -177,7 +177,7 @@ export async function extractIdFields(idFrontDataUrl: string): Promise<IdExtract
   const fallback = (over: Partial<IdExtractionResult>): IdExtractionResult => ({
     ok: false, is_id_legible: false, name: "", id_number: "", ...over,
   });
-  if (!apiKey) return fallback({ error: "GEMINI_API_KEY مش متسجل — لا في Vercel ولا من إعدادات التوثيق في /admin." });
+  if (!apiKey) return fallback({ error: "الاستخراج التلقائي متوقف مؤقتًا — أدخل البيانات يدويًا أو حاول تاني لاحقًا." });
 
   const idPart = dataUrlToInlinePart(idFrontDataUrl);
   if (!idPart) return fallback({ error: "صورة البطاقة وصلت بصيغة غير متوقعة." });
@@ -201,7 +201,7 @@ export async function extractIdFields(idFrontDataUrl: string): Promise<IdExtract
       }),
     });
     const data = await res.json();
-    if (!res.ok) return fallback({ error: data?.error?.message || `Gemini API error (${res.status})` });
+    if (!res.ok) return fallback({ error: data?.error?.message || `تعذر إتمام الطلب (${res.status})، حاول تاني لاحقًا.` });
     const text: string | undefined = data?.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!text) return fallback({ error: "مفيش رد واضح من نظام الاستخراج، حاول تاني." });
     const parsed = JSON.parse(text);
@@ -237,7 +237,7 @@ export async function extractDoctorFields(imageDataUrl: string): Promise<DoctorE
   const fallback = (over: Partial<DoctorExtractionResult>): DoctorExtractionResult => ({
     ok: false, doctor_name: "", doctor_specialty: "", doctor_address: "", ...over,
   });
-  if (!apiKey) return fallback({ error: "GEMINI_API_KEY مش متسجل — لا في Vercel ولا من إعدادات التوثيق في /admin." });
+  if (!apiKey) return fallback({ error: "الاستخراج التلقائي متوقف مؤقتًا — أدخل البيانات يدويًا أو حاول تاني لاحقًا." });
 
   const part = dataUrlToInlinePart(imageDataUrl);
   if (!part) return fallback({ error: "الصورة وصلت بصيغة غير متوقعة." });
@@ -261,7 +261,7 @@ export async function extractDoctorFields(imageDataUrl: string): Promise<DoctorE
       }),
     });
     const data = await res.json();
-    if (!res.ok) return fallback({ error: data?.error?.message || `Gemini API error (${res.status})` });
+    if (!res.ok) return fallback({ error: data?.error?.message || `تعذر إتمام الطلب (${res.status})، حاول تاني لاحقًا.` });
     const text: string | undefined = data?.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!text) return fallback({ error: "مفيش رد واضح من نظام الاستخراج، حاول تاني." });
     const parsed = JSON.parse(text);
@@ -296,7 +296,7 @@ export async function extractMeterReading(imageDataUrl: string, meterType?: stri
   const fallback = (over: Partial<MeterExtractionResult>): MeterExtractionResult => ({
     ok: false, reading_value: null, is_legible: false, ...over,
   });
-  if (!apiKey) return fallback({ error: "GEMINI_API_KEY مش متسجل — لا في Vercel ولا من إعدادات التوثيق في /admin." });
+  if (!apiKey) return fallback({ error: "الاستخراج التلقائي متوقف مؤقتًا — أدخل البيانات يدويًا أو حاول تاني لاحقًا." });
 
   const part = dataUrlToInlinePart(imageDataUrl);
   if (!part) return fallback({ error: "الصورة وصلت بصيغة غير متوقعة." });
@@ -321,7 +321,7 @@ export async function extractMeterReading(imageDataUrl: string, meterType?: stri
       }),
     });
     const data = await res.json();
-    if (!res.ok) return fallback({ error: data?.error?.message || `Gemini API error (${res.status})` });
+    if (!res.ok) return fallback({ error: data?.error?.message || `تعذر إتمام الطلب (${res.status})، حاول تاني لاحقًا.` });
     const text: string | undefined = data?.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!text) return fallback({ error: "مفيش رد واضح من نظام الاستخراج، حاول تاني." });
     const parsed = JSON.parse(text);
@@ -369,7 +369,7 @@ export async function extractReceiptItems(imageDataUrl: string): Promise<Receipt
   const fallback = (over: Partial<ReceiptExtractionResult>): ReceiptExtractionResult => ({
     ok: false, store_name: null, items: [], ...over,
   });
-  if (!apiKey) return fallback({ error: "GEMINI_API_KEY مش متسجل — لا في Vercel ولا من إعدادات التوثيق في /admin." });
+  if (!apiKey) return fallback({ error: "الاستخراج التلقائي متوقف مؤقتًا — أدخل البيانات يدويًا أو حاول تاني لاحقًا." });
 
   const part = dataUrlToInlinePart(imageDataUrl);
   if (!part) return fallback({ error: "الصورة وصلت بصيغة غير متوقعة." });
@@ -393,7 +393,7 @@ export async function extractReceiptItems(imageDataUrl: string): Promise<Receipt
       }),
     });
     const data = await res.json();
-    if (!res.ok) return fallback({ error: data?.error?.message || `Gemini API error (${res.status})` });
+    if (!res.ok) return fallback({ error: data?.error?.message || `تعذر إتمام الطلب (${res.status})، حاول تاني لاحقًا.` });
     const text: string | undefined = data?.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!text) return fallback({ error: "مفيش رد واضح من نظام الاستخراج، حاول تاني." });
     const parsed = JSON.parse(text);
@@ -438,7 +438,7 @@ export async function verifyIdMatchesName(idFrontDataUrl: string, claimedName: s
   const fallback = (over: Partial<IdNameMatchResult>): IdNameMatchResult => ({
     ok: false, is_id_legible: false, name_matches: false, confidence: "low", notes: "", ...over,
   });
-  if (!apiKey) return fallback({ error: "GEMINI_API_KEY مش متسجل." });
+  if (!apiKey) return fallback({ error: "الاستخراج التلقائي متوقف مؤقتًا — أدخل البيانات يدويًا أو حاول تاني لاحقًا." });
 
   const idPart = dataUrlToInlinePart(idFrontDataUrl);
   if (!idPart) return fallback({ error: "صورة البطاقة وصلت بصيغة غير متوقعة." });
@@ -462,7 +462,7 @@ export async function verifyIdMatchesName(idFrontDataUrl: string, claimedName: s
       }),
     });
     const data = await res.json();
-    if (!res.ok) return fallback({ error: data?.error?.message || `Gemini API error (${res.status})` });
+    if (!res.ok) return fallback({ error: data?.error?.message || `تعذر إتمام الطلب (${res.status})، حاول تاني لاحقًا.` });
     const text: string | undefined = data?.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!text) return fallback({ error: "مفيش رد واضح، حاول تاني." });
     const parsed = JSON.parse(text);

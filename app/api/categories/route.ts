@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
     .insert({
       user_id: userId,
       name,
-      icon: icon || "💰",
+ icon: icon ||"",
       kind: kind === "income" ? "income" : "expense",
       keywords: Array.isArray(keywords) ? keywords : [],
     })

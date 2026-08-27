@@ -84,12 +84,12 @@ export async function getWebhookInfo(botToken: string) {
 
 export const MAIN_KEYBOARD = {
   keyboard: [
-    [{ text: "💸 تسجيل مصروف" }, { text: "🏧 سحب من حساب" }],
-    [{ text: "💰 فلوس جاتلي" }, { text: "🔁 تحويل أونلاين" }],
-    [{ text: "📊 تحديث أرصدة" }, { text: "📄 كشف سريع" }],
-    [{ text: "📈 كشف حساب" }, { text: "🔍 استعلام عن مصروف" }],
-    [{ text: "➕ إضافة تذكير" }],
-    [{ text: "🔔 التنبيهات" }, { text: "🔕 كتم/تفعيل تنبيهات البوت" }],
+ [{ text:"تسجيل مصروف"}, { text:"سحب من حساب"}],
+ [{ text:"فلوس جاتلي"}, { text:"تحويل أونلاين"}],
+ [{ text:"تحديث أرصدة"}, { text:"كشف سريع"}],
+ [{ text:"كشف حساب"}, { text:"استعلام عن مصروف"}],
+ [{ text:"إضافة تذكير"}],
+ [{ text:"التنبيهات"}, { text:"كتم/تفعيل تنبيهات البوت"}],
   ],
   resize_keyboard: true,
 };
@@ -97,11 +97,11 @@ export const MAIN_KEYBOARD = {
 // shown during every step of every multi-step flow so the user can always bail
 // out immediately, even before typing/selecting anything for that step.
 export const CANCEL_KEYBOARD = {
-  keyboard: [[{ text: "❌ إنهاء" }]],
+ keyboard: [[{ text:"إنهاء"}]],
   resize_keyboard: true,
 };
 
-export const CANCEL_TEXT = "❌ إنهاء";
+export const CANCEL_TEXT ="إنهاء";
 
 export function sendText(botToken: string, chatId: string | number, text: string, extra: any = {}) {
   return tgCall(botToken, "sendMessage", {

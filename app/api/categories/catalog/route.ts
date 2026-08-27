@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
   const validNew = newCategories.filter((c) => c.name && c.name.trim() && (c.kind === "expense" || c.kind === "income"));
   if (validNew.length) {
     await supabaseAdmin.from("categories").insert(
-      validNew.map((c) => ({ user_id: userId, name: c.name.trim(), icon: c.icon || "💰", kind: c.kind, is_active: true }))
+ validNew.map((c) => ({ user_id: userId, name: c.name.trim(), icon: c.icon ||"", kind: c.kind, is_active: true}))
     );
   }
 

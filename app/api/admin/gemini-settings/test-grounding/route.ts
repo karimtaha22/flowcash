@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
       model,
       usedGrounding,
       reply: text || "(رد فاضي بس الاتصال نجح)",
-      note: usedGrounding ? "النموذج ده بيستخدم البحث الحي فعلاً ✅" : "النموذج رد من غير ما يستخدم البحث الحي — النتيجة ممكن تكون غير دقيقة أو قديمة.",
+ note: usedGrounding ?"النموذج ده بيستخدم البحث الحي فعلاً":"النموذج رد من غير ما يستخدم البحث الحي — النتيجة ممكن تكون غير دقيقة أو قديمة.",
     });
   } catch (e: any) {
     return NextResponse.json({ ok: false, model, error: e?.message || "فشل الاتصال بـ Gemini" });

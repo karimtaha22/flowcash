@@ -71,7 +71,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   if (debt.is_advanced) {
     const otherPartyPhone = (debt as any).people?.phone;
     const { data: witnesses } = await supabaseAdmin.from("debt_witnesses").select("phone").eq("debt_id", id);
-    const msg = `🗑️ تم إلغاء وحذف الدين "${debt.title}" من صاحبه`;
+ const msg =`تم إلغاء وحذف الدين"${debt.title}"من صاحبه`;
     await notifyIfLinkedAccount(otherPartyPhone, msg);
     for (const w of witnesses || []) await notifyIfLinkedAccount(w.phone, msg);
   }

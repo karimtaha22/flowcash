@@ -109,7 +109,7 @@ export default function TransactionRow({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { showMsg(data.error || "حصل خطأ ومتحفظش التعديل، حاول تاني", true); return; }
-      showMsg("تم حفظ التعديل ✅");
+ showMsg("تم حفظ التعديل");
       setExpanded(false);
       onChanged();
     } catch {
@@ -131,7 +131,7 @@ export default function TransactionRow({
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { showMsg(data.error || "حصل خطأ في رفع الإيصال، حاول تاني", true); return; }
       setReceiptUrl(dataUrl);
-      showMsg("تم رفع الإيصال ✅");
+ showMsg("تم رفع الإيصال");
       onChanged();
     } catch {
       showMsg("حصلت مشكلة في رفع الإيصال، حاول تاني", true);

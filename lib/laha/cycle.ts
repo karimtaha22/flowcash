@@ -88,8 +88,8 @@ export const PHASE_LABEL: Record<CyclePhase, string> = {
 // بدون أي استدعاء شبكة أو قاعدة بيانات.
 
 // ─── ٢. خريطة الطاقة والإنتاجية حسب المرحلة الهرمونية ─────────────────────
+// Round 44 — شيل حقل emoji الزخرفي (طلب صريح بشيل أي إيموشن من التطبيق).
 export interface ProductivityGuide {
-  emoji: string;
   title: string;
   work: string;
   social: string;
@@ -97,28 +97,24 @@ export interface ProductivityGuide {
 }
 export const PRODUCTIVITY_MAP: Record<CyclePhase, ProductivityGuide> = {
   menstrual: {
-    emoji: "🌙",
     title: "مرحلة الراحة",
     work: "ركزي على المهام الهادئة والمراجعة بدل الأفكار الجديدة — طاقتك الجسدية أقل دلوقتي وده طبيعي جدًا.",
     social: "مفيش مشكلة تقللي التفاعل الاجتماعي شوية والوقت لنفسك.",
     fitness: "حركة خفيفة بس (مشي، تمدد) — الأفضل تسيبي التمارين القوية للأيام الجاية.",
   },
   follicular: {
-    emoji: "🌱",
     title: "مرحلة الطاقة المتصاعدة",
     work: "أفضل وقت للأفكار الجديدة والتخطيط والمشاريع اللي محتاجة تركيز — طاقتك بتزيد يوم بعد يوم.",
     social: "وقت كويس للقاءات ومناسبات جديدة، مزاجك عادة بيكون متفتح.",
     fitness: "قدرتك على المجهود بتزيد — وقت مناسب لتمارين أقوى شوية.",
   },
   ovulation: {
-    emoji: "☀️",
     title: "أعلى نقطة طاقة في الدورة",
     work: "أفضل وقت للعروض التقديمية والمحادثات المهمة — ثقتك وطاقتك في أعلى مستوى.",
     social: "وقت التواصل الاجتماعي والفعاليات — عادة بتحسي بانفتاح أكتر مع الناس.",
     fitness: "أعلى قدرة على المجهود البدني — استغلي الطاقة دي لو حابة.",
   },
   luteal: {
-    emoji: "🍂",
     title: "مرحلة التركيز والإنهاء",
     work: "وقت كويس لإنهاء المهام العالقة والتنظيم بدل بدء حاجات جديدة — ركزي على التفاصيل.",
     social: "مفيش غلط لو حسيتي إنك عايزة تقللي المناسبات الاجتماعية شوية قرب الدورة.",
@@ -290,7 +286,7 @@ export function describeTravelRange(periods: PeriodLike[], avgCycleLength: numbe
       note: CATEGORY_NOTE[category],
     };
     if (prevCategory === "period" && category !== "period") {
-      seg.extraNote = "من هنا تقدري تستعدي نشاطك العادي 🙂";
+ seg.extraNote ="من هنا تقدري تستعدي نشاطك العادي";
     }
     segments.push(seg);
     i = j + 1;
@@ -300,8 +296,8 @@ export function describeTravelRange(periods: PeriodLike[], avgCycleLength: numbe
   const verdict: "safe" | "caution" = safeDays / totalDays > 0.5 ? "safe" : "caution";
   const verdictText =
     verdict === "safe"
-      ? "✅ إجمالاً الفترة آمنة وتسمح بنشاط عالٍ."
-      : "⚠️ فيه أيام في الرحلة تحتاج انتباه أكتر (دورة أو فرصة حمل عالية) — خططي براحتك وخدي بالك.";
+ ?"إجمالاً الفترة آمنة وتسمح بنشاط عالٍ."
+ :"فيه أيام في الرحلة تحتاج انتباه أكتر (دورة أو فرصة حمل عالية) — خططي براحتك وخدي بالك.";
 
   return { segments, totalDays, safeDays, verdict, verdictText };
 }

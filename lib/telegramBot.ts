@@ -20,20 +20,20 @@ import { getFxRates } from "./fxRates";
 import { startOfDay, startOfWeek, startOfMonth } from "date-fns";
 
 const KEY_MAP: Record<string, string> = {
-  "💸 تسجيل مصروف": "expense",
-  "🏧 سحب من حساب": "withdrawal",
-  "💰 فلوس جاتلي": "income",
-  "🔁 تحويل أونلاين": "transfer",
-  "📊 تحديث أرصدة": "balance_update",
-  "📄 كشف سريع": "quick_statement",
-  "📈 كشف حساب": "account_statement",
-  "🔍 استعلام عن مصروف": "expense_query",
-  "🔔 التنبيهات": "alerts",
-  "🔕 كتم/تفعيل تنبيهات البوت": "toggle_mute",
-  "➕ إضافة تذكير": "add_reminder",
+"تسجيل مصروف":"expense",
+"سحب من حساب":"withdrawal",
+"فلوس جاتلي":"income",
+"تحويل أونلاين":"transfer",
+"تحديث أرصدة":"balance_update",
+"كشف سريع":"quick_statement",
+"كشف حساب":"account_statement",
+"استعلام عن مصروف":"expense_query",
+"التنبيهات":"alerts",
+"كتم/تفعيل تنبيهات البوت":"toggle_mute",
+"إضافة تذكير":"add_reminder",
 };
 
-// round 27 — "➕ إضافة تذكير": asks which of the 3 reminder kinds, then takes
+// round 27 —"إضافة تذكير": asks which of the 3 reminder kinds, then takes
 // one free-text message and saves it as a minimal record of that kind,
 // tagged source:"telegram" so it's visibly distinguishable in the app (see
 // /reminders' UI — each list badges telegram-sourced rows). Deliberately NOT
@@ -54,10 +54,10 @@ async function reply(botToken: string, chatId: string, text: string, keyboard: a
 // Telegram can't show a persistent reply keyboard (like CANCEL_KEYBOARD) and
 // an inline keyboard on the same message — so every step that prompts with
 // an inline keyboard (account pickers, etc.) sends a tiny companion message
-// carrying the ❌ إنهاء button first, then the actual inline-keyboard prompt.
+// carrying the إنهاء button first, then the actual inline-keyboard prompt.
 // This is what makes "إنهاء" reachable at ANY step, not just typed-input ones.
 async function replyInlineWithCancel(botToken: string, chatId: string, text: string, inlineKeyboard: any) {
-  await reply(botToken, chatId, "اضغط ❌ إنهاء في أي وقت لو غيّرت رأيك.", CANCEL_KEYBOARD);
+ await reply(botToken, chatId,"اضغط إنهاء في أي وقت لو غيّرت رأيك.", CANCEL_KEYBOARD);
   return tgCall(botToken, "sendMessage", { chat_id: chatId, text, reply_markup: inlineKeyboard });
 }
 
@@ -69,14 +69,14 @@ export async function handleTelegramMessage(userId: string, botToken: string, ms
 
   if (text === "/start") {
     await clearSession(userId, chatId);
-    return reply(botToken, chatId, `أهلاً بيك في FlowCash 👋\nاختار من الأزرار تحت.`);
+ return reply(botToken, chatId,`أهلاً بيك في FlowCash \nاختار من الأزرار تحت.`);
   }
   // "إنهاء" works at ANY step of ANY flow — even before typing/selecting anything —
   // so an accidental tap (e.g. "سحب من حساب" by mistake) can always be backed out of.
   if (text === "/cancel" || text === CANCEL_TEXT) {
     const hadFlow = !!session?.flow;
     await clearSession(userId, chatId);
-    return reply(botToken, chatId, hadFlow ? "تم الإلغاء ✅ رجعنا للقائمة الرئيسية" : "القائمة الرئيسية 👇");
+ return reply(botToken, chatId, hadFlow ?"تم الإلغاء رجعنا للقائمة الرئيسية":"القائمة الرئيسية");
   }
 
   // photo → treat as receipt for the last created transaction in this session, if any
@@ -88,7 +88,7 @@ export async function handleTelegramMessage(userId: string, botToken: string, ms
       : null;
     if (receiptUrl) {
       await supabaseAdmin.from("transactions").update({ receipt_url: receiptUrl }).eq("id", session.payload.last_tx_id);
-      return reply(botToken, chatId, "تم حفظ الإيصال 📎✅");
+ return reply(botToken, chatId,"تم حفظ الإيصال");
     }
   }
 
@@ -97,7 +97,7 @@ export async function handleTelegramMessage(userId: string, botToken: string, ms
       return reply(
         botToken,
         chatId,
-        "الرسائل الصوتية محتاجة تفعيل مفتاح تحويل الصوت لنص (لسه مش متاح). اكتب المصروف كتابة دلوقتي 🙏"
+"الرسائل الصوتية محتاجة تفعيل مفتاح تحويل الصوت لنص (لسه مش متاح). اكتب المصروف كتابة دلوقتي"
       );
     }
     // Whisper transcription wiring point — left as an extension hook.
@@ -137,10 +137,10 @@ export async function handleTelegramCallback(userId: string, botToken: string, c
   if (prefix === "charity_mute") {
     const todayIso = new Date().toISOString().slice(0, 10);
     await supabaseAdmin.from("app_users").update({ charity_muted_date: todayIso }).eq("id", userId);
-    return reply(botToken, chatId, "تم تسجيل إخراج الصدقة ✅ مش هتوصلك تذكيرات صدقة تانية النهاردة.");
+ return reply(botToken, chatId,"تم تسجيل إخراج الصدقة مش هتوصلك تذكيرات صدقة تانية النهاردة.");
   }
 
-  // "✅ تم الدفع" button on an installment/gam3eya due-day reminder — marks
+ //"تم الدفع"button on an installment/gam3eya due-day reminder — marks
   // that one month's row paid directly from Telegram, same effect as tapping
   // it in the app (see app/api/installments/[id]/payments/[paymentId] and
   // app/api/gam3eya/[id]/payments/[paymentId]). No account/balance is
@@ -152,14 +152,14 @@ export async function handleTelegramCallback(userId: string, botToken: string, c
       .eq("id", value)
       .single();
     if (!payment || (payment as any).installment_plans?.user_id !== userId) return reply(botToken, chatId, "القسط ده مش موجود.");
-    if (payment.status === "paid") return reply(botToken, chatId, "اتسجل قبل كده ✅");
+ if (payment.status ==="paid") return reply(botToken, chatId,"اتسجل قبل كده");
     await supabaseAdmin.from("installment_payments").update({ status: "paid", paid_at: new Date().toISOString() }).eq("id", value);
     const { count } = await supabaseAdmin.from("installment_payments").select("id", { count: "exact", head: true }).eq("plan_id", payment.plan_id).eq("status", "pending");
     if ((count || 0) === 0) await supabaseAdmin.from("installment_plans").update({ status: "completed" }).eq("id", payment.plan_id);
-    return reply(botToken, chatId, `✅ اتسجل قسط "${(payment as any).installment_plans?.item_name}" مدفوع.`);
+ return reply(botToken, chatId,`اتسجل قسط"${(payment as any).installment_plans?.item_name}"مدفوع.`);
   }
 
-  // "✅ اتاخدت" on a medication dose-due reminder — logs the dose exactly
+ //"اتاخدت"on a medication dose-due reminder — logs the dose exactly
   // like POST /api/reminders/medications/[id]/dose does for the in-app
   // button, so both paths share the same next-dose math (lib/medicationSchedule.ts).
   if (prefix === "dose_taken") {
@@ -182,7 +182,7 @@ export async function handleTelegramCallback(userId: string, botToken: string, c
         last_dose_reminded_at: null,
       })
       .eq("id", value);
-    return reply(botToken, chatId, `✅ اتسجلت جرعة "${med.name}"${newRemaining !== null ? ` — باقي ${newRemaining}` : ""}`);
+ return reply(botToken, chatId,`اتسجلت جرعة"${med.name}"${newRemaining !== null ?`— باقي ${newRemaining}`:""}`);
   }
 
   if (prefix === "gam3eya_paid") {
@@ -192,11 +192,11 @@ export async function handleTelegramCallback(userId: string, botToken: string, c
       .eq("id", value)
       .single();
     if (!payment || (payment as any).gam3eyas?.user_id !== userId) return reply(botToken, chatId, "الدفعة دي مش موجودة.");
-    if (payment.status === "paid") return reply(botToken, chatId, "اتسجلت قبل كده ✅");
+ if (payment.status ==="paid") return reply(botToken, chatId,"اتسجلت قبل كده");
     await supabaseAdmin.from("gam3eya_payments").update({ status: "paid", paid_at: new Date().toISOString() }).eq("id", value);
     const { count } = await supabaseAdmin.from("gam3eya_payments").select("id", { count: "exact", head: true }).eq("gam3eya_id", payment.gam3eya_id).eq("status", "pending");
     if ((count || 0) === 0) await supabaseAdmin.from("gam3eyas").update({ status: "completed" }).eq("id", payment.gam3eya_id);
-    return reply(botToken, chatId, `✅ اتسجلت الدفعة في "${(payment as any).gam3eyas?.name || "الجمعية"}".`);
+ return reply(botToken, chatId,`اتسجلت الدفعة في"${(payment as any).gam3eyas?.name ||"الجمعية"}".`);
   }
 
   const session = await getSession(userId, chatId);
@@ -213,7 +213,7 @@ async function startRecurConfirm(userId: string, botToken: string, chatId: strin
   const { data: item } = await supabaseAdmin.from("recurring_items").select("*").eq("id", itemId).eq("user_id", userId).single();
   if (!item) return reply(botToken, chatId, "العنصر ده مش موجود دلوقتي.");
   if (isConfirmedForCurrentPeriod(item)) {
-    return reply(botToken, chatId, "اتسجل قبل كده في نفس المدة دي ✅");
+ return reply(botToken, chatId,"اتسجل قبل كده في نفس المدة دي");
   }
   await setSession(userId, chatId, "recur_confirm", "ask_deduct", { itemId });
   return replyInlineWithCancel(
@@ -233,9 +233,9 @@ async function startFlow(userId: string, botToken: string, chatId: string, flow:
     await setSession(userId, chatId, "add_reminder", "await_type", {});
     return replyInlineWithCancel(botToken, chatId, "هتضيف انهي تذكير؟", {
       inline_keyboard: [
-        [{ text: "📅 تذكير عام", callback_data: "remtype:general" }],
-        [{ text: "💊 دواء", callback_data: "remtype:medication" }],
-        [{ text: "🛒 سوبر ماركت", callback_data: "remtype:grocery" }],
+ [{ text:"تذكير عام", callback_data:"remtype:general"}],
+ [{ text:"دواء", callback_data:"remtype:medication"}],
+ [{ text:"سوبر ماركت", callback_data:"remtype:grocery"}],
       ],
     });
   }
@@ -261,10 +261,10 @@ async function startFlow(userId: string, botToken: string, chatId: string, flow:
   // expense / withdrawal / income / transfer all start by asking amount
   await setSession(userId, chatId, flow, "await_amount", {});
   const prompts: Record<string, string> = {
-    expense: "كام؟ 💸",
-    withdrawal: "هتسحب كام؟ 🏧",
-    income: "وصلك كام؟ 💰",
-    transfer: "هتحول كام؟ 🔁",
+ expense:"كام؟",
+ withdrawal:"هتسحب كام؟",
+ income:"وصلك كام؟",
+ transfer:"هتحول كام؟",
   };
   return reply(botToken, chatId, prompts[flow] || "كام؟", CANCEL_KEYBOARD);
 }
@@ -289,14 +289,14 @@ async function quickStatement(userId: string, botToken: string, chatId: string) 
   const spentToday = spendables.filter((t) => new Date(t.occurred_at) >= dayStart).reduce((s, t) => s + toEGP(Math.abs(Number(t.amount)), t.currency, rates), 0);
   const spentMonth = spendables.filter((t) => new Date(t.occurred_at) >= monthStart).reduce((s, t) => s + toEGP(Math.abs(Number(t.amount)), t.currency, rates), 0);
 
-  const text = `📊 كشف سريع\n\nتملك: ${owned.toLocaleString()} + مستحق لي: ${owedToMe.toLocaleString()}\nمستحق عليّ: ${iOwe.toLocaleString()}\nصافي الثروة: ${net.toLocaleString()} جنيه\n\nصرفت النهاردة: ${spentToday.toLocaleString()}\nصرفت الشهر ده: ${spentMonth.toLocaleString()}`;
+ const text =`كشف سريع\n\nتملك: ${owned.toLocaleString()} + مستحق لي: ${owedToMe.toLocaleString()}\nمستحق عليّ: ${iOwe.toLocaleString()}\nصافي الثروة: ${net.toLocaleString()} جنيه\n\nصرفت النهاردة: ${spentToday.toLocaleString()}\nصرفت الشهر ده: ${spentMonth.toLocaleString()}`;
   return reply(botToken, chatId, text);
 }
 
-// "🔍 استعلام عن مصروف" — today's expenses, plus (as of round 21) any
+//"استعلام عن مصروف"— today's expenses, plus (as of round 21) any
 // pending installment/gam3eya payments due today أو متأخرة — دي مش
 // "transactions" لكنها التزامات مالية فعلية، فطلب المستخدم إنها تظهر هنا
-// كمان بدل ما تفضل مقصورة على "🔔 التنبيهات".
+// كمان بدل ما تفضل مقصورة على"التنبيهات".
 async function expenseQuery(userId: string, botToken: string, chatId: string) {
   const dayStart = startOfDay(new Date());
   const todayIso = new Date().toISOString().slice(0, 10);
@@ -337,7 +337,7 @@ async function expenseQuery(userId: string, botToken: string, chatId: string) {
   );
 
   if (!list.length && !dueInstallments.length && !dueGam3eya.length) {
-    return reply(botToken, chatId, "مفيش مصاريف اتسجلت النهاردة، ولا أقساط/جمعيات مستحقة عليك دلوقتي 👌");
+ return reply(botToken, chatId,"مفيش مصاريف اتسجلت النهاردة، ولا أقساط/جمعيات مستحقة عليك دلوقتي");
   }
 
   const parts: string[] = [];
@@ -348,17 +348,17 @@ async function expenseQuery(userId: string, botToken: string, chatId: string) {
       .map((t) => `• ${t.categories?.icon || ""} ${t.description || t.categories?.name || "مصروف"} — ${Number(t.amount).toLocaleString()} ${t.currency}`)
       .join("\n");
     const more = list.length > 10 ? `\n+${list.length - 10} حركة تانية...` : "";
-    parts.push(`💸 مصاريف النهاردة (${list.length}) — الإجمالي: ${total.toLocaleString()} جنيه تقريبًا\n${lines}${more}`);
+ parts.push(`مصاريف النهاردة (${list.length}) — الإجمالي: ${total.toLocaleString()} جنيه تقريبًا\n${lines}${more}`);
   } else {
-    parts.push("💸 مفيش مصاريف اتسجلت النهاردة لحد دلوقتي.");
+ parts.push("مفيش مصاريف اتسجلت النهاردة لحد دلوقتي.");
   }
-  if (dueInstallments.length) parts.push(`📦 أقساط مستحقة (${dueInstallments.length}):\n${dueInstallments.join("\n")}`);
-  if (dueGam3eya.length) parts.push(`🤝 دفعات جمعيات مستحقة (${dueGam3eya.length}):\n${dueGam3eya.join("\n")}`);
+ if (dueInstallments.length) parts.push(`أقساط مستحقة (${dueInstallments.length}):\n${dueInstallments.join("\n")}`);
+ if (dueGam3eya.length) parts.push(`دفعات جمعيات مستحقة (${dueGam3eya.length}):\n${dueGam3eya.join("\n")}`);
 
-  return reply(botToken, chatId, `🔍 استعلام عن مصروف\n\n${parts.join("\n\n")}\n\nلو عايز بيانات أكتر أو فترة تانية، افتح التطبيق 📱`);
+ return reply(botToken, chatId,`استعلام عن مصروف\n\n${parts.join("\n\n")}\n\nلو عايز بيانات أكتر أو فترة تانية، افتح التطبيق`);
 }
 
-// "🔔 التنبيهات" — same signal as the orange alert banner on the dashboard
+//"التنبيهات"— same signal as the orange alert banner on the dashboard
 // (overdue debts, over-budget categories, due recurring items، وكمان أقساط
 // وجمعيات مستحقة من round 21 — قبل كده كانت ناقصة من هنا رغم إنها موجودة في
 // جرس التنبيهات جوه التطبيق نفسه وفي alerts-count).
@@ -402,11 +402,11 @@ async function alertsReport(userId: string, botToken: string, chatId: string) {
   const gam3eyaList = (overdueGam3eya || []) as any[];
 
   const total = dueRecurring.length + overBudget.length + (overdueDebts || []).length + installmentsList.length + gam3eyaList.length;
-  if (!total) return reply(botToken, chatId, "مفيش تنبيهات دلوقتي، كله تمام ✅");
+ if (!total) return reply(botToken, chatId,"مفيش تنبيهات دلوقتي، كله تمام");
 
   const lines: string[] = [];
-  if (dueRecurring.length) lines.push(`📅 ${dueRecurring.length} مصروف/دخل متكرر مستني تأكيد: ${dueRecurring.map((r) => r.name).join("، ")}`);
-  if (overBudget.length) lines.push(`📊 ${overBudget.length} ميزانية تخطت الحد: ${overBudget.map((b: any) => b.categories?.name || "").filter(Boolean).join("، ")}`);
+ if (dueRecurring.length) lines.push(`${dueRecurring.length} مصروف/دخل متكرر مستني تأكيد: ${dueRecurring.map((r) => r.name).join("،")}`);
+ if (overBudget.length) lines.push(`${overBudget.length} ميزانية تخطت الحد: ${overBudget.map((b: any) => b.categories?.name ||"").filter(Boolean).join("،")}`);
   if ((overdueDebts || []).length) {
     lines.push(
       `⏰ ${overdueDebts!.length} دين متأخر: ` +
@@ -415,24 +415,24 @@ async function alertsReport(userId: string, botToken: string, chatId: string) {
   }
   if (installmentsList.length) {
     lines.push(
-      `📦 ${installmentsList.length} قسط مستحق: ` +
+`${installmentsList.length} قسط مستحق:`+
         installmentsList.map((p) => `${p.installment_plans?.item_name} (${Number(p.amount).toLocaleString()} ${p.installment_plans?.currency})`).join("، ")
     );
   }
   if (gam3eyaList.length) {
     lines.push(
-      `🤝 ${gam3eyaList.length} دفعة جمعية مستحقة: ` +
+`${gam3eyaList.length} دفعة جمعية مستحقة:`+
         gam3eyaList.map((p) => `${p.gam3eyas?.name || "جمعية"}${p.gam3eya_participants?.name ? ` — ${p.gam3eya_participants.name}` : ""} (${Number(p.amount).toLocaleString()} ${p.gam3eyas?.currency})`).join("، ")
     );
   }
 
-  return reply(botToken, chatId, `🔔 عندك ${total} حاجة محتاجة انتباهك\n\n${lines.join("\n")}`);
+ return reply(botToken, chatId,`عندك ${total} حاجة محتاجة انتباهك\n\n${lines.join("\n")}`);
 }
 
-// "🔕 كتم/تفعيل تنبيهات البوت" — زرار ثابت في القايمة الرئيسية (سياسة
+//"كتم/تفعيل تنبيهات البوت"— زرار ثابت في القايمة الرئيسية (سياسة
 // تليجرام بتطلب إن أي بوت يبعت تنبيهات دورية يديك طريقة توقفها بسهولة، وإلا
 // ممكن يتقفل). بيوقف/يشغّل كل التذكيرات الاستباقية (صدقة/زكاة/ديون/متكرر/
-// أقساط/جمعيات) من هنا — الأزرار التفاعلية زي "🔍 استعلام عن مصروف" و"🔔
+// أقساط/جمعيات) من هنا — الأزرار التفاعلية زي"استعلام عن مصروف"و"
 // التنبيهات" بتفضل شغالة عادي لأنها بطلب المستخدم نفسه مش بوش من البوت.
 async function toggleMuteAll(userId: string, botToken: string, chatId: string) {
   const { data: user } = await supabaseAdmin.from("app_users").select("telegram_notifications_muted").eq("id", userId).single();
@@ -442,8 +442,8 @@ async function toggleMuteAll(userId: string, botToken: string, chatId: string) {
     botToken,
     chatId,
     next
-      ? "🔕 تم كتم كل تنبيهات البوت (الصدقة، الزكاة، الديون، المصاريف المتكررة، الأقساط، الجمعيات). تقدر تشغّلها تاني بنفس الزرار في أي وقت.\n\nملحوظة: تقدر تشوف نفس البيانات دايمًا من جرس التنبيهات جوه التطبيق."
-      : "🔔 اتفعّلت تنبيهات البوت تاني ✅"
+ ?"تم كتم كل تنبيهات البوت (الصدقة، الزكاة، الديون، المصاريف المتكررة، الأقساط، الجمعيات). تقدر تشغّلها تاني بنفس الزرار في أي وقت.\n\nملحوظة: تقدر تشوف نفس البيانات دايمًا من جرس التنبيهات جوه التطبيق."
+ :"اتفعّلت تنبيهات البوت تاني"
   );
 }
 
@@ -464,7 +464,7 @@ async function continueFlow(userId: string, botToken: string, chatId: string, se
       return reply(
         botToken,
         chatId,
-        `⚠️ اتسجل إن "${item?.name}" اتدفع (${Number(item?.amount || 0).toLocaleString()} ${item?.currency}) بس متسجلش في مصروفاتك ولا اتخصم من أي حساب.`
+`اتسجل إن"${item?.name}"اتدفع (${Number(item?.amount || 0).toLocaleString()} ${item?.currency}) بس متسجلش في مصروفاتك ولا اتخصم من أي حساب.`
       );
     }
     const accounts = await getAccounts(userId);
@@ -484,8 +484,8 @@ async function continueFlow(userId: string, botToken: string, chatId: string, se
       const accName = acc?.name || "الحساب";
       const msg =
         item.kind === "income"
-          ? `✅ تم الإيداع في حساب ${accName} — ${Number(item.amount).toLocaleString()} ${item.currency} (${item.name})`
-          : `✅ اتخصم من حساب ${accName} — ${Number(item.amount).toLocaleString()} ${item.currency} (${item.name})`;
+ ?`تم الإيداع في حساب ${accName} — ${Number(item.amount).toLocaleString()} ${item.currency} (${item.name})`
+ :`اتخصم من حساب ${accName} — ${Number(item.amount).toLocaleString()} ${item.currency} (${item.name})`;
       return reply(botToken, chatId, msg);
     } catch (e: any) {
       await clearSession(userId, chatId);
@@ -498,16 +498,16 @@ async function continueFlow(userId: string, botToken: string, chatId: string, se
     payload.type = input; // "general" | "medication" | "grocery"
     await setSession(userId, chatId, "add_reminder", "await_text", payload);
     const prompts: Record<string, string> = {
-      general: "اكتب التذكير اللي عايزه ✍️",
-      medication: "اكتب اسم الدواء ✍️",
-      grocery: "اكتب اللي عايز تضيفه للسوبر ماركت ✍️",
+ general:"اكتب التذكير اللي عايزه",
+ medication:"اكتب اسم الدواء",
+ grocery:"اكتب اللي عايز تضيفه للسوبر ماركت",
     };
-    return reply(botToken, chatId, prompts[input] || "اكتب ✍️", CANCEL_KEYBOARD);
+ return reply(botToken, chatId, prompts[input] ||"اكتب", CANCEL_KEYBOARD);
   }
 
   if (flow === "add_reminder" && step === "await_text") {
     const text = input.trim();
-    if (!text) return reply(botToken, chatId, "اكتب نص مش فاضي 🙏");
+ if (!text) return reply(botToken, chatId,"اكتب نص مش فاضي");
     const note = "جاي من تليجرام";
     try {
       if (payload.type === "general") {
@@ -523,7 +523,7 @@ async function continueFlow(userId: string, botToken: string, chatId: string, se
       return reply(botToken, chatId, `في مشكلة: ${e.message}`);
     }
     await clearSession(userId, chatId);
-    return reply(botToken, chatId, `✅ اتسجل "${text}" كـ ${REMINDER_TYPE_LABELS[payload.type] || "تذكير"}. تقدر تكمّل بياناته من التطبيق (زي المعاد أو السعر) لو حابب.`);
+ return reply(botToken, chatId,`اتسجل"${text}"كـ ${REMINDER_TYPE_LABELS[payload.type] ||"تذكير"}. تقدر تكمّل بياناته من التطبيق (زي المعاد أو السعر) لو حابب.`);
   }
 
   // ===== ACCOUNT STATEMENT =====
@@ -539,7 +539,7 @@ async function continueFlow(userId: string, botToken: string, chatId: string, se
       .map((t) => `${new Date(t.occurred_at).toLocaleDateString("ar-EG")} — ${t.type} — ${t.amount} ${t.currency}${t.description ? " — " + t.description : ""}`)
       .join("\n");
     await clearSession(userId, chatId);
-    return reply(botToken, chatId, `📈 ${acc?.name}\nالرصيد: ${acc?.balance} ${acc?.currency}\n\nآخر الحركات:\n${lines || "لا يوجد"}`);
+ return reply(botToken, chatId,`${acc?.name}\nالرصيد: ${acc?.balance} ${acc?.currency}\n\nآخر الحركات:\n${lines ||"لا يوجد"}`);
   }
 
   // ===== BALANCE UPDATE =====
@@ -560,18 +560,18 @@ async function continueFlow(userId: string, botToken: string, chatId: string, se
       });
     }
     await clearSession(userId, chatId);
-    return reply(botToken, chatId, "تم تحديث كل الأرصدة ✅");
+ return reply(botToken, chatId,"تم تحديث كل الأرصدة");
   }
 
   // ===== EXPENSE / WITHDRAWAL / INCOME / TRANSFER =====
   if (["expense", "withdrawal", "income", "transfer"].includes(flow)) {
     if (step === "await_amount") {
       const n = parseAmount(input);
-      if (!n || n <= 0) return reply(botToken, chatId, "اكتب رقم صحيح للمبلغ 🙏");
+ if (!n || n <= 0) return reply(botToken, chatId,"اكتب رقم صحيح للمبلغ");
       payload.amount = n;
       if (flow === "expense") {
         await setSession(userId, chatId, flow, "await_description", payload);
-        return reply(botToken, chatId, "اتصرف في ايه؟ ✍️", CANCEL_KEYBOARD);
+ return reply(botToken, chatId,"اتصرف في ايه؟", CANCEL_KEYBOARD);
       }
       if (flow === "income") {
         await setSession(userId, chatId, flow, "await_source", payload);
@@ -636,7 +636,7 @@ async function continueFlow(userId: string, botToken: string, chatId: string, se
       const delta = payload.kind === "withdrawal" ? Math.abs(payload.amount) : -Math.abs(payload.amount);
       const newBalance = await adjustWallet(userId, payload.currency, delta, payload.kind, "bot");
       await setSession(userId, chatId, null, null, { last_tx_id: payload.last_tx_id });
-      return reply(botToken, chatId, `تم ✅ محفظتك دلوقتي: ${newBalance.toLocaleString()} ${payload.currency}`);
+ return reply(botToken, chatId,`تم محفظتك دلوقتي: ${newBalance.toLocaleString()} ${payload.currency}`);
     } catch (e: any) {
       await clearSession(userId, chatId);
       return reply(botToken, chatId, `في مشكلة: ${e.message}`);
@@ -667,10 +667,10 @@ async function finalizeSimpleTx(userId: string, botToken: string, chatId: string
       flow === "withdrawal" ? "withdrawal" : flow === "expense" && !payload.account_id ? "cash_expense" : null;
     if (walletKind) {
       await setSession(userId, chatId, "wallet_prompt", "ask", { kind: walletKind, amount: Math.abs(payload.amount), currency: tx.currency, last_tx_id: tx.id });
-      await reply(botToken, chatId, `تم تسجيل ${labels[flow]} ✅ (${payload.amount})`, CANCEL_KEYBOARD);
+ await reply(botToken, chatId,`تم تسجيل ${labels[flow]} (${payload.amount})`, CANCEL_KEYBOARD);
       return tgCall(botToken, "sendMessage", {
         chat_id: chatId,
-        text: walletKind === "withdrawal" ? "👛 حط الفلوس دي في محفظتك؟" : "👛 تخصم المبلغ ده من محفظتك؟",
+ text: walletKind ==="withdrawal"?"حط الفلوس دي في محفظتك؟":"تخصم المبلغ ده من محفظتك؟",
         reply_markup: yesNoKeyboard("wallet"),
       });
     }
@@ -678,7 +678,7 @@ async function finalizeSimpleTx(userId: string, botToken: string, chatId: string
     return reply(
       botToken,
       chatId,
-      `تم تسجيل ${labels[flow]} ✅ (${payload.amount})\nابعت صورة الإيصال لو عندك 📎، أو كمّل من الأزرار.`
+`تم تسجيل ${labels[flow]} (${payload.amount})\nابعت صورة الإيصال لو عندك ، أو كمّل من الأزرار.`
     );
   } catch (e: any) {
     await clearSession(userId, chatId);

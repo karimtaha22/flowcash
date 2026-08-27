@@ -201,7 +201,7 @@ function InstallmentsTab({ plans, reload, showMsg }: { plans: InstallmentPlan[];
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { showMsg(data.error || "حصل خطأ ومتحفظش التعديل", true); return; }
-      showMsg("✅ اتحفظ التعديل");
+ showMsg("اتحفظ التعديل");
       setEditPlan(null);
       reload();
     } finally {
@@ -219,7 +219,7 @@ function InstallmentsTab({ plans, reload, showMsg }: { plans: InstallmentPlan[];
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { showMsg(data.error || "حصل خطأ وماتحدثش الجدول", true); return; }
-      showMsg("✅ اتحدث جدول الأقساط الباقية");
+ showMsg("اتحدث جدول الأقساط الباقية");
       setShowCalculator(false);
       setCalculatorPlan(null);
       reload();
@@ -238,7 +238,7 @@ function InstallmentsTab({ plans, reload, showMsg }: { plans: InstallmentPlan[];
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { showMsg(data.error || "حصل خطأ ومتحفظش التعديل", true); return; }
-      showMsg("✅ اتحفظ التعديل");
+ showMsg("اتحفظ التعديل");
       setEditPayment(null);
       reload();
     } finally {
@@ -251,7 +251,7 @@ function InstallmentsTab({ plans, reload, showMsg }: { plans: InstallmentPlan[];
     try {
       const res = await fetch(`/api/installments/${plan.id}/payments/${paymentId}`, { method: "POST" });
       if (!res.ok) { showMsg("حصل خطأ ومتسجلش، حاول تاني", true); return; }
-      showMsg("✅ اتسجل القسط مدفوع");
+ showMsg("اتسجل القسط مدفوع");
       reload();
     } finally {
       setBusy(false);
@@ -265,7 +265,7 @@ function InstallmentsTab({ plans, reload, showMsg }: { plans: InstallmentPlan[];
       for (const p of overdue) {
         await fetch(`/api/installments/${plan.id}/payments/${p.id}`, { method: "POST" });
       }
-      showMsg(`✅ اتسجل ${overdue.length} قسط مدفوعين`);
+ showMsg(`اتسجل ${overdue.length} قسط مدفوعين`);
       setEscalation(null);
       reload();
     } finally {
@@ -282,7 +282,7 @@ function InstallmentsTab({ plans, reload, showMsg }: { plans: InstallmentPlan[];
         body: JSON.stringify({ months: 1 }),
       });
       if (!res.ok) { showMsg("حصل خطأ في إعادة الجدولة", true); return; }
-      showMsg("✅ اتعادت جدولة الأقساط الباقية شهر لقدام");
+ showMsg("اتعادت جدولة الأقساط الباقية شهر لقدام");
       setEscalation(null);
       reload();
     } finally {
@@ -306,7 +306,7 @@ function InstallmentsTab({ plans, reload, showMsg }: { plans: InstallmentPlan[];
         </div>
         <div className="text-xs text-orange-600 dark:text-orange-400 text-left">
           <p>{active.length} قسط شغال</p>
-          <p>{completed.length} خلص ✅</p>
+ <p>{completed.length} خلص </p>
         </div>
       </Card>
 
@@ -399,7 +399,7 @@ function InstallmentsTab({ plans, reload, showMsg }: { plans: InstallmentPlan[];
               currency: v.currency,
             });
             setShowForm(true);
-            showMsg("✅ اتملى الفورم بقيم الحاسبة — راجعها واحفظ");
+ showMsg("اتملى الفورم بقيم الحاسبة — راجعها واحفظ");
           }}
         />
       )}
@@ -422,12 +422,12 @@ function InstallmentsTab({ plans, reload, showMsg }: { plans: InstallmentPlan[];
                   <p className="text-sm font-medium">{plan.item_name}{plan.company_name ? ` — ${plan.company_name}` : ""}</p>
                   <p className="text-[11px] text-neutral-400">
                     {fmt(plan.monthly_amount, plan.currency)}/شهر · {paidCount}/{plan.months_count} اتدفعوا
-                    {plan.status === "completed" && " · خلص ✅"}
+ {plan.status ==="completed"&&"· خلص"}
                     {interestPct !== null && ` · فايدة ${interestPct}%`}
                   </p>
                   {nextPending && (
                     <p className={`text-[11px] mt-0.5 ${overduePending.length > 0 ? "text-red-500 font-medium" : "text-neutral-400"}`}>
-                      {overduePending.length > 0 ? `⚠️ متأخر من ${nextPending.due_date}` : `القسط الجاي: ${fmt(Number(nextPending.amount), plan.currency)} بتاريخ ${nextPending.due_date}`}
+ {overduePending.length > 0 ?`متأخر من ${nextPending.due_date}`:`القسط الجاي: ${fmt(Number(nextPending.amount), plan.currency)} بتاريخ ${nextPending.due_date}`}
                     </p>
                   )}
                 </div>
@@ -547,7 +547,7 @@ function PlanEditModal({
     <Modal onClose={onClose}>
       <p className="font-semibold text-sm">تعديل بيانات القسط</p>
       <p className="text-[11px] text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950 rounded-lg p-2">
-        ⚠️ التعديل هيغيّر بيانات القسط المسجلة عندك.
+ التعديل هيغيّر بيانات القسط المسجلة عندك.
       </p>
       <div>
         <label className="text-[10px] text-neutral-400">اسم السلعة</label>
@@ -769,7 +769,7 @@ function Gam3eyaTab({
     try {
       const res = await fetch(`/api/gam3eya/${g.id}/payments/${paymentId}`, { method: "POST" });
       if (!res.ok) { showMsg("حصل خطأ ومتسجلش", true); return; }
-      showMsg("✅ اتسجلت الدفعة");
+ showMsg("اتسجلت الدفعة");
       reload();
     } finally {
       setBusy(false);
@@ -819,7 +819,7 @@ function Gam3eyaTab({
         body: JSON.stringify({ participant_a: a, participant_b: b }),
       });
       if (!res.ok) { showMsg("حصل خطأ في التبديل", true); return; }
-      showMsg("✅ اتبدل الدور");
+ showMsg("اتبدل الدور");
       setSwapConfirm(null);
       setSwapFirst(null);
       setSwapMode(null);
@@ -952,7 +952,7 @@ function Gam3eyaTab({
                       </div>
                       <input placeholder="العنوان (اختياري)" value={p.address} onChange={(e) => update({ address: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 text-xs" />
                       <label className="flex items-center gap-1.5 text-[10px] text-neutral-400 cursor-pointer">
-                        <Camera size={12} /> {p.id_photo_front ? "✅ اتصورت صورة البطاقة" : "ارفع صورة البطاقة (اختياري)"}
+ <Camera size={12} /> {p.id_photo_front ?"اتصورت صورة البطاقة":"ارفع صورة البطاقة (اختياري)"}
                         <input
                           type="file" accept="image/*" capture="environment" className="hidden"
                           onChange={async (e) => { const f = e.target.files?.[0]; if (f) update({ id_photo_front: await shrinkImage(f) }); }}
@@ -1111,7 +1111,7 @@ function Gam3eyaCard({
     const payoutRow = g.gam3eya_payments.find((p) => p.month_index === g.my_payout_month);
     return (
       <Card className="!p-3 space-y-2">
-        <span className="inline-block text-[9px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400">🙋 جمعية مشترك فيها</span>
+ <span className="inline-block text-[9px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400"> جمعية مشترك فيها</span>
         <div className="flex items-center justify-between cursor-pointer" onClick={onToggle}>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1">
@@ -1126,9 +1126,9 @@ function Gam3eyaCard({
             </div>
             <p className="text-[11px] text-neutral-400">
               {fmt(g.monthly_amount, g.currency)}/شهر · {paidCount}/{g.months_count} اتدفعوا · هتقبض في الشهر {g.my_payout_month}
-              {g.status === "completed" && " · خلصت ✅"}
+ {g.status ==="completed"&&"· خلصت"}
             </p>
-            {nextPending && <p className={`text-[11px] mt-0.5 ${overdue > 0 ? "text-red-500 font-medium" : "text-neutral-400"}`}>{overdue > 0 ? `⚠️ متأخر من ${nextPending.due_date}` : `الدفعة الجاية: ${nextPending.due_date}`}</p>}
+ {nextPending && <p className={`text-[11px] mt-0.5 ${overdue > 0 ?"text-red-500 font-medium":"text-neutral-400"}`}>{overdue > 0 ?`متأخر من ${nextPending.due_date}`:`الدفعة الجاية: ${nextPending.due_date}`}</p>}
           </div>
           <div className="flex items-center gap-1 shrink-0">
             <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="text-neutral-400 hover:text-red-600 p-1"><Trash2 size={14} /></button>
@@ -1150,7 +1150,7 @@ function Gam3eyaCard({
               const isPayout = p.month_index === g.my_payout_month;
               return (
                 <div key={p.id} className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs ${late ? "bg-red-50 dark:bg-red-950 ring-1 ring-red-300 dark:ring-red-800" : isPayout ? "bg-emerald-50 dark:bg-emerald-950" : "bg-neutral-50 dark:bg-neutral-800/50"}`}>
-                  <span>شهر {p.month_index} — {p.due_date}{isPayout ? " 🎁 معاد قبضك" : ""} — {fmt(Number(p.amount), g.currency)}</span>
+ <span>شهر {p.month_index} — {p.due_date}{isPayout ?"معاد قبضك":""} — {fmt(Number(p.amount), g.currency)}</span>
                   {p.status === "paid" ? (
                     <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1"><CheckCircle2 size={12} /> مدفوع</span>
                   ) : (
@@ -1199,8 +1199,8 @@ function Gam3eyaCard({
           const myPayment = g.gam3eya_payments.find((x) => x.participant_id === p.id && x.month_index === currentMonth);
           const overdueForP = g.gam3eya_payments.some((x) => x.participant_id === p.id && x.status === "pending" && x.due_date < today);
           const collected = p.payout_order < currentMonth || (p.payout_order === currentMonth && g.status === "completed");
-          const paidLabel = myPayment ? (myPayment.status === "paid" ? '<span style="color:#059669;font-weight:700;">دفع ✓</span>' : '<span style="color:#dc2626;font-weight:700;">لسه ✗</span>') : "";
-          const stars = exportIncludeRating ? "★".repeat(p.rating || 0) + "☆".repeat(5 - (p.rating || 0)) : "";
+ const paidLabel = myPayment ? (myPayment.status ==="paid"?'<span style="color:#059669;font-weight:700;">دفع </span>':'<span style="color:#dc2626;font-weight:700;">لسه </span>') :"";
+ const stars = exportIncludeRating ?"".repeat(p.rating || 0) +"".repeat(5 - (p.rating || 0)) :"";
           return `
             <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f3f4f6;${overdueForP ? "background:#fef2f2;" : ""}">
               <div style="display:flex;align-items:center;gap:6px;min-width:0;">
@@ -1209,13 +1209,13 @@ function Gam3eyaCard({
                 ${stars ? `<span style="font-size:11px;color:#f59e0b;">${stars}</span>` : ""}
               </div>
               <div style="font-size:11px;text-align:left;flex-shrink:0;">
-                <div>${collected ? '<span style="color:#059669;">قبض ✓</span>' : '<span style="color:#9ca3af;">لسه ما قبضش</span>'}</div>
+ <div>${collected ?'<span style="color:#059669;">قبض </span>':'<span style="color:#9ca3af;">لسه ما قبضش</span>'}</div>
                 <div>${paidLabel}</div>
               </div>
             </div>
             ${
               exportIncludeAddress || exportIncludePhone
-                ? `<div style="font-size:10px;color:#6b7280;padding:2px 0 6px;">${exportIncludePhone && p.phone ? `📱 ${p.phone}` : ""}${exportIncludePhone && exportIncludeAddress && p.phone && p.address ? " · " : ""}${exportIncludeAddress && p.address ? `📍 ${p.address}` : ""}</div>`
+ ?`<div style="font-size:10px;color:#6b7280;padding:2px 0 6px;">${exportIncludePhone && p.phone ?`${p.phone}`:""}${exportIncludePhone && exportIncludeAddress && p.phone && p.address ?"·":""}${exportIncludeAddress && p.address ?`${p.address}`:""}</div>`
                 : ""
             }
             ${exportIncludePhotos && p.id_photo_front ? `<img src="${p.id_photo_front}" style="width:100%;max-height:140px;object-fit:cover;border-radius:8px;margin-bottom:8px;" />` : ""}
@@ -1281,7 +1281,7 @@ function Gam3eyaCard({
 
   return (
     <Card className="!p-3 space-y-2">
-      <span className="inline-block text-[9px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400">🗂️ جمعية أنشأتها انت</span>
+ <span className="inline-block text-[9px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400"> جمعية أنشأتها انت</span>
       <div className="flex items-center justify-between cursor-pointer" onClick={onToggle}>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1">
@@ -1296,7 +1296,7 @@ function Gam3eyaCard({
           </div>
           <p className="text-[11px] text-neutral-400">
             {fmt(g.monthly_amount, g.currency)}/فرد شهريًا · {g.participants_count} فرد
-            {g.status === "completed" && " · خلصت ✅"}
+ {g.status ==="completed"&&"· خلصت"}
           </p>
           {g.status === "active" && (
             <p className="text-[11px] mt-0.5 text-neutral-500">
@@ -1386,7 +1386,7 @@ function Gam3eyaCard({
               </div>
               <input placeholder="العنوان (اختياري)" value={newParticipant.address} onChange={(e) => setNewParticipant({ ...newParticipant, address: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 text-xs" />
               <label className="flex items-center gap-1.5 text-[10px] text-neutral-400 cursor-pointer">
-                <Camera size={12} /> {newParticipant.id_photo_front ? "✅ اتصورت صورة البطاقة" : "ارفع صورة البطاقة (اختياري)"}
+ <Camera size={12} /> {newParticipant.id_photo_front ?"اتصورت صورة البطاقة":"ارفع صورة البطاقة (اختياري)"}
                 <input
                   type="file" accept="image/*" capture="environment" className="hidden"
                   onChange={async (e) => { const f = e.target.files?.[0]; if (f) setNewParticipant({ ...newParticipant, id_photo_front: await shrinkImage(f) }); }}
@@ -1424,7 +1424,7 @@ function Gam3eyaCard({
                     <span className={`font-medium truncate ${overdueForP ? "text-red-500" : ""}`}>{p.name}{p.split_with_name ? ` / ${p.split_with_name}` : ""}</span>
                     {p.split_with_name && <span className="text-[9px] font-semibold text-orange-600 shrink-0" title={`مقسومة بين ${p.name} و${p.split_with_name}`}>÷٢</span>}
                     {overdueForP && <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" title="متأخر عن السداد" />}
-                    {isCollectorNow && <span className="text-[10px] shrink-0">🎁 بيقبض الشهر ده</span>}
+ {isCollectorNow && <span className="text-[10px] shrink-0"> بيقبض الشهر ده</span>}
                     {p.account_verified && <span title="شخص موثّق (حساب FlowCash موثّق بنفس رقم الموبايل)"><BadgeCheck size={13} className="text-blue-500 shrink-0" /></span>}
                     {p.verified ? <ShieldCheck size={13} className="text-emerald-600 shrink-0" /> : <ShieldAlert size={13} className="text-neutral-300 dark:text-neutral-600 shrink-0" />}
                   </button>
@@ -1527,7 +1527,7 @@ function EditGam3eyaInfoModal({
         body: JSON.stringify({ name: name || null, monthly_amount: parseFloat(monthlyAmount), start_date: startDate }),
       });
       if (!res.ok) { showMsg("حصل خطأ ومتحفظش التعديل", true); return; }
-      showMsg("✅ اتحفظ التعديل");
+ showMsg("اتحفظ التعديل");
       onSaved();
     } finally {
       setSaving(false);
@@ -1595,7 +1595,7 @@ function ParticipantDetailModal({
         }),
       });
       if (!res.ok) { showMsg("حصل خطأ ومتحفظش التعديل", true); return; }
-      showMsg("✅ اتحفظ التعديل");
+ showMsg("اتحفظ التعديل");
       onSaved();
     } finally {
       setSaving(false);
@@ -1702,30 +1702,30 @@ function VerifyParticipantModal({
     <Modal onClose={onClose}>
       <p className="font-semibold text-sm">توثيق العضو (اختياري)</p>
       <p className="text-[11px] text-neutral-400 leading-relaxed">
-        دي مش عملية تحقق هوية رسمية زي البنوك — مجرد مقارنة بالذكاء الاصطناعي بين صورة البطاقة والسيلفي، بتديك مؤشر ثقة بس. البيانات بتتحفظ عندك في حسابك فقط.
+        دي مش عملية تحقق هوية رسمية زي البنوك — مجرد مقارنة آلية بين صورة البطاقة والسيلفي بتديك مؤشر ثقة بس. البيانات بتتحفظ عندك في حسابك فقط.
       </p>
 
       <div className="grid grid-cols-3 gap-2">
         <label className="flex flex-col items-center gap-1 border border-dashed border-neutral-300 dark:border-neutral-700 rounded-lg p-2 text-[10px] text-center cursor-pointer">
           <Camera size={16} className="text-neutral-400" />
-          {front ? "✅ اتصورت" : "وش البطاقة"}
+ {front ?"اتصورت":"وش البطاقة"}
           <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) pick(f, setFront); }} />
         </label>
         <label className="flex flex-col items-center gap-1 border border-dashed border-neutral-300 dark:border-neutral-700 rounded-lg p-2 text-[10px] text-center cursor-pointer">
           <Camera size={16} className="text-neutral-400" />
-          {back ? "✅ اتصورت" : "ضهر البطاقة (اختياري)"}
+ {back ?"اتصورت":"ضهر البطاقة (اختياري)"}
           <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) pick(f, setBack); }} />
         </label>
         <label className="flex flex-col items-center gap-1 border border-dashed border-neutral-300 dark:border-neutral-700 rounded-lg p-2 text-[10px] text-center cursor-pointer">
           <Camera size={16} className="text-neutral-400" />
-          {selfie ? "✅ اتصورت" : "سيلفي حي"}
+ {selfie ?"اتصورت":"سيلفي حي"}
           <input type="file" accept="image/*" capture="user" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) pick(f, setSelfie); }} />
         </label>
       </div>
 
       {result && (
         <div className={`text-xs rounded-lg p-2 space-y-1 ${result.verified ? "bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300" : "bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300"}`}>
-          <p className="font-medium">{result.verified ? "✅ اتوثق" : "⚠️ مش متطابق / مش واضح"}</p>
+ <p className="font-medium">{result.verified ?"اتوثق":"مش متطابق / مش واضح"}</p>
           {result.notes && <p>{result.notes}</p>}
           {result.error && <p>{result.error}</p>}
         </div>
@@ -1814,14 +1814,14 @@ function SimulatorPanel({ kind = "gam3eya" }: { kind?: "gam3eya" | "installment"
             <p className="font-medium">= الإجمالي الشهري بعد كده: {fmt(newTotal, currency)}</p>
             {snapshot && snapshot.outstandingDebts > 0 && (
               <p className="text-amber-600 dark:text-amber-400 pt-1 border-t border-neutral-200 dark:border-neutral-700">
-                ⚠️ عندك كمان ديون متبقية بإجمالي {fmt(snapshot.outstandingDebts, currency)} (مش محسوبة في الإجمالي فوق لأنها مش التزام شهري ثابت).
+ عندك كمان ديون متبقية بإجمالي {fmt(snapshot.outstandingDebts, currency)} (مش محسوبة في الإجمالي فوق لأنها مش التزام شهري ثابت).
               </p>
             )}
           </div>
 
           {remaining !== null && (
             <div className={`rounded-lg p-2.5 text-xs font-medium ${remaining >= 0 ? "bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300" : "bg-red-50 dark:bg-red-950 text-red-600 dark:text-red-400"}`}>
-              {remaining >= 0 ? `✅ هيفضلك حوالي ${fmt(remaining, currency)} من دخلك بعد كل الالتزامات` : `⚠️ الالتزامات هتتخطى دخلك بـ ${fmt(Math.abs(remaining), currency)}`}
+ {remaining >= 0 ?`هيفضلك حوالي ${fmt(remaining, currency)} من دخلك بعد كل الالتزامات`:`الالتزامات هتتخطى دخلك بـ ${fmt(Math.abs(remaining), currency)}`}
             </div>
           )}
         </>

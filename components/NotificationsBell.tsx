@@ -55,7 +55,7 @@ export default function NotificationsBell() {
           >
             <p className="px-4 py-3 text-sm font-bold border-b border-neutral-100 dark:border-neutral-800">التنبيهات</p>
             {items.length === 0 ? (
-              <p className="px-4 py-6 text-xs text-center text-neutral-400">مفيش تنبيهات دلوقتي 👍</p>
+ <p className="px-4 py-6 text-xs text-center text-neutral-400">مفيش تنبيهات دلوقتي </p>
             ) : (
               <div className="max-h-80 overflow-y-auto divide-y divide-neutral-100 dark:divide-neutral-800">
                 {items.map((it, i) => (

@@ -17,7 +17,7 @@ export default function CategoryManager() {
   const [newCats, setNewCats] = useState<{ name: string; icon: string; kind: "expense" | "income" }[]>([]);
   const [kind, setKind] = useState<"expense" | "income">("expense");
   const [newName, setNewName] = useState("");
-  const [newIcon, setNewIcon] = useState("💰");
+ const [newIcon, setNewIcon] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
@@ -52,7 +52,7 @@ export default function CategoryManager() {
     if (!newName.trim()) return;
     setNewCats((prev) => [...prev, { name: newName.trim(), icon: newIcon, kind }]);
     setNewName("");
-    setNewIcon("💰");
+ setNewIcon("");
   };
 
   const removePendingNew = (idx: number) => setNewCats((prev) => prev.filter((_, i) => i !== idx));
@@ -70,7 +70,7 @@ export default function CategoryManager() {
         body: JSON.stringify({ activate, deactivate, newCategories: newCats }),
       });
       if (!res.ok) { setMsg("حصل خطأ ومتحفظش، حاول تاني"); return; }
-      setMsg("تم الحفظ ✅ — دي التصنيفات اللي هتظهرلك في البرنامج");
+ setMsg("تم الحفظ — دي التصنيفات اللي هتظهرلك في البرنامج");
       load();
     } catch {
       setMsg("مفيش اتصال بالإنترنت، حاول تاني");

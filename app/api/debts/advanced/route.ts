@@ -147,11 +147,11 @@ export async function POST(req: NextRequest) {
   // linked) + the in-app bell picks it up on its own (see alerts-count).
   const otherPartyLink = insertedLinks.find((l) => l.role === otherPartyRole)!;
   const otherPartyLabel = otherPartyRole === "debtor" ? "طلب توثيق دين عليك" : "طلب مراجعة دين ليك";
-  await notifyIfLinkedAccount(person.phone, `📜 ${otherPartyLabel}\n"${title}"\n${debtLinkUrl(otherPartyLink.token)}`);
+ await notifyIfLinkedAccount(person.phone,`${otherPartyLabel}\n"${title}"\n${debtLinkUrl(otherPartyLink.token)}`);
 
   for (const w of insertedWitnesses) {
     const link = insertedLinks.find((l) => l.witness_id === w.id)!;
-    await notifyIfLinkedAccount(w.phone, `📜 طلب شهادة على دين\n"${title}"\n${debtLinkUrl(link.token)}`);
+ await notifyIfLinkedAccount(w.phone,`طلب شهادة على دين\n"${title}"\n${debtLinkUrl(link.token)}`);
   }
 
   return NextResponse.json({

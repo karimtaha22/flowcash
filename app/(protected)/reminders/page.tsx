@@ -64,10 +64,10 @@ function PhotoCaptureRow({ onPick }: { onPick: (dataUrl: string) => void }) {
 export default function RemindersPage() {
   const [tab, setTab] = useState<Tab>("grocery");
   const tabs: { key: Tab; label: string }[] = [
-    { key: "grocery", label: "🛒 سوبر ماركت" },
-    { key: "general", label: "📅 عامة" },
-    { key: "medications", label: "💊 أدوية" },
-    { key: "utility", label: "🔌 عدادات" },
+ { key:"grocery", label:"سوبر ماركت"},
+ { key:"general", label:"عامة"},
+ { key:"medications", label:"أدوية"},
+ { key:"utility", label:"عدادات"},
   ];
   return (
     <div className="space-y-4">
@@ -658,7 +658,7 @@ function GroceryTab() {
         await fetch(`/api/reminders/grocery/lists/${replacingListId}`, { method: "DELETE" });
         setReplacingListId(null);
       }
-      setMsg("تم حفظ القائمة ✅");
+ setMsg("تم حفظ القائمة");
       setListName("");
       setLines([]);
       setListText("");
@@ -865,7 +865,7 @@ function GroceryTab() {
               return;
             }
             const names = data.saved.map((s: any) => s.name).join("، ");
-            setReceiptMsg({ ok: true, text: `تم تحديث سعر ${data.saved.length} صنف من الإيصال: ${names} ✅` });
+ setReceiptMsg({ ok: true, text:`تم تحديث سعر ${data.saved.length} صنف من الإيصال: ${names}`});
           } catch {
             setReceiptMsg({ ok: false, text: "تعذر الاتصال بخوادم IDEA — جرب تاني بعد شوية." });
           } finally {
@@ -1014,7 +1014,7 @@ function GroceryTab() {
                 {l.resolvedVia && (
                   <p className="flex items-center gap-1.5 text-[10px] text-neutral-400">
                     <span className={`inline-block w-2 h-2 rounded-full ${l.resolvedVia === "ai" ? "bg-green-500" : "bg-red-500"}`} />
-                    {l.resolvedVia === "ai" ? "الذكاء الاصطناعي ساعد في السعر ده" : "السعر ده كان متسجل عندنا قبل كده"}
+                    {l.resolvedVia === "ai" ? "سعر محدّث من نتائج البحث" : "السعر ده كان متسجل عندنا قبل كده"}
                   </p>
                 )}
               </div>
@@ -1025,7 +1025,7 @@ function GroceryTab() {
               !l.loadingAi && l.raw_text.trim() && (
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-xs text-neutral-400">مفيش سعر مسجل للصنف ده لسه.</p>
-                  <button onClick={() => enqueueAi(l.id, l.raw_text.trim())} className="text-[11px] text-pink-500 shrink-0 underline">🔍 دوّر بالذكاء الاصطناعي</button>
+ <button onClick={() => enqueueAi(l.id, l.raw_text.trim())} className="text-[11px] text-pink-500 shrink-0 underline"> ابحث عن السعر</button>
                 </div>
               )
             )}
@@ -1096,7 +1096,7 @@ function GroceryTab() {
                     {sl.name || "قائمة بدون اسم"}
                     {sl.source === "telegram" ? " (تليجرام)" : ""}
                     {sl.status === "draft" ? " — مسودة" : ""}
-                    {done ? " — تم التسوق ✅" : ""}
+ {done ?"— تم التسوق":""}
                   </p>
                   <button onClick={() => deleteList(sl.id)} className="text-red-500 p-1"><Trash2 size={14} /></button>
                 </div>
@@ -1394,7 +1394,7 @@ function GeneralTab() {
 
 /* ============================= أدوية وروشتات ============================= */
 
-const FORM_EMOJI: Record<string, string> = { injection: "💉", capsule: "💊", tablet: "🔵", effervescent: "🫧", syrup: "🧴", drops: "💧" };
+const FORM_EMOJI: Record<string, string> = { injection:"", capsule:"", tablet:"", effervescent:"", syrup:"", drops:""};
 
 // Round 30 — full set of schedule types (was meal/interval only).
 const SCHEDULE_TYPES: string[] = ["meal", "interval", "daily", "weekly", "monthly"];
@@ -1517,7 +1517,7 @@ function MedicationsTab() {
         }));
       }
       if (data.doctor_name || data.doctor_specialty || data.doctor_address) {
-        (isEdit ? setEditApptExtractMsg : setApptExtractMsg)("تم استخراج بيانات الطبيب من الصورة — راجعها قبل الحفظ ✅");
+ (isEdit ? setEditApptExtractMsg : setApptExtractMsg)("تم استخراج بيانات الطبيب من الصورة — راجعها قبل الحفظ");
       } else {
         (isEdit ? setEditApptExtractMsg : setApptExtractMsg)("معرفناش نستخرج بيانات طبيب واضحة من الصورة دي — اكتبها يدويًا.");
       }
@@ -2229,7 +2229,7 @@ function MedicationsTab() {
       <div className="space-y-4">
         {meds.filter((m) => !m.group_id).length > 0 && (
           <div className="space-y-2">
-            <p className="text-xs font-medium text-neutral-500">💊 أدوية حرة</p>
+ <p className="text-xs font-medium text-neutral-500"> أدوية حرة</p>
             {meds.filter((m) => !m.group_id).map(medCard)}
           </div>
         )}
@@ -2242,7 +2242,7 @@ function MedicationsTab() {
           return (
             <div key={g.id} className="space-y-2">
               <div className="flex items-center justify-between gap-2">
-                <p className="text-xs font-medium text-neutral-500 truncate">📋 {g.name}{g.doctor_name ? ` — د. ${g.doctor_name}` : ""}</p>
+ <p className="text-xs font-medium text-neutral-500 truncate"> {g.name}{g.doctor_name ?`— د. ${g.doctor_name}`:""}</p>
                 <button onClick={() => exportGroupReferral(g, opts)} disabled={exportingGroupId === g.id} className={`${btnGhost} flex items-center gap-1 text-[10px] shrink-0`}>
                   {exportingGroupId === g.id ? <Loader2 size={11} className="animate-spin" /> : <FileDown size={11} />} تصدير كشف للدكتور
                 </button>
@@ -2306,7 +2306,7 @@ function MedicationsTab() {
           </select>
         )}
         <div className="space-y-1">
-          <p className="text-xs text-neutral-400">صورة الروشتة (اختياري) — بنستخرج بيانات الطبيب منها تلقائيًا بالذكاء الاصطناعي</p>
+          <p className="text-xs text-neutral-400">صورة الروشتة (اختياري) — هنستخرج بيانات الطبيب منها تلقائيًا</p>
           <PhotoCaptureRow onPick={(dataUrl) => { setApptForm({ ...apptForm, prescription_image: dataUrl }); extractDoctorInfo(dataUrl, false); }} />
         </div>
         {apptForm.prescription_image && <img src={apptForm.prescription_image} alt="روشتة" className="rounded-lg max-h-32 mx-auto" />}
@@ -2358,12 +2358,12 @@ function MedicationsTab() {
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-medium">{a.kind === "consultation" ? "استشارة طبية" : "كشف طبي"}{a.title ? ` — ${a.title}` : ""}</p>
                   {a.status === "upcoming" && (
-                    <button onClick={(e) => { e.stopPropagation(); markApptDone(a.id); }} className="text-xs text-blue-600">تم ✓</button>
+ <button onClick={(e) => { e.stopPropagation(); markApptDone(a.id);}} className="text-xs text-blue-600">تم </button>
                   )}
                 </div>
                 <p className="text-xs text-neutral-400">{new Date(a.appointment_at).toLocaleString("ar-EG")}{a.medications?.name ? ` — ${a.medications.name}` : ""}</p>
                 {(a.doctor_name || a.doctor_specialty || a.doctor_phone || a.doctor_address) && (
-                  <p className="text-xs text-orange-600">👨‍⚕️ بيانات الطبيب — اضغط للتفاصيل</p>
+ <p className="text-xs text-orange-600"> بيانات الطبيب — اضغط للتفاصيل</p>
                 )}
               </div>
               {parent && <p className="text-xs text-orange-500">متابعة لكشف: {parent.title || new Date(parent.appointment_at).toLocaleDateString("ar-EG")}</p>}
@@ -2413,7 +2413,7 @@ function MedicationsTab() {
 /* ============================= قياس سكر/ضغط + نتائج التحاليل (Round 34) ============================= */
 
 const HEALTH_KIND_LABELS: Record<string, string> = { blood_sugar: "قياس سكر", blood_pressure: "قياس ضغط" };
-const HEALTH_KIND_EMOJI: Record<string, string> = { blood_sugar: "🩸", blood_pressure: "❤️" };
+const HEALTH_KIND_EMOJI: Record<string, string> = { blood_sugar:"", blood_pressure:""};
 
 function nowLocalInputValue() {
   const d = new Date();
@@ -2530,8 +2530,8 @@ function HealthSection({ groups }: { groups: any[] }) {
 
       <div className="space-y-2">
         <div className="grid grid-cols-2 gap-1 bg-neutral-100 dark:bg-neutral-800 rounded-lg p-1 text-xs">
-          <button onClick={() => setKind("blood_sugar")} className={`py-1.5 rounded-md ${kind === "blood_sugar" ? "bg-white dark:bg-neutral-900 shadow" : ""}`}>🩸 قياس سكر</button>
-          <button onClick={() => setKind("blood_pressure")} className={`py-1.5 rounded-md ${kind === "blood_pressure" ? "bg-white dark:bg-neutral-900 shadow" : ""}`}>❤️ قياس ضغط</button>
+ <button onClick={() => setKind("blood_sugar")} className={`py-1.5 rounded-md ${kind ==="blood_sugar"?"bg-white dark:bg-neutral-900 shadow":""}`}> قياس سكر</button>
+ <button onClick={() => setKind("blood_pressure")} className={`py-1.5 rounded-md ${kind ==="blood_pressure"?"bg-white dark:bg-neutral-900 shadow":""}`}> قياس ضغط</button>
         </div>
         {kind === "blood_sugar" ? (
           <input type="number" placeholder="قراءة السكر" value={value1} onChange={(e) => setValue1(e.target.value)} className={inputCls} />
@@ -2600,7 +2600,7 @@ function HealthSection({ groups }: { groups: any[] }) {
               <img src={l.image} alt="تحليل" className="w-14 h-14 object-cover rounded-lg shrink-0" />
               <div className="flex-1 min-w-0">
                 <p className="text-xs text-neutral-400">{new Date(l.created_at).toLocaleDateString("ar-EG")}</p>
-                {l.medication_groups?.name && <p className="text-xs text-orange-600 truncate">📋 {l.medication_groups.name}</p>}
+ {l.medication_groups?.name && <p className="text-xs text-orange-600 truncate"> {l.medication_groups.name}</p>}
               </div>
               <button onClick={() => delLab(l.id)} className="text-red-500 p-1 shrink-0"><Trash2 size={13} /></button>
             </div>
@@ -2623,7 +2623,7 @@ function HealthSection({ groups }: { groups: any[] }) {
 /* ============================= قراءة العدادات ============================= */
 
 const METER_LABELS: Record<string, string> = { electricity: "كهرباء", gas: "غاز", water: "مياه" };
-const METER_EMOJI: Record<string, string> = { electricity: "⚡", gas: "🔥", water: "💧" };
+const METER_EMOJI: Record<string, string> = { electricity:"", gas:"", water:""};
 
 function UtilityTab() {
   const [meterType, setMeterType] = useState("electricity");
@@ -2671,15 +2671,15 @@ function UtilityTab() {
       });
       const data = await res.json();
       if (!res.ok || data.reading_value == null) {
-        (isEdit ? setEditExtractMsg : setExtractMsg)("❌ فشل القراءة تلقائيًا — من فضلك ادخل الرقم يدويًا تحت.");
+ (isEdit ? setEditExtractMsg : setExtractMsg)("فشل القراءة تلقائيًا — من فضلك ادخل الرقم يدويًا تحت.");
         (isEdit ? setEditExtractFailed : setExtractFailed)(true);
         return;
       }
       if (isEdit) setEditForm((f: any) => ({ ...f, reading_value: String(data.reading_value) }));
       else setReadingValue(String(data.reading_value));
-      (isEdit ? setEditExtractMsg : setExtractMsg)(`اتقرأت القراءة: ${data.reading_value} — راجعها قبل الحفظ ✅`);
+ (isEdit ? setEditExtractMsg : setExtractMsg)(`اتقرأت القراءة: ${data.reading_value} — راجعها قبل الحفظ`);
     } catch {
-      (isEdit ? setEditExtractMsg : setExtractMsg)("❌ فشل القراءة (تعذر الاتصال بخوادم IDEA) — من فضلك ادخل الرقم يدويًا تحت.");
+ (isEdit ? setEditExtractMsg : setExtractMsg)("فشل القراءة (تعذر الاتصال بخوادم IDEA) — من فضلك ادخل الرقم يدويًا تحت.");
       (isEdit ? setEditExtractFailed : setExtractFailed)(true);
     } finally {
       (isEdit ? setEditExtracting : setExtracting)(false);
@@ -2741,7 +2741,7 @@ function UtilityTab() {
         <input type="number" placeholder={extractFailed ? "فشل القراءة — ادخلها يدويًا" : "قيمة القراءة"} value={readingValue} onChange={(e) => { setReadingValue(e.target.value); if (extractFailed) setExtractFailed(false); }} className={`${inputCls} ${extractFailed ? "border-red-400 dark:border-red-600" : ""}`} />
         <input type="date" value={readingDate} onChange={(e) => setReadingDate(e.target.value)} className={inputCls} />
         <div className="space-y-1">
-          <p className="text-xs text-neutral-400">صورة العداد (اختياري) — بنقرا القراءة منها تلقائيًا بالذكاء الاصطناعي</p>
+          <p className="text-xs text-neutral-400">صورة العداد (اختياري) — هنقرأ القراءة منها تلقائيًا</p>
           <PhotoCaptureRow onPick={(dataUrl) => { setPhoto(dataUrl); extractReading(dataUrl, meterType, false); }} />
         </div>
         {photo && <img src={photo} alt="العداد" className="rounded-lg max-h-32 mx-auto" />}

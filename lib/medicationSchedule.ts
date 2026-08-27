@@ -1,6 +1,6 @@
 // MedicationScheduleEngine equivalent (the user's spec asked for this as a
 // Python class against SQLite — adapted here to a small pure function set
-// that both the medications API routes and the Telegram "✅ اتاخدت" callback
+// that both the medications API routes and the Telegram"اتاخدت"callback
 // share, so dose-time math only lives in one place).
 //
 // Two schedule modes:
@@ -76,7 +76,7 @@ function advanceFromAnchor(anchor: Date, from: Date, stepMs: number, stepMonths 
 // schedule settings, starting from `from` (defaults to now). Used both when
 // a medication is first created/edited (schedule_type or timing changed) and
 // every time a dose is logged as taken (see the dose-logging endpoint and
-// the Telegram "✅ اتاخدت" callback in lib/telegramBot.ts).
+// the Telegram"اتاخدت"callback in lib/telegramBot.ts).
 //
 // `firstDoseAt` is the optional "بداية أول جرعة" anchor (Round 30) — when set,
 // it's used as the base to step forward from for interval/daily/weekly/monthly

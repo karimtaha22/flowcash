@@ -5,7 +5,7 @@ import { computeNextDoseAt } from "@/lib/medicationSchedule";
 
 // "اتاخدت" — logs one dose as taken: decrements remaining_doses, advances
 // next_dose_at, and clears last_dose_reminded_at so the NEXT dose can alert
-// again (mirrors the Telegram "✅ اتاخدت" callback in lib/telegramBot.ts,
+// again (mirrors the Telegram"اتاخدت"callback in lib/telegramBot.ts,
 // which does the exact same update for a dose logged from the bot instead).
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const userId = await getSessionUserId();

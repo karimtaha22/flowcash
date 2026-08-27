@@ -11,10 +11,10 @@ import Link from "next/link";
 import ReceiptActions from "@/components/ReceiptActions";
 
 const TYPES = [
-  { key: "expense", label: "💸 مصروف" },
-  { key: "withdrawal", label: "🏧 سحب" },
-  { key: "income", label: "💰 دخل" },
-  { key: "transfer", label: "🔁 تحويل" },
+ { key:"expense", label:"مصروف"},
+ { key:"withdrawal", label:"سحب"},
+ { key:"income", label:"دخل"},
+ { key:"transfer", label:"تحويل"},
 ];
 
 const CURRENCIES = ["EGP", "USD", "SAR"];
@@ -77,7 +77,7 @@ function AddForm() {
         body: JSON.stringify({ currency: walletPrompt.currency, amount: delta }),
       });
       const data = await res.json().catch(() => ({}));
-      if (res.ok) showToast(`تم تحديث المحفظة ✅ (${fmt(data.balance, walletPrompt.currency)})`);
+ if (res.ok) showToast(`تم تحديث المحفظة (${fmt(data.balance, walletPrompt.currency)})`);
     } finally {
       setWalletBusy(false);
       setWalletPrompt(null);
@@ -323,13 +323,13 @@ function AddForm() {
         ))}
       </div>
 
-      {done && <Card className="bg-orange-50 dark:bg-orange-950 border-orange-300 text-orange-700 dark:text-orange-300 text-center text-sm">تم الحفظ ✅</Card>}
+ {done && <Card className="bg-orange-50 dark:bg-orange-950 border-orange-300 text-orange-700 dark:text-orange-300 text-center text-sm">تم الحفظ </Card>}
       {saveError && <Card className="bg-red-50 dark:bg-red-950 border-red-300 text-red-600 dark:text-red-400 text-center text-sm">{saveError}</Card>}
 
       {walletPrompt && (
         <Card className="bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-900 text-center text-sm space-y-2">
           <p className="text-amber-700 dark:text-amber-400 font-medium">
-            {walletPrompt.kind === "withdrawal" ? "👛 حط الفلوس دي في محفظتك؟" : "👛 تخصم المبلغ ده من محفظتك؟"}
+ {walletPrompt.kind ==="withdrawal"?"حط الفلوس دي في محفظتك؟":"تخصم المبلغ ده من محفظتك؟"}
           </p>
           <div className="flex gap-2 justify-center">
             <button disabled={walletBusy} onClick={() => confirmWallet(true)} className="bg-orange-600 text-white rounded-lg px-5 py-1.5 text-sm font-medium">نعم</button>
@@ -537,7 +537,7 @@ function AddForm() {
           <div className="rounded-lg border border-dashed border-neutral-300 dark:border-neutral-700 p-3 space-y-3">
             <label className="flex items-center gap-2 text-xs font-medium">
               <input type="checkbox" checked={groupSplit} onChange={(e) => setGroupSplit(e.target.checked)} />
-              🎉 عزومة — قسّم الفاتورة على مجموعة؟
+ عزومة — قسّم الفاتورة على مجموعة؟
             </label>
             {groupSplit && (
               <div className="space-y-3">

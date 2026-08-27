@@ -273,12 +273,12 @@ export default function CalendarPage() {
             {!charityEnabled ? (
               <p className="text-xs text-neutral-400">تذكير الصدقة مش مفعّل — فعّله من تبويب "صدقات وزكاة".</p>
             ) : mutedToday ? (
-              <p className="text-xs text-emerald-700 dark:text-emerald-400 flex items-center gap-1"><CheckCircle2 size={13} /> اتدفعت النهاردة ✅</p>
+ <p className="text-xs text-emerald-700 dark:text-emerald-400 flex items-center gap-1"><CheckCircle2 size={13} /> اتدفعت النهاردة </p>
             ) : (
               <div className="flex items-center justify-between gap-2">
                 <p className="text-xs text-neutral-400">لسه ماتأكدش إنها اتدفعت النهاردة</p>
                 <button disabled={mutingCharity} onClick={toggleCharityToday} className="shrink-0 text-[11px] bg-emerald-600 text-white rounded-lg px-2.5 py-1.5 disabled:opacity-60">
-                  اتدفعت ✅
+ اتدفعت 
                 </button>
               </div>
             )}

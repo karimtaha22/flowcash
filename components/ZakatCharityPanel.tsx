@@ -207,7 +207,7 @@ export default function ZakatCharityPanel() {
         }),
       });
       if (!res.ok) { setMsg("حصل خطأ ومتحفظش، حاول تاني"); return; }
-      setMsg(telegramConnected ? "تم الحفظ ✅ هتوصلك تذكرة الصدقة على تليجرام" : "تم الحفظ ✅ — لسه لازم تربط بوت تليجرام عشان توصلك التذكرة");
+ setMsg(telegramConnected ?"تم الحفظ هتوصلك تذكرة الصدقة على تليجرام":"تم الحفظ — لسه لازم تربط بوت تليجرام عشان توصلك التذكرة");
     } catch {
       setMsg("مفيش اتصال بالإنترنت، حاول تاني");
     } finally {
@@ -251,8 +251,8 @@ export default function ZakatCharityPanel() {
       setShowSaveZakat(false);
       setZakatSaveMsg(
         telegramConnected
-          ? `تم الحفظ ✅ — الزكاة الجاية بإذن الله: ${data.next_due_gregorian} (${data.next_due_hijri}). هنفكرك على تليجرام قبلها.`
-          : `تم الحفظ ✅ — الزكاة الجاية بإذن الله: ${data.next_due_gregorian} (${data.next_due_hijri}). اربط بوت تليجرام (من صفحة الإعداد) عشان نفكرك.`
+ ?`تم الحفظ — الزكاة الجاية بإذن الله: ${data.next_due_gregorian} (${data.next_due_hijri}). هنفكرك على تليجرام قبلها.`
+ :`تم الحفظ — الزكاة الجاية بإذن الله: ${data.next_due_gregorian} (${data.next_due_hijri}). اربط بوت تليجرام (من صفحة الإعداد) عشان نفكرك.`
       );
     } catch {
       setZakatSaveMsg("مفيش اتصال بالإنترنت، حاول تاني");
@@ -419,7 +419,7 @@ export default function ZakatCharityPanel() {
         <div className="grid grid-cols-2 gap-2">
           <Link
             href={`/add?type=expense&amount=${calc.zakatDue > 0 ? calc.zakatDue.toFixed(2) : ""}&description=${encodeURIComponent("إخراج الزكاة")}`}
-            onClick={() => setZakatOutMsg("وفقك الله 🤍")}
+ onClick={() => setZakatOutMsg("وفقك الله")}
             className="block text-center bg-white text-emerald-800 rounded-lg py-2.5 text-sm font-bold"
           >
             أخرج زكاتك الآن
@@ -536,7 +536,7 @@ export default function ZakatCharityPanel() {
             onClick={toggleMuteToday}
             className={`w-full flex items-center justify-center gap-1.5 rounded-lg py-2.5 text-sm font-medium border ${mutedToday ? "bg-emerald-600 text-white border-emerald-600" : "border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300"}`}
           >
-            <BellOff size={15} /> {mutedToday ? "تم إخراج الصدقة اليوم ✅ (دوس عشان تلغي)" : "تم إخراج الصدقة — سكّت تذكير النهاردة"}
+ <BellOff size={15} /> {mutedToday ?"تم إخراج الصدقة اليوم (دوس عشان تلغي)":"تم إخراج الصدقة — سكّت تذكير النهاردة"}
           </button>
         )}
         {mutedToday && <p className="text-[11px] text-center text-emerald-700 dark:text-emerald-400">مش هتوصلك تذكيرات صدقة النهاردة، وهترجع تعمل عادي بكرة.</p>}

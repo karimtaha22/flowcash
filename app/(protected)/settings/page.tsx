@@ -62,25 +62,25 @@ function SelfVerifyModal({ onClose, onDone, showMsg }: { onClose: () => void; on
     <Modal onClose={onClose}>
       <p className="font-semibold text-sm">توثيق حسابك</p>
       <p className="text-[11px] text-neutral-400 leading-relaxed">
-        دي مش عملية تحقق هوية رسمية زي البنوك — مجرد مقارنة بالذكاء الاصطناعي بين صورة البطاقة والسيلفي، بتديك مؤشر ثقة بس. لو اتوثقت، هتظهر علامة موثّق جمب اسمك في الإدارة، وجمب اسمك في أي جمعية بتشترك فيها بنفس رقم موبايلك.
+        دي مش عملية تحقق هوية رسمية زي البنوك — مجرد مقارنة آلية بين صورة البطاقة والسيلفي بتديك مؤشر ثقة بس. لو اتوثقت، هتظهر علامة موثّق جمب اسمك في الإدارة، وجمب اسمك في أي جمعية بتشترك فيها بنفس رقم موبايلك.
       </p>
 
       <div className="grid grid-cols-2 gap-2">
         <label className="flex flex-col items-center gap-1 border border-dashed border-neutral-300 dark:border-neutral-700 rounded-lg p-2 text-[10px] text-center cursor-pointer">
           <Camera size={16} className="text-neutral-400" />
-          {front ? "✅ اتصورت" : "وش البطاقة"}
+ {front ?"اتصورت":"وش البطاقة"}
           <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) pick(f, setFront); }} />
         </label>
         <label className="flex flex-col items-center gap-1 border border-dashed border-neutral-300 dark:border-neutral-700 rounded-lg p-2 text-[10px] text-center cursor-pointer">
           <Camera size={16} className="text-neutral-400" />
-          {selfie ? "✅ اتصورت" : "سيلفي حي"}
+ {selfie ?"اتصورت":"سيلفي حي"}
           <input type="file" accept="image/*" capture="user" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) pick(f, setSelfie); }} />
         </label>
       </div>
 
       {result && (
         <div className={`text-xs rounded-lg p-2 space-y-1 ${result.verified ? "bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300" : "bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300"}`}>
-          <p className="font-medium">{result.verified ? "✅ اتوثق" : "⚠️ مش متطابق / مش واضح"}</p>
+ <p className="font-medium">{result.verified ?"اتوثق":"مش متطابق / مش واضح"}</p>
           {result.notes && <p>{result.notes}</p>}
           {result.error && <p>{result.error}</p>}
         </div>
@@ -196,7 +196,7 @@ export default function SettingsPage() {
       });
       const data = await res.json();
       if (!res.ok) { setPhoneMsg(data.error || "حصل خطأ"); return; }
-      setPhoneMsg("✅ اتحفظ الرقم");
+ setPhoneMsg("اتحفظ الرقم");
     } catch {
       setPhoneMsg("مفيش اتصال بالإنترنت، حاول تاني");
     } finally {
@@ -212,7 +212,7 @@ export default function SettingsPage() {
       if (!res.ok) { setTelegramMsg("حصل خطأ"); return; }
       setTelegramLinked(false);
       setTelegramLink("");
-      setTelegramMsg("تم إلغاء الربط ✅");
+ setTelegramMsg("تم إلغاء الربط");
     } catch {
       setTelegramMsg("مفيش اتصال بالإنترنت، حاول تاني");
     } finally {
@@ -270,7 +270,7 @@ export default function SettingsPage() {
       });
       const verifyData = await verifyRes.json();
       if (!verifyRes.ok) { setBioMsg(verifyData.error || "فشل تفعيل البصمة"); setBioBusy(false); return; }
-      setBioMsg("تم تفعيل الدخول بالبصمة على الجهاز ده ✅");
+ setBioMsg("تم تفعيل الدخول بالبصمة على الجهاز ده");
     } catch {
       setBioMsg("اتلغى التسجيل أو الجهاز مش بيدعم البصمة");
     } finally {
@@ -357,7 +357,7 @@ export default function SettingsPage() {
           توثيق حسابك
         </div>
         {isVerified ? (
-          <p className="text-xs text-blue-500 flex items-center gap-1"><BadgeCheck size={14} /> حسابك موثّق ✅ — هتظهر علامة موثّق جمب اسمك في أي جمعية بتشترك فيها بنفس رقم موبايلك.</p>
+ <p className="text-xs text-blue-500 flex items-center gap-1"><BadgeCheck size={14} /> حسابك موثّق — هتظهر علامة موثّق جمب اسمك في أي جمعية بتشترك فيها بنفس رقم موبايلك.</p>
         ) : (
           <>
             <p className="text-xs text-neutral-400">وثّق حسابك بصورة بطاقة وسيلفي — نفس فكرة التوثيق الموجودة في الجمعيات، بس على مستوى حسابك كله.</p>
@@ -388,11 +388,11 @@ export default function SettingsPage() {
               {savingPhone ? "..." : "حفظ"}
             </button>
           </div>
-          {phoneMsg && <p className={`text-[11px] mt-1 ${phoneMsg.startsWith("✅") ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}`}>{phoneMsg}</p>}
+ {phoneMsg && <p className={`text-[11px] mt-1 ${phoneMsg.startsWith("") ?"text-emerald-600 dark:text-emerald-400":"text-red-500"}`}>{phoneMsg}</p>}
         </div>
         {telegramLinked ? (
           <>
-            <p className="text-xs text-emerald-600 dark:text-emerald-400">متصل ✅ — هتوصلك التذكيرات على تليجرام</p>
+ <p className="text-xs text-emerald-600 dark:text-emerald-400">متصل — هتوصلك التذكيرات على تليجرام</p>
             <button
               disabled={telegramBusy}
               onClick={unlinkTelegram}

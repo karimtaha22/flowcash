@@ -18,7 +18,7 @@ interface ReminderUser {
   telegram_notifications_muted?: boolean | null;
 }
 
-// كتم عام من زرار "🔕 كتم/تفعيل تنبيهات البوت" — بيوقف كل رسالة استباقية
+// كتم عام من زرار"كتم/تفعيل تنبيهات البوت"— بيوقف كل رسالة استباقية
 // (بتبعتها الكرون) لحد ما المستخدم يشغّلها تاني، بدون ما يأثر على أي حاجة
 // جوه التطبيق نفسه (جرس التنبيهات لسه بيشتغل عادي لأنه مش مربوط بالبوت).
 const isMuted = (user: ReminderUser) => !!user.telegram_notifications_muted;
@@ -104,7 +104,7 @@ export async function runRecurringRemindersForUser(user: ReminderUser) {
     try {
       await tgCall(botToken(), "sendMessage", {
         chat_id: user.telegram_chat_id,
-        text: `📅 تذكير: ${verb}\n${item.name} — ${Number(item.amount).toLocaleString()} ${item.currency}`,
+ text:`تذكير: ${verb}\n${item.name} — ${Number(item.amount).toLocaleString()} ${item.currency}`,
       });
       sent++;
     } catch {
@@ -116,8 +116,8 @@ export async function runRecurringRemindersForUser(user: ReminderUser) {
     try {
       await tgCall(botToken(), "sendMessage", {
         chat_id: user.telegram_chat_id,
-        text: `🔔 ${verb}\n${item.name} — ${Number(item.amount).toLocaleString()} ${item.currency}`,
-        reply_markup: { inline_keyboard: [[{ text: item.kind === "income" ? "نزل ✅" : "دفعت ✅", callback_data: `recur_paid:${item.id}` }]] },
+ text:`${verb}\n${item.name} — ${Number(item.amount).toLocaleString()} ${item.currency}`,
+ reply_markup: { inline_keyboard: [[{ text: item.kind ==="income"?"نزل":"دفعت", callback_data:`recur_paid:${item.id}`}]]},
       });
       sent++;
     } catch {
@@ -195,10 +195,10 @@ export async function runCharityReminderForUser(user: CharityUser) {
   if (hoursSince < 3) return { notified: false, reason: "too_soon" };
 
   const amountLine = user.charity_amount
-    ? `\n💚 قيمة الصدقة اللي حددتها: ${Number(user.charity_amount).toLocaleString()} ${user.base_currency || "EGP"} (${user.charity_frequency === "monthly" ? "شهريًا" : "يوميًا"})`
+ ?`\n قيمة الصدقة اللي حددتها: ${Number(user.charity_amount).toLocaleString()} ${user.base_currency ||"EGP"} (${user.charity_frequency ==="monthly"?"شهريًا":"يوميًا"})`
     : "";
   const text =
-    `🌙 لا تنسَ صدقة اليوم${amountLine}\n\n` +
+`لا تنسَ صدقة اليوم${amountLine}\n\n`+
     `"مَا نَقَصَ مَالُ عَبدٍ مِن صَدَقَةٍ"\n\n` +
     `"وَمَا أَنفَقْتُم مِّن شَيْءٍ فَهُوَ يُخْلِفُهُ وَهُوَ خَيْرُ الرَّازِقِينَ" {سبأ:39}`;
 
@@ -206,7 +206,7 @@ export async function runCharityReminderForUser(user: CharityUser) {
     await tgCall(botToken(), "sendMessage", {
       chat_id: user.telegram_chat_id,
       text,
-      reply_markup: { inline_keyboard: [[{ text: "✅ تم إخراج الصدقة", callback_data: "charity_mute" }]] },
+ reply_markup: { inline_keyboard: [[{ text:"تم إخراج الصدقة", callback_data:"charity_mute"}]]},
     });
     await supabaseAdmin.from("app_users").update({ charity_last_reminded_at: new Date().toISOString() }).eq("id", user.id);
     return { notified: true };
@@ -233,7 +233,7 @@ const ZAKAT_REMINDER_REPEAT_HOURS = 24;
 
 // ---------------- installment (أقساط) reminders ----------------
 // Two heads-up messages per installment: 2 days before due_date, then again
-// on due_date itself with a "✅ تم الدفع" inline button (handled in
+// on due_date itself with a"تم الدفع"inline button (handled in
 // lib/telegramBot.ts's installment_paid callback) — mirrors the recurring-item
 // reminder pattern. Guarded by reminded_2days_at/reminded_due_at so each
 // installment only ever gets each message once, regardless of how many
@@ -261,7 +261,7 @@ export async function runInstallmentRemindersForUser(user: ReminderUser) {
         try {
           await tgCall(botToken(), "sendMessage", {
             chat_id: user.telegram_chat_id,
-            text: `📅 تذكير: باقي يومين على قسط "${plan.item_name}"${plan.company_name ? ` (${plan.company_name})` : ""}\nالمبلغ: ${Number(p.amount).toLocaleString()} ${plan.currency}`,
+ text:`تذكير: باقي يومين على قسط"${plan.item_name}"${plan.company_name ?`(${plan.company_name})`:""}\nالمبلغ: ${Number(p.amount).toLocaleString()} ${plan.currency}`,
           });
           sent++;
         } catch {
@@ -274,8 +274,8 @@ export async function runInstallmentRemindersForUser(user: ReminderUser) {
         try {
           await tgCall(botToken(), "sendMessage", {
             chat_id: user.telegram_chat_id,
-            text: `🔔 قسط "${plan.item_name}"${plan.company_name ? ` (${plan.company_name})` : ""} مستحق${p.due_date < todayIso ? " ومتأخر" : " النهاردة"}\nالمبلغ: ${Number(p.amount).toLocaleString()} ${plan.currency}`,
-            reply_markup: { inline_keyboard: [[{ text: "✅ تم الدفع", callback_data: `installment_paid:${p.id}` }]] },
+ text:`قسط"${plan.item_name}"${plan.company_name ?`(${plan.company_name})`:""} مستحق${p.due_date < todayIso ?"ومتأخر":"النهاردة"}\nالمبلغ: ${Number(p.amount).toLocaleString()} ${plan.currency}`,
+ reply_markup: { inline_keyboard: [[{ text:"تم الدفع", callback_data:`installment_paid:${p.id}`}]]},
           });
           sent++;
         } catch {
@@ -320,7 +320,7 @@ export async function runGam3eyaRemindersForUser(user: ReminderUser) {
         try {
           await tgCall(botToken(), "sendMessage", {
             chat_id: user.telegram_chat_id,
-            text: `📅 باقي يومين على دفعة في "${label}"${who}\nالمبلغ: ${Number(p.amount).toLocaleString()} ${g.currency}`,
+ text:`باقي يومين على دفعة في"${label}"${who}\nالمبلغ: ${Number(p.amount).toLocaleString()} ${g.currency}`,
           });
           sent++;
         } catch {
@@ -334,8 +334,8 @@ export async function runGam3eyaRemindersForUser(user: ReminderUser) {
         try {
           await tgCall(botToken(), "sendMessage", {
             chat_id: user.telegram_chat_id,
-            text: `🔔 ${when} في "${label}"${who}\nالمبلغ: ${Number(p.amount).toLocaleString()} ${g.currency}`,
-            reply_markup: { inline_keyboard: [[{ text: "✅ تم الدفع", callback_data: `gam3eya_paid:${p.id}` }]] },
+ text:`${when} في"${label}"${who}\nالمبلغ: ${Number(p.amount).toLocaleString()} ${g.currency}`,
+ reply_markup: { inline_keyboard: [[{ text:"تم الدفع", callback_data:`gam3eya_paid:${p.id}`}]]},
           });
           sent++;
         } catch {
@@ -369,7 +369,7 @@ export async function runZakatReminderForUser(user: ZakatUser) {
   const whenLine =
     daysUntil > 0 ? `باقي ${daysUntil} يوم على معاد زكاتك (${hijriLabel})` : daysUntil === 0 ? `النهاردة معاد زكاتك (${hijriLabel})` : `فات معاد زكاتك (${hijriLabel}) من ${Math.abs(daysUntil)} يوم — لسه محتاج تخرجها`;
 
-  const text = `🕌 تذكير الزكاة\n${whenLine}\n\nافتح تبويب "صدقات وزكاة" في التطبيق عشان تحسبها وتخرجها، وبعدها احفظ التاريخ عشان يتحسب معاد السنة الجاية.`;
+ const text =`تذكير الزكاة\n${whenLine}\n\nافتح تبويب"صدقات وزكاة"في التطبيق عشان تحسبها وتخرجها، وبعدها احفظ التاريخ عشان يتحسب معاد السنة الجاية.`;
 
   try {
     await sendText(botToken(), user.telegram_chat_id, text);
@@ -419,7 +419,7 @@ export async function runGeneralRemindersForUser(user: ReminderUser) {
   let sent = 0;
   for (const r of reminders || []) {
     try {
-      await sendText(botToken(), user.telegram_chat_id, `🔔 تذكير: ${r.title}`);
+ await sendText(botToken(), user.telegram_chat_id,`تذكير: ${r.title}`);
       sent++;
     } catch {
       // best-effort
@@ -478,8 +478,8 @@ export async function runMedicationRemindersForUser(user: ReminderUser) {
         try {
           await tgCall(botToken(), "sendMessage", {
             chat_id: user.telegram_chat_id,
-            text: `💊 موعد جرعة "${m.name}"${m.remind_before_minutes ? ` بعد ${m.remind_before_minutes} دقيقة تقريبًا` : ""}`,
-            reply_markup: { inline_keyboard: [[{ text: "✅ اتاخدت", callback_data: `dose_taken:${m.id}` }]] },
+ text:`موعد جرعة"${m.name}"${m.remind_before_minutes ?`بعد ${m.remind_before_minutes} دقيقة تقريبًا`:""}`,
+ reply_markup: { inline_keyboard: [[{ text:"اتاخدت", callback_data:`dose_taken:${m.id}`}]]},
           });
           sent++;
         } catch {
@@ -491,7 +491,7 @@ export async function runMedicationRemindersForUser(user: ReminderUser) {
 
     if (m.remaining_doses !== null && m.remaining_doses !== undefined && m.remaining_doses <= (m.low_stock_threshold ?? 5) && !m.low_stock_alerted_at) {
       try {
-        await sendText(botToken(), user.telegram_chat_id, `⚠️ الدواء "${m.name}" قرب يخلص — باقي ${m.remaining_doses} بس. وقت تجيب علبة جديدة.`);
+ await sendText(botToken(), user.telegram_chat_id,`الدواء"${m.name}"قرب يخلص — باقي ${m.remaining_doses} بس. وقت تجيب علبة جديدة.`);
         sent++;
       } catch {
         // best-effort
@@ -530,7 +530,7 @@ export async function runAppointmentRemindersForUser(user: ReminderUser) {
 
     if (!a.reminded_at) {
       try {
-        await sendText(botToken(), user.telegram_chat_id, `🩺 تذكير: ${kindLabel}${a.title ? ` — ${a.title}` : ""}\nالمعاد: ${when}${doctorLine}`);
+ await sendText(botToken(), user.telegram_chat_id,`تذكير: ${kindLabel}${a.title ?`— ${a.title}`:""}\nالمعاد: ${when}${doctorLine}`);
         sent++;
       } catch {
         // best-effort
@@ -576,7 +576,7 @@ export async function runLahaAppointmentRemindersForUser(user: ReminderUser) {
   for (const a of appts || []) {
     if (a.appt_date === tomorrowIso && !a.reminded_at) {
       try {
-        await sendText(botToken(), user.telegram_chat_id, `🩺 تذكير: معاكي موعد بكرة — ${a.title}`);
+ await sendText(botToken(), user.telegram_chat_id,`تذكير: معاكي موعد بكرة — ${a.title}`);
         sent++;
       } catch {
         // best-effort
@@ -585,7 +585,7 @@ export async function runLahaAppointmentRemindersForUser(user: ReminderUser) {
     }
     if (a.appt_date === todayIso && !a.reminded_same_day_at) {
       try {
-        await sendText(botToken(), user.telegram_chat_id, `🔔 معاكي موعد النهاردة — ${a.title}`);
+ await sendText(botToken(), user.telegram_chat_id,`معاكي موعد النهاردة — ${a.title}`);
         sent++;
       } catch {
         // best-effort
@@ -642,7 +642,7 @@ export async function runUtilityInsightForUser(user: UtilityUser) {
   if (!lines.length) return { sent: false, reason: "no_signal" };
 
   try {
-    await sendText(botToken(), user.telegram_chat_id, `📊 مقارنة استهلاك العدادات\n\n${lines.join("\n")}`);
+ await sendText(botToken(), user.telegram_chat_id,`مقارنة استهلاك العدادات\n\n${lines.join("\n")}`);
     await supabaseAdmin.from("app_users").update({ utility_insight_last_sent_at: now.toISOString() }).eq("id", user.id);
     return { sent: true };
   } catch {

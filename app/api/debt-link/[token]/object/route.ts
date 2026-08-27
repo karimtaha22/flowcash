@@ -38,7 +38,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   const botToken = (process.env.TELEGRAM_BOT_TOKEN || "").trim();
   if (botToken && creditor?.telegram_chat_id && !creditor.telegram_notifications_muted) {
     try {
-      await sendText(botToken, creditor.telegram_chat_id, `⚠️ اعتراض جديد على دين "${debt.title}"\nالسبب: ${String(reason).trim()}\nراجعه من "الأشخاص والديون" في التطبيق.`);
+ await sendText(botToken, creditor.telegram_chat_id,`اعتراض جديد على دين"${debt.title}"\nالسبب: ${String(reason).trim()}\nراجعه من"الأشخاص والديون"في التطبيق.`);
     } catch {
       // best-effort — the in-app bell still surfaces this
     }

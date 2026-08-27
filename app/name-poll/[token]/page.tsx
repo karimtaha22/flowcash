@@ -83,7 +83,7 @@ export default function NamePollPage({ params }: { params: Promise<{ token: stri
   return (
     <div className="min-h-full flex flex-col max-w-md mx-auto w-full p-4 space-y-4" dir="rtl">
       <div className="text-center space-y-1 pt-2">
-        <p className="text-xs font-bold text-pink-500">👶 اختاروا اسم البيبي معانا!</p>
+ <p className="text-xs font-bold text-pink-500"> اختاروا اسم البيبي معانا!</p>
         <h1 className="text-lg font-bold">صوّتوا على اسمكم المفضّل</h1>
         <p className="text-xs text-neutral-400">تقدروا تصوّتوا لأكتر من اسم</p>
       </div>
@@ -99,7 +99,7 @@ export default function NamePollPage({ params }: { params: Promise<{ token: stri
           return (
             <Card key={n.id} className="flex items-center justify-between gap-2">
               <div className="flex-1">
-                <p className="font-medium">{n.name} {n.gender === "girl" ? "💗" : "💙"}</p>
+                <p className="font-medium">{n.name}</p>
                 {n.meaning && <p className="text-xs text-neutral-400">{n.meaning}</p>}
                 {data.fatherName && <p className="text-xs text-neutral-400">الاسم كامل: {fullName}</p>}
               </div>

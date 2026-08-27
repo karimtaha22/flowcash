@@ -2,7 +2,7 @@
 // of tables (`wallets` balances + `wallet_entries` ledger), NOT a row in
 // `accounts`: the whole point of this feature is cash that is explicitly
 // EXCLUDED from "إجمالي الحسابات"/"صافي الثروة" everywhere — the dashboard
-// (app/api/dashboard/route.ts), the Telegram bot's "📄 كشف سريع" quick
+// (app/api/dashboard/route.ts), the Telegram bot's"كشف سريع"quick
 // statement (lib/telegramBot.ts), and the accounts page's own summary boxes
 // all sum straight from `accounts`, so keeping the wallet in a separate
 // table means it can never leak into any of those totals by omission — there

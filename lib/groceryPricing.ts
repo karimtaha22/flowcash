@@ -109,7 +109,7 @@ export async function fetchAiPrice(itemName: string): Promise<AiPriceResult> {
     return {
       ok: false,
       options: [],
-      error: "GEMINI_API_KEY مش متسجل — لا في Vercel ولا من إعدادات /admin. تسعير الأصناف الجديدة بالذكاء الاصطناعي متوقف مؤقتًا؛ سجّل السعر يدويًا لحد ما يتضاف مفتاح.",
+      error: "البحث عن السعر مش متاح دلوقتي. سجّل السعر يدويًا لحد ما يتفعّل الاتصال.",
     };
   }
 
@@ -143,7 +143,7 @@ export async function fetchAiPrice(itemName: string): Promise<AiPriceResult> {
     });
     const data = await res.json();
     if (!res.ok) {
-      const rawMessage = data?.error?.message || `Gemini API error (${res.status})`;
+      const rawMessage = data?.error?.message || `تعذر إتمام البحث (${res.status})، حاول تاني لاحقًا.`;
       return { ok: false, options: [], error: isQuotaError(rawMessage, res.status) ? QUOTA_MESSAGE : rawMessage };
     }
     const text: string = (data?.candidates?.[0]?.content?.parts || [])
@@ -195,7 +195,7 @@ export async function fetchAiPriceBatch(itemNames: string[]): Promise<{ ok: bool
     return {
       ok: false,
       items: [],
-      error: "GEMINI_API_KEY مش متسجل — لا في Vercel ولا من إعدادات /admin. تسعير الأصناف الجديدة بالذكاء الاصطناعي متوقف مؤقتًا؛ سجّل السعر يدويًا لحد ما يتضاف مفتاح.",
+      error: "البحث عن السعر مش متاح دلوقتي. سجّل السعر يدويًا لحد ما يتفعّل الاتصال.",
     };
   }
 
@@ -227,7 +227,7 @@ ${itemsList}
     });
     const data = await res.json();
     if (!res.ok) {
-      const rawMessage = data?.error?.message || `Gemini API error (${res.status})`;
+      const rawMessage = data?.error?.message || `تعذر إتمام البحث (${res.status})، حاول تاني لاحقًا.`;
       return { ok: false, items: [], error: isQuotaError(rawMessage, res.status) ? QUOTA_MESSAGE : rawMessage };
     }
     const text: string = (data?.candidates?.[0]?.content?.parts || [])

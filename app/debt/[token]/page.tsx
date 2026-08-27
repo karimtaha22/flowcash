@@ -18,8 +18,8 @@ import { ShieldCheck, ShieldAlert, AlertTriangle, CheckCircle2, Camera } from "l
 
 const VALUE_TYPE_LABEL: Record<string, string> = { currency: "مبلغ مالي", gold: "ذهب", silver: "فضة", other: "أخرى" };
 const EVENT_ICON: Record<string, string> = {
-  created: "📜", payment_recorded: "💰", due_date_extended: "📅",
-  witness_acknowledged: "✅", objection_raised: "⚠️", objection_resolved: "✅", link_revoked: "🚫",
+ created:"", payment_recorded:"", due_date_extended:"",
+ witness_acknowledged:"", objection_raised:"", objection_resolved:"", link_revoked:"",
 };
 
 export default function DebtLinkPage({ params }: { params: Promise<{ token: string }> }) {
@@ -72,7 +72,7 @@ export default function DebtLinkPage({ params }: { params: Promise<{ token: stri
       });
       const d = await res.json();
       if (!res.ok) { setMsg(d.error || "حصل خطأ"); return; }
-      setMsg("✅ تم تسجيل شهادتك");
+ setMsg("تم تسجيل شهادتك");
       load();
     } finally {
       setBusy(false);
@@ -91,7 +91,7 @@ export default function DebtLinkPage({ params }: { params: Promise<{ token: stri
       });
       const d = await res.json();
       if (!res.ok) { setMsg(d.error || "حصل خطأ"); return; }
-      setMsg("✅ تم تسجيل اعتراضك — هيظهر للدائن والشهود");
+ setMsg("تم تسجيل اعتراضك — هيظهر للدائن والشهود");
       setShowObjectionForm(false);
       setObjectionReason("");
       load();
@@ -196,7 +196,7 @@ export default function DebtLinkPage({ params }: { params: Promise<{ token: stri
               </div>
               <label className="flex items-center gap-2 text-[11px] text-neutral-600 dark:text-neutral-300 border border-dashed border-neutral-300 dark:border-neutral-700 rounded-lg px-3 py-2 cursor-pointer">
                 <Camera size={14} />
-                {wPhoto ? "✅ صورة بطاقتك اتصورت — دوس لتغييرها" : "صورة بطاقتك (اختياري)"}
+ {wPhoto ?"صورة بطاقتك اتصورت — دوس لتغييرها":"صورة بطاقتك (اختياري)"}
                 <input type="file" accept="image/*" capture="environment" className="hidden" onChange={async (e) => { const f = e.target.files?.[0]; if (f) setWPhoto(await shrinkImage(f)); }} />
               </label>
               <label className="flex items-start gap-2 text-xs cursor-pointer pt-1">

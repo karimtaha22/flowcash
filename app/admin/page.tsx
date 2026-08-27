@@ -204,7 +204,7 @@ export default function AdminPage() {
         setSharedBotStatus({ ok: false, error: `فشلت إعادة التسجيل: ${data.error}`, computedUrl: data.computedUrl });
       } else {
         await checkSharedBotStatus();
-        setSharedBotStatus((s: any) => ({ ...s, resyncMsg: "تم تسجيل الويب هوك ✅ جرب دلوقتي: افتح البوت وابعت /start" }));
+ setSharedBotStatus((s: any) => ({ ...s, resyncMsg:"تم تسجيل الويب هوك جرب دلوقتي: افتح البوت وابعت /start"}));
       }
     } finally {
       setSharedBotBusy(false);
@@ -222,7 +222,7 @@ export default function AdminPage() {
       const res = await fetch("/api/admin/gemini-settings", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
       const data = await res.json().catch(() => null);
       if (!res.ok) { setGeminiMsg((data && data.error) || `حصل خطأ ومتحفظش (${res.status})`); return; }
-      setGeminiMsg("اتحفظ ✅");
+ setGeminiMsg("اتحفظ");
       setGeminiKeyInput("");
       await loadGeminiStatus();
     } catch {
@@ -281,7 +281,7 @@ export default function AdminPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(newUser.is_family ? newUser : { name: newUser.name, pin: newUser.pin }),
     });
-    if (res.ok) { setNewUser({ name: "", pin: "", is_family: false, parent_user_id: "" }); setMsg("تم إنشاء المستخدم ✅"); load(); }
+ if (res.ok) { setNewUser({ name:"", pin:"", is_family: false, parent_user_id:""}); setMsg("تم إنشاء المستخدم"); load();}
     else setMsg("حصل خطأ");
   };
 
@@ -294,7 +294,7 @@ export default function AdminPage() {
     });
     const data = await res.json();
     if (res.ok) {
-      setMsg("تم الحفظ ✅");
+ setMsg("تم الحفظ");
       load();
     } else setMsg("حصل خطأ في الحفظ");
   };
@@ -323,7 +323,7 @@ export default function AdminPage() {
       const data = await res.json();
       if (!res.ok) { setMsg(data.error || "حصل خطأ في إصدار الكود"); return; }
       setLastIssuedCode({ name: newLicense.name.trim(), code: data.code });
-      setMsg(`تم إصدار الكود ✅ — ${data.code}`);
+ setMsg(`تم إصدار الكود — ${data.code}`);
       setNewLicense({ name: "", email: "", type: "trial", days: "14", allowed_pages: [] });
       load();
     } finally {
@@ -365,7 +365,7 @@ export default function AdminPage() {
       });
       const data = await res.json();
       if (!res.ok) { setMsg(data.error || "حصل خطأ في تعديل الترخيص"); return; }
-      setMsg("تم تعديل الترخيص ✅");
+ setMsg("تم تعديل الترخيص");
       load();
     } finally {
       setLicenseBusyId((s) => ({ ...s, [id]: false }));
@@ -414,7 +414,7 @@ export default function AdminPage() {
       });
       const data = await res.json();
       if (!res.ok) { setMsg(data.error || "حصل خطأ في إرسال الرسالة"); return; }
-      setMsg(`تم إرسال الرسالة لكل العملاء ✅ (تليجرام: ${data.telegramSent} وصلت${data.telegramFailed ? `، ${data.telegramFailed} فشلت` : ""})`);
+ setMsg(`تم إرسال الرسالة لكل العملاء (تليجرام: ${data.telegramSent} وصلت${data.telegramFailed ?`، ${data.telegramFailed} فشلت`:""})`);
       setBroadcastMsg("");
     } finally {
       setBroadcastBusy(false);
@@ -464,11 +464,11 @@ export default function AdminPage() {
             )}
             {sharedBotStatus.ok && (
               <>
-                <p>الرابط المسجل عند تليجرام: {sharedBotStatus.url ? <code className="break-all">{sharedBotStatus.url}</code> : "مفيش رابط متسجل خالص ⚠️"}</p>
+ <p>الرابط المسجل عند تليجرام: {sharedBotStatus.url ? <code className="break-all">{sharedBotStatus.url}</code> :"مفيش رابط متسجل خالص"}</p>
                 {sharedBotStatus.hasErrors && (
                   <p>آخر خطأ من تليجرام: {sharedBotStatus.last_error_message} {sharedBotStatus.last_error_date ? `(${new Date(sharedBotStatus.last_error_date).toLocaleString("ar-EG")})` : ""}</p>
                 )}
-                {!sharedBotStatus.hasErrors && sharedBotStatus.url && <p>الويب هوك شغال وملوش أخطاء ✅</p>}
+ {!sharedBotStatus.hasErrors && sharedBotStatus.url && <p>الويب هوك شغال وملوش أخطاء </p>}
                 <p>رسائل واقفة معلقة: {sharedBotStatus.pending_update_count}</p>
               </>
             )}
@@ -492,7 +492,7 @@ export default function AdminPage() {
         )}
         {!geminiStatusLoading && !geminiStatusError && geminiStatus && (
           <div className={`text-xs rounded-lg p-2 space-y-1 ${geminiStatus.hasKey ? "bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300" : "bg-red-50 dark:bg-red-950 text-red-600 dark:text-red-400"}`}>
-            <p>المفتاح: {geminiStatus.hasKey ? `متسجل ✅ (${geminiStatus.keySource === "db" ? "من هنا" : "من Vercel"})` : "مش متسجل خالص ⚠️"}</p>
+ <p>المفتاح: {geminiStatus.hasKey ?`متسجل (${geminiStatus.keySource ==="db"?"من هنا":"من Vercel"})`:"مش متسجل خالص"}</p>
             <p>الموديل الفعلي دلوقتي: <code className="break-all">{geminiStatus.effectiveModel}</code></p>
           </div>
         )}
@@ -531,7 +531,7 @@ export default function AdminPage() {
         {geminiMsg && <p className="text-xs text-center text-neutral-500">{geminiMsg}</p>}
         {geminiTestResult && (
           <div className={`text-xs rounded-lg p-2 ${geminiTestResult.ok ? "bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300" : "bg-red-50 dark:bg-red-950 text-red-600 dark:text-red-400"}`}>
-            {geminiTestResult.ok ? `شغال ✅ (${geminiTestResult.model}) — الرد: "${geminiTestResult.reply}"` : `فشل (${geminiTestResult.model}): ${geminiTestResult.error}`}
+ {geminiTestResult.ok ?`شغال (${geminiTestResult.model}) — الرد:"${geminiTestResult.reply}"`:`فشل (${geminiTestResult.model}): ${geminiTestResult.error}`}
           </div>
         )}
       </Card>
@@ -819,7 +819,7 @@ export default function AdminPage() {
             </div>
 
             <div className="text-xs text-neutral-400">
-              تليجرام: {u.telegram_chat_id ? "متصل ✅" : "لسه مش رابط حسابه"} — كل العملاء بيستخدموا بوت واحد مشترك دلوقتي (شوف كارت "بوت تليجرام المركزي" فوق)، العميل بيربط نفسه من الإعدادات عنده.
+ تليجرام: {u.telegram_chat_id ?"متصل":"لسه مش رابط حسابه"} — كل العملاء بيستخدموا بوت واحد مشترك دلوقتي (شوف كارت"بوت تليجرام المركزي"فوق)، العميل بيربط نفسه من الإعدادات عنده.
             </div>
 
             <input

@@ -81,7 +81,7 @@ function AccountsInner() {
       if (!res.ok) { showMsg(data.error || "حصل خطأ في المحفظة، حاول تاني", true); return; }
       setWalletAmount("");
       loadWallet();
-      showMsg(sign === 1 ? "تم الإضافة للمحفظة ✅" : "تم الخصم من المحفظة ✅");
+ showMsg(sign === 1 ?"تم الإضافة للمحفظة":"تم الخصم من المحفظة");
     } catch {
       showMsg("مفيش اتصال بالإنترنت، حاول تاني", true);
     } finally {
@@ -114,7 +114,7 @@ function AccountsInner() {
       if (!res.ok) { showMsg(data.error || "حصل خطأ ومتحفظش الحساب، حاول تاني", true); return; }
       setShowForm(false);
       setForm(emptyForm);
-      if (form.name) showMsg("تم حفظ الحساب ✅");
+ if (form.name) showMsg("تم حفظ الحساب");
       load();
     } catch {
       showMsg("مفيش اتصال بالإنترنت، حاول تاني", true);
@@ -136,7 +136,7 @@ function AccountsInner() {
       if (!res.ok) { showMsg(data.error || "حصل خطأ ومتحفظش الحساب الفرعي، حاول تاني", true); return; }
       setSubFormFor(null);
       setSubForm(emptyForm);
-      if (subForm.name) showMsg("تم حفظ الحساب الفرعي ✅");
+ if (subForm.name) showMsg("تم حفظ الحساب الفرعي");
       load();
     } catch {
       showMsg("مفيش اتصال بالإنترنت، حاول تاني", true);
@@ -214,7 +214,7 @@ function AccountsInner() {
     setSaving(false);
     setBalances({});
     if (failed > 0) showMsg(`اتحدث بعض الأرصدة، لكن ${failed} فشل — حاول تاني`, true);
-    else showMsg("تم تحديث الأرصدة ✅");
+ else showMsg("تم تحديث الأرصدة");
     load();
   };
 
@@ -308,7 +308,7 @@ function AccountsInner() {
             {converted !== null && (
               <p className={`text-[10px] ${a.include_in_net_worth === false ? "text-neutral-400" : "text-orange-600 dark:text-orange-400 font-medium"}`}>
                 ≈ {fmt(converted, baseCurrency)}
-                {a.include_in_net_worth === false ? " (مش محسوبة في صافي الثروة)" : " ✓ متحسوبة في الإجمالي"}
+ {a.include_in_net_worth === false ?"(مش محسوبة في صافي الثروة)":"متحسوبة في الإجمالي"}
               </p>
             )}
             {converted === null && a.include_in_net_worth === false && (

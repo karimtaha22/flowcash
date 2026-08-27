@@ -10,12 +10,12 @@ import { Heart } from "lucide-react";
 // (المدة بتحددها صاحبة الحساب وقت التوليد)، وبتقدر تولّد لينك جديد في أي
 // وقت (بيلغي القديم أوتوماتيك — صف واحد بس لكل مستخدمة في الداتابيز).
 const MOOD_LABEL: Record<string, string> = {
-  happy: "مبسوطة 😊",
-  calm: "هادية 🙂",
-  tired: "متعبة شوية 😴",
-  sensitive: "حساسة زيادة النهاردة 🥺",
-  anxious: "قلقانة شوية 😟",
-  irritable: "سريعة الانفعال 😤",
+ happy:"مبسوطة",
+ calm:"هادية",
+ tired:"متعبة شوية",
+ sensitive:"حساسة زيادة النهاردة",
+ anxious:"قلقانة شوية",
+ irritable:"سريعة الانفعال",
 };
 
 export default function PartnerViewPage({ params }: { params: Promise<{ token: string }> }) {
@@ -52,7 +52,7 @@ export default function PartnerViewPage({ params }: { params: Promise<{ token: s
   const moodText = data.mood ? (MOOD_LABEL[data.mood] || data.mood) : null;
 
   const shareMessage = data.mode === "pregnancy"
-    ? `النهاردة في الأسبوع ${data.week} من الحمل${moodText ? `، وحاسة إنها ${moodText}` : ""}. 💗`
+ ?`النهاردة في الأسبوع ${data.week} من الحمل${moodText ?`، وحاسة إنها ${moodText}`:""}.`
     : data.phase
     ? `دلوقتي في ${data.phaseLabel}${moodText ? `، وحاسة إنها ${moodText}` : ""}. ${data.phaseGuide?.title ? `(${data.phaseGuide.title})` : ""}`
     : `${moodText ? `حاسة إنها ${moodText} النهاردة.` : "مفيش بيانات كفاية لسه."}`;
@@ -94,7 +94,7 @@ export default function PartnerViewPage({ params }: { params: Promise<{ token: s
       )}
 
       <button onClick={copyMessage} className="w-full bg-neutral-800 dark:bg-neutral-200 text-white dark:text-neutral-900 rounded-xl py-2.5 text-sm font-medium">
-        {copied ? "اتنسخت الرسالة ✅" : "نسخ الرسالة"}
+ {copied ?"اتنسخت الرسالة":"نسخ الرسالة"}
       </button>
 
       <Footer />
