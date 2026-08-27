@@ -26,6 +26,10 @@ export async function POST(req: NextRequest) {
       meaning: typeof body.meaning === "string" ? body.meaning.slice(0, 300) : null,
       gender,
       source: body.source === "ai" ? "ai" : "manual",
+      // Round 43 — إضافة اسم يدوي مباشرة لقائمة تصويت العيلة: بتوصل هنا
+      // بـ selected:true علشان تظهر فورًا في تصويت العيلة من غير خطوة
+      // "دوسي القلب" منفصلة.
+      selected: typeof body.selected === "boolean" ? body.selected : false,
     })
     .select()
     .single();

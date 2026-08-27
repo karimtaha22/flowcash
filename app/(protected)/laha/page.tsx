@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import Card from "@/components/Card";
+import Switch from "@/components/Switch";
 import { shrinkImage } from "@/lib/image";
 import { todayISO, daysInMonth, firstWeekdayOfMonth, parseISO, ARABIC_MONTHS, addDays } from "@/lib/laha/dates";
 import {
@@ -1229,6 +1230,12 @@ function BabyNamesTab({ settings, saveSettings }: { settings: Settings; saveSett
   const [meaningBusy, setMeaningBusy] = useState(false);
   const [meaningResult, setMeaningResult] = useState<{ found: boolean; meaning: string; error?: string } | null>(null);
 
+  // Round 43 — "حط مربع إضافة اسم يدوي لقائمة التصويت": اسم بيتكتب على طول
+  // (مش لازم يكون اقتراح ذكاء اصطناعي) وبيتحفظ selected:true فورًا، فيظهر
+  // في تصويت العيلة تحت من غير خطوة "دوسي القلب" منفصلة.
+  const [manualName, setManualName] = useState("");
+  const [manualBusy, setManualBusy] = useState(false);
+
   // Round 41 — "Family Heart Poll": لينك حقيقي بمفتاح ثابت لتصويت العيلة
   // على الأسماء المختارة (selected=true)، مع عدّاد لايف.
   const [pollToken, setPollToken] = useState<string | null>(null);
@@ -1292,6 +1299,22 @@ function BabyNamesTab({ settings, saveSettings }: { settings: Settings; saveSett
   };
   const toggleSelect = async (id: string, selected: boolean) => { await api(`/api/laha/baby-names/${id}`, { method: "PATCH", body: JSON.stringify({ selected }) }); load(); loadPoll(); };
   const del = async (id: string) => { await api(`/api/laha/baby-names/${id}`, { method: "DELETE" }); load(); };
+
+  const addManualName = async () => {
+    const name = manualName.trim();
+    if (!name) return;
+    setManualBusy(true);
+    try {
+      await api("/api/laha/baby-names", { method: "POST", body: JSON.stringify({ name, meaning: "", gender, source: "manual", selected: true }) });
+      setManualName("");
+      load();
+      loadPoll();
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      setManualBusy(false);
+    }
+  };
 
   const lookupMeaning = async () => {
     const name = meaningQuery.trim();
@@ -1378,6 +1401,21 @@ function BabyNamesTab({ settings, saveSettings }: { settings: Settings; saveSett
             </p>
           )
         )}
+      </Card>
+
+      <Card className="space-y-2">
+        <p className="text-xs font-semibold">إضافة اسم يدوي لقائمة التصويت</p>
+        <p className="text-[10px] text-neutral-400">اكتبي أي اسم مباشرة — هيتحفظ ويظهر فورًا في تصويت العيلة تحت، من غير ما تحتاجي تدوسي القلب.</p>
+        <div className="flex gap-1.5">
+          <input
+            value={manualName}
+            onChange={(e) => setManualName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") addManualName(); }}
+            placeholder={gender === "girl" ? "اكتبي اسم بنت" : "اكتبي اسم ولد"}
+            className="flex-1 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm"
+          />
+          <button onClick={addManualName} disabled={manualBusy || !manualName.trim()} className="shrink-0 bg-pink-500 text-white rounded-lg px-3 text-xs font-medium disabled:opacity-50">إضافة</button>
+        </div>
       </Card>
 
       <Card className="space-y-2">
@@ -1621,23 +1659,118 @@ function GenderRevealTab() {
     );
   }
 
-  if (party.status === "awaiting_setup") {
-    return <GenderRevealSetupCard onDone={load} />;
-  }
+  // Round 43 — "رابط انستاباي يظهر بره، الأم تحطه قبل ما تفتح تعرف ولد ولا
+  // بنت": بقى ظاهر هنا فوق أي حاجة تانية، بغض النظر عن حالة الحفلة (حتى لو
+  // لسه awaiting_setup أو لسه مقفولة) — بدل ما كان محبوس جوه "غرفة الأم" بس.
+  return (
+    <div className="space-y-3">
+      <InstapayCard instapayLink={party.instapay_link} onSaved={load} />
 
-  if (!party.unlocked) {
-    return (
-      <Card className="text-center space-y-3 py-8">
-        <Lock className="mx-auto text-neutral-400" size={28} />
-        <p className="text-sm text-neutral-500">اتسجل نوع الجنين بالفعل — دخلي الرقم السري اللي معاكي (اللي أعطاكي إياه الدكتور/صديقتك) عشان تفتحي غرفة الأم.</p>
-        <input value={pin} onChange={(e) => setPin(e.target.value)} type="password" inputMode="numeric" placeholder="الرقم السري" className="w-full text-center rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-lg tracking-widest" />
-        {unlockError && <p className="text-xs text-red-500">{unlockError}</p>}
-        <button onClick={unlock} className="w-full bg-pink-500 text-white rounded-xl py-2.5 text-sm font-medium flex items-center justify-center gap-1.5"><Unlock size={14} /> افتحي غرفة الأم</button>
-      </Card>
-    );
-  }
+      {party.status === "awaiting_setup" && <GenderRevealSetupCard onDone={load} />}
 
-  return <MotherRoom party={party} votes={votes} onRefresh={load} />;
+      {party.status !== "awaiting_setup" && !party.unlocked && (
+        <Card className="text-center space-y-3 py-8">
+          <Lock className="mx-auto text-neutral-400" size={28} />
+          <p className="text-sm text-neutral-500">اتسجل نوع الجنين بالفعل — دخلي الرقم السري اللي معاكي (اللي أعطاكي إياه الدكتور/صديقتك) عشان تفتحي غرفة الأم.</p>
+          <input value={pin} onChange={(e) => setPin(e.target.value)} type="password" inputMode="numeric" placeholder="الرقم السري" className="w-full text-center rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-lg tracking-widest" />
+          {unlockError && <p className="text-xs text-red-500">{unlockError}</p>}
+          <button onClick={unlock} className="w-full bg-pink-500 text-white rounded-xl py-2.5 text-sm font-medium flex items-center justify-center gap-1.5"><Unlock size={14} /> افتحي غرفة الأم</button>
+        </Card>
+      )}
+
+      {party.status !== "awaiting_setup" && party.unlocked && <MotherRoom party={party} votes={votes} onRefresh={load} />}
+
+      {/* Round 43 — "سوتش حذف نوع الجنين": مقصود إنه يفضل متاح حتى من غير
+          فتح غرفة الأم بالـ PIN (ده أصلًا مسار بديل لو الـ PIN اتنسي)،
+          فمش جوه شرط party.unlocked. */}
+      {party.status !== "awaiting_setup" && <ResetPartySection onReset={load} />}
+    </div>
+  );
+}
+
+// Round 43 — استُخرج من "غرفة الأم" (كان محبوس وراء unlock token) عشان
+// يبقى متاح من غير ما تحتاج تعرف نوع الجنين الأول (راجع الملاحظة فوق).
+function InstapayCard({ instapayLink, onSaved }: { instapayLink: string | null; onSaved: () => void }) {
+  const [instapay, setInstapay] = useState(instapayLink || "");
+  const [saved, setSaved] = useState(false);
+  useEffect(() => { setInstapay(instapayLink || ""); }, [instapayLink]);
+
+  const saveInstapay = async () => {
+    try {
+      await api("/api/laha/gender-reveal/instapay", { method: "POST", body: JSON.stringify({ instapay_link: instapay }) });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1500);
+      onSaved();
+    } catch (e: any) { alert(e.message); }
+  };
+
+  return (
+    <Card className="space-y-2">
+      <p className="text-xs font-semibold">رابط انستاباي (يظهر للضيوف يبعتولك عليه "نقطة البيبي")</p>
+      <div className="flex gap-2">
+        <input value={instapay} onChange={(e) => setInstapay(e.target.value)} placeholder="ipn.eg/S/..." className="flex-1 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-xs" />
+        <button onClick={saveInstapay} className="bg-pink-500 text-white rounded-lg px-3 text-xs font-medium">حفظ</button>
+      </div>
+      {saved && <p className="text-[10px] text-emerald-500">اتحفظ ✅</p>}
+    </Card>
+  );
+}
+
+// Round 43 — "سوتش حذف نوع الجنين... يتطلب الرقم السري أو كود تفعيل
+// البرنامج": مسار مسح/استرجاع متعمّد بناءً على طلب صريح من المستخدمة.
+function ResetPartySection({ onReset }: { onReset: () => void }) {
+  const [wantReset, setWantReset] = useState(false);
+  const [authCode, setAuthCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const toggle = (v: boolean) => {
+    setWantReset(v);
+    setError("");
+    if (!v) setAuthCode("");
+  };
+
+  const confirm = async () => {
+    if (!authCode.trim()) { setError("اكتبي الرقم السري أو كود تفعيل البرنامج"); return; }
+    setBusy(true);
+    setError("");
+    try {
+      await api("/api/laha/gender-reveal/reset", { method: "POST", body: JSON.stringify({ auth_code: authCode.trim() }) });
+      setWantReset(false);
+      setAuthCode("");
+      onReset();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-semibold text-red-500">امسحي نوع الجنين والرقم السري</p>
+        <Switch checked={wantReset} onChange={toggle} />
+      </div>
+      {wantReset && (
+        <div className="space-y-2 pt-2 border-t border-neutral-100 dark:border-neutral-800">
+          <p className="text-[11px] text-amber-600 dark:text-amber-400 leading-relaxed">
+            ⚠️ ده هيمسح نوع الجنين والرقم السري الحاليين، وهيتطلب من الدكتورة أو الصديقة المقربة تسجيلهم من جديد. هيتولّد رابط تصويت جديد للحفلة، وهتتمسح كل الأصوات المسجلة حاليًا.
+          </p>
+          <input
+            value={authCode}
+            onChange={(e) => setAuthCode(e.target.value)}
+            placeholder="الرقم السري الحالي أو كود تفعيل البرنامج"
+            className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm text-center"
+          />
+          {error && <p className="text-[11px] text-red-500 text-center">{error}</p>}
+          <button onClick={confirm} disabled={busy} className="w-full bg-red-500 text-white rounded-xl py-2.5 text-sm font-medium">
+            {busy ? "جاري المسح..." : "تأكيد إعادة الضبط"}
+          </button>
+        </div>
+      )}
+    </Card>
+  );
 }
 
 function GenderRevealSetupCard({ onDone }: { onDone: () => void }) {
@@ -1701,7 +1834,6 @@ function GenderRevealSetupCard({ onDone }: { onDone: () => void }) {
 }
 
 function MotherRoom({ party, votes, onRefresh }: { party: any; votes: { boy: number; girl: number }; onRefresh: () => void }) {
-  const [instapay, setInstapay] = useState("");
   const [confirmReveal, setConfirmReveal] = useState(false);
   const [entries, setEntries] = useState<any[]>([]);
   const [openEntry, setOpenEntry] = useState<string | null>(null);
@@ -1728,11 +1860,6 @@ function MotherRoom({ party, votes, onRefresh }: { party: any; votes: { boy: num
     try { await api("/api/laha/gender-reveal/reveal", { method: "POST" }); onRefresh(); }
     catch (e: any) { alert(e.message); }
     setConfirmReveal(false);
-  };
-
-  const saveInstapay = async () => {
-    try { await api("/api/laha/gender-reveal/instapay", { method: "POST", body: JSON.stringify({ instapay_link: instapay }) }); alert("تم الحفظ"); }
-    catch (e: any) { alert(e.message); }
   };
 
   return (
@@ -1772,14 +1899,6 @@ function MotherRoom({ party, votes, onRefresh }: { party: any; votes: { boy: num
           <h2 className="text-xl font-bold">{party.gender === "boy" ? "🎉 إنه ولد! 💙" : "🎉 إنها بنت! 💗"}</h2>
         </Card>
       )}
-
-      <Card className="space-y-2">
-        <p className="text-xs font-semibold">رابط انستاباي (يظهر للضيوف يبعتولك عليه "نقطة البيبي")</p>
-        <div className="flex gap-2">
-          <input value={instapay} onChange={(e) => setInstapay(e.target.value)} placeholder="ipn.eg/S/..." className="flex-1 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-xs" />
-          <button onClick={saveInstapay} className="bg-pink-500 text-white rounded-lg px-3 text-xs font-medium">حفظ</button>
-        </div>
-      </Card>
 
       <Card className="space-y-2">
         <p className="text-xs font-semibold">جيست بوك الضيوف ({entries.length})</p>
