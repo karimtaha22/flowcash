@@ -2482,7 +2482,15 @@ function HealthSection({ groups }: { groups: any[] }) {
       const pageW = Math.round(dims.w * pageScale);
       const pageH = Math.round(dims.h * pageScale);
       const { jsPDF } = await import("jspdf");
-      const pdf = new jsPDF({ unit: "px", format: [pageW, pageH] });
+      // Round 49 — نفس باج الاتجاه اللي كان في lib/pdfExport.ts: من غير
+      // `orientation` صريحة، jsPDF بيفترض "portrait" وبيبدّل العرض بالارتفاع
+      // لو العرض أكبر — فأي صورة تحليل عرضية (landscape) كانت صفحتها بتطلع
+      // مقلوبة والصورة بتتقص. (راجع تعليق lib/pdfExport.ts لتفاصيل التأكيد.)
+      const pdf = new jsPDF({
+        unit: "px",
+        format: [pageW, pageH],
+        orientation: pageW >= pageH ? "landscape" : "portrait",
+      });
       pdf.addImage(lab.image, "JPEG", 0, 0, pageW, pageH);
       await shareFile(pdf.output("dataurlstring"), `تحليل-${lab.id.slice(0, 8)}.pdf`, "application/pdf");
     } catch (e: any) {
