@@ -3,7 +3,9 @@ import { useEffect, useRef, useState, use as usePromise } from "react";
 import Card from "@/components/Card";
 import Footer from "@/components/Footer";
 import { shrinkImage } from "@/lib/image";
-import { CheckCircle2, PartyPopper, Copy, ExternalLink, RefreshCw } from "lucide-react";
+// Round 47 — "Party Popper 🎉 شيله من أي مكان": Gift بدل PartyPopper (نفس
+// الاستبدال في app/(protected)/laha/page.tsx).
+import { CheckCircle2, Gift, Copy, ExternalLink, RefreshCw } from "lucide-react";
 import { GENDER_REVEAL_DUA, genderRevealCongrats } from "@/lib/laha/genderReveal";
 
 // PUBLIC صفحة — من غير جلسة، من غير Sidebar/BottomNav (برّه (protected)
@@ -170,7 +172,7 @@ export default function GenderRevealGuestPage({ params }: { params: Promise<{ to
           {data.selected_name ? (
             <p className={`text-2xl font-extrabold ${data.gender === "boy" ? "text-sky-500" : "text-pink-500"}`}>{data.selected_name}</p>
           ) : (
-            <PartyPopper className={`mx-auto ${data.gender === "boy" ? "text-sky-500" : "text-pink-500"}`} size={40} />
+            <Gift className={`mx-auto ${data.gender === "boy" ? "text-sky-500" : "text-pink-500"}`} size={40} />
           )}
           <p className="text-sm text-neutral-600 dark:text-neutral-300 leading-relaxed">{GENDER_REVEAL_DUA}</p>
           <h2 className="text-xl font-bold">{genderRevealCongrats(data.gender)}</h2>

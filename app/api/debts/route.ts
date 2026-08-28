@@ -53,10 +53,16 @@ export async function POST(req: NextRequest) {
   const userId = await getSessionUserId();
   if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const body = await req.json();
-  const { person_id, direction, title, reason, amount, currency, due_date, debt_date } = body;
+  const { person_id, direction, title, reason, amount, currency, due_date, debt_date, value_type, metal_karat, unit_label } = body;
   if (!person_id || !direction || !title || !amount) {
     return NextResponse.json({ error: "بيانات ناقصة" }, { status: 400 });
   }
+  // Round 47 — "لما بختار ذهب بيحسب الذهب فلوس، اعمل مربع اختيار نوع
+  // الدين": نفس منطق تحويل "العملة" لوحدة قياس (جرام ذهب/فضة/وحدة) المستخدم
+  // أصلًا في app/api/debts/advanced/route.ts للتسجيل المتقدم — هنا بقى
+  // متاح في الفورم البسيط كمان، عشان دين الذهب/الفضة ميتسجلش وكأنه مبلغ
+  // مالي بعملة (اللي كان سبب البلاغ).
+  const vType = ["currency", "gold", "silver", "other"].includes(value_type) ? value_type : "currency";
   const { data, error } = await supabaseAdmin
     .from("debts")
     .insert({
@@ -67,7 +73,9 @@ export async function POST(req: NextRequest) {
       reason,
       original_amount: amount,
       remaining_amount: amount,
-      currency: currency || "EGP",
+      currency: vType === "currency" ? currency || "EGP" : unit_label || (vType === "gold" ? "جرام ذهب" : vType === "silver" ? "جرام فضة" : "وحدة"),
+      value_type: vType,
+      metal_karat: vType === "gold" ? Number(metal_karat) || null : null,
       due_date: due_date || null,
       debt_date: debt_date || new Date().toISOString().slice(0, 10),
       status: "open",

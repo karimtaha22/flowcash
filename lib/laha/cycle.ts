@@ -30,26 +30,64 @@ export interface CycleInfo {
   isPeriodDay: boolean;
 }
 
-export function cycleInfo(periods: PeriodLike[], avgCycleLength: number, onISO = todayISO()): CycleInfo | null {
+// Round 47 — "التقويم والحسبة بايظة... المفروض عنده تاريخ البداية ومدة
+// الدورة يسجل في التقويم أيام الخصوبة والتبويض والدورة وأيام آمنة [لمدى
+// الشهر كامل]". فحص الكود طلع فيه بجّتين حقيقيتين كانوا بيبوّظوا أي شهر
+// غير الشهر الأول بعد آخر دورة متسجلة:
+//
+// ١) ovulationDate/fertileStart/fertileEnd/nextPeriodDate كانوا بيتحسبوا
+//    كتواريخ مطلقة من `lastStart` مباشرة (أول دورة اتسجلت) من غير ما
+//    يتحركوا مع كل دورة متكررة — يعني نافذة التبويض/الخصوبة كانت بتظهر
+//    صح بس في الدورة الأولى بعد آخر تسجيل، وأي شهر بعد كده (لسه جوه نفس
+//    التقويم) كانت النافذة فاضلة "واقفة" في الماضي ومتظهرش خالص. الحل:
+//    نحسب `currentCycleStart` (بداية الدورة المحدّدة اللي `onISO` نفسه
+//    واقع جواها، مش أول دورة مسجّلة) ونبني كل التواريخ دي منه.
+// ٢) "يوم الدورة" (`isPeriodDay`) كان بيعتمد بالكامل على تسجيل فعلي
+//    (`periods` row) — فمفيش أي توقّع لأيام الدورة القادمة (أو الماضية
+//    الغير مسجّلة) خالص، رغم إن المستخدمة سجّلت تاريخ البداية ومدة الدورة
+//    في الإعدادات بالظبط عشان كده. وكمان دورة نشطة (`end_date` لسه
+//    فاضي) كانت بتتحسب "دورة" لأي تاريخ في المستقبل من غير أي حد — حتى
+//    بعد شهور. الحل: نستخدم `avgPeriodLength` (مسجلة في الإعدادات) نتوقع
+//    بيها أيام الدورة لأي دورة متكررة من غير تسجيل فعلي، ونحدّد الدورة
+//    النشطة الغير مقفولة بمدتها المتوقعة بدل ما تفضل "دورة" للأبد.
+export function cycleInfo(periods: PeriodLike[], avgCycleLength: number, onISO = todayISO(), avgPeriodLength = 6): CycleInfo | null {
   const lastStart = latestPeriodStart(periods, onISO);
   if (!lastStart) return null;
   const cycleLen = Math.max(15, Math.min(60, Math.round(avgCycleLength) || 28));
+  const periodLen = Math.max(1, Math.min(15, Math.round(avgPeriodLength) || 6));
   const daysSince = diffDays(lastStart, onISO);
   const dayInCycle = (((daysSince % cycleLen) + cycleLen) % cycleLen) + 1;
+  // بداية الدورة المحدّدة اللي onISO واقع جواها فعليًا (مش أول دورة
+  // اتسجلت) — كل التواريخ التانية (تبويض/خصوبة/الدورة الجاية) بتتبني منها
+  // عشان تتكرر صح مع كل دورة، مش تفضل ثابتة عند أول دورة بس.
+  const currentCycleStart = addDays(onISO, -(dayInCycle - 1));
   const ovDay = Math.max(1, cycleLen - 14);
-  const ovulationDate = addDays(lastStart, ovDay - 1);
+  const ovulationDate = addDays(currentCycleStart, ovDay - 1);
   const fertileStart = addDays(ovulationDate, -5);
   const fertileEnd = addDays(ovulationDate, 1);
-  const nextPeriodDate = addDays(lastStart, cycleLen);
+  const nextPeriodDate = addDays(currentCycleStart, cycleLen);
 
-  const activePeriod = periods.find((p) => p.start_date <= onISO && (!p.end_date || p.end_date >= onISO));
+  // تسجيل فعلي بيغطي التاريخ ده — دورة مقفولة (عندها end_date) بتتحسب زي
+  // ما هي بالظبط، لكن دورة "مستمرة" (لسه من غير end_date) بتتحدد بمدتها
+  // المتوقعة (avgPeriodLength) بدل ما تفضل "دورة" لأي تاريخ مستقبلي للأبد.
+  const recordedPeriod = periods.find((p) => {
+    if (p.start_date > onISO) return false;
+    if (p.end_date) return p.end_date >= onISO;
+    return diffDays(p.start_date, onISO) < periodLen;
+  });
+  // توقّع أيام الدورة للدورات المتكررة الغير مسجّلة فعليًا (المستقبل، أو
+  // الماضي اللي متسجلش) — بناءً على مكان اليوم جوه الدورة (dayInCycle)
+  // ومدة الدورة المتوقعة، بالظبط زي ما وصفت المستخدمة (تاريخ البداية +
+  // مدة الدورة).
+  const isPeriodDay = !!recordedPeriod || dayInCycle <= periodLen;
+
   let phase: CyclePhase;
-  if (activePeriod) phase = "menstrual";
+  if (isPeriodDay) phase = "menstrual";
   else if (onISO >= fertileStart && onISO <= fertileEnd) phase = "ovulation";
   else if (dayInCycle < ovDay) phase = "follicular";
   else phase = "luteal";
 
-  return { dayInCycle, phase, nextPeriodDate, ovulationDate, fertileStart, fertileEnd, isPeriodDay: !!activePeriod };
+  return { dayInCycle, phase, nextPeriodDate, ovulationDate, fertileStart, fertileEnd, isPeriodDay };
 }
 
 // انتظام الدورة بناءً على آخر ٦ دورات (فرق أطول-أقصر دورة، تقريب بسيط
@@ -217,8 +255,8 @@ export function waterRetentionInsight(weights: WeightLike[], phase: CyclePhase |
 // ─── ٤. محاكي توافق السفر والمناسبات ───────────────────────────────────────
 export type DayCategory = "period" | "ovulation" | "fertile" | "safe";
 
-export function dayCategory(periods: PeriodLike[], avgCycleLength: number, dateISO: string): DayCategory {
-  const info = cycleInfo(periods, avgCycleLength, dateISO);
+export function dayCategory(periods: PeriodLike[], avgCycleLength: number, dateISO: string, avgPeriodLength = 6): DayCategory {
+  const info = cycleInfo(periods, avgCycleLength, dateISO, avgPeriodLength);
   if (!info) return "safe";
   if (info.isPeriodDay) return "period";
   if (info.ovulationDate === dateISO) return "ovulation";
@@ -259,13 +297,13 @@ function relativeDayLabel(fromIdx: number, toIdx: number, totalDays: number): st
   return single ? `اليوم ${fromIdx}` : `من اليوم ${fromIdx} إلى اليوم ${toIdx}`;
 }
 
-export function describeTravelRange(periods: PeriodLike[], avgCycleLength: number, startISO: string, endISO: string): TravelPlan | null {
+export function describeTravelRange(periods: PeriodLike[], avgCycleLength: number, startISO: string, endISO: string, avgPeriodLength = 6): TravelPlan | null {
   if (!startISO || !endISO || endISO < startISO) return null;
   const totalDays = diffDays(startISO, endISO) + 1;
   if (totalDays > 60) return null; // حماية من مدى ضخم غلط بالغلط
 
   const categories: DayCategory[] = [];
-  for (let i = 0; i < totalDays; i++) categories.push(dayCategory(periods, avgCycleLength, addDays(startISO, i)));
+  for (let i = 0; i < totalDays; i++) categories.push(dayCategory(periods, avgCycleLength, addDays(startISO, i), avgPeriodLength));
 
   const segments: TravelSegment[] = [];
   let i = 0;

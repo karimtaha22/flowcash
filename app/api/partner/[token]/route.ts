@@ -23,7 +23,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ tok
 
   const { data: settings } = await supabaseAdmin
     .from("laha_settings")
-    .select("mode,avg_cycle_length,lmp")
+    .select("mode,avg_cycle_length,avg_period_length,lmp")
     .eq("user_id", link.user_id)
     .maybeSingle();
   if (!settings) return NextResponse.json({ error: "مفيش بيانات كفاية لسه" }, { status: 404 });
@@ -69,7 +69,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ tok
   }
 
   const { data: periods } = await supabaseAdmin.from("laha_periods").select("start_date,end_date").eq("user_id", link.user_id);
-  const info = cycleInfo(periods || [], settings.avg_cycle_length, today);
+  const info = cycleInfo(periods || [], settings.avg_cycle_length, today, settings.avg_period_length);
   if (!info) return NextResponse.json({ ...base, mode: "cycle", phase: null });
 
   const out: Record<string, any> = { ...base, mode: "cycle", phase: info.phase, phaseLabel: PHASE_LABEL[info.phase], phaseGuide: PRODUCTIVITY_MAP[info.phase], nextPeriodDate: info.nextPeriodDate };

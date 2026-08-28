@@ -120,9 +120,23 @@ function PeopleInner() {
   const [showForm, setShowForm] = useState(false);
   const [formWarning, setFormWarning] = useState("");
   const [payFor, setPayFor] = useState<Debt | null>(null);
+  const [payMode, setPayMode] = useState<"partial" | "full">("partial");
   const [payAmount, setPayAmount] = useState("");
+  // Round 47 — "تم سداد الدين... يسألني اخصم من حساب نعم/لا": هل السداد ده
+  // (جزئي أو كامل) هيتربط بحساب حقيقي في التطبيق ولا لأ. `null` = لسه محددتش.
+  const [payUseAccount, setPayUseAccount] = useState<boolean | null>(null);
+  const [payAccountId, setPayAccountId] = useState("");
+  const [accounts, setAccounts] = useState<{ id: string; name: string; currency: string }[]>([]);
   const todayISO = () => new Date().toISOString().slice(0, 10);
-  const [form, setForm] = useState({ person_id: "", new_person: "", title: "", reason: "", amount: "", currency: "EGP", debt_date: todayISO(), due_date: "" });
+  const [form, setForm] = useState({
+    person_id: "", new_person: "", title: "", reason: "", amount: "", currency: "EGP", debt_date: todayISO(), due_date: "",
+    // Round 47 — "اعمل مربع اختيار نوع الدين: ذهب وعيار / مبلغ مالي /
+    // اختيار العملة" — نفس اختيار نوع القيمة الموجود أصلًا في فورم "تسجيل
+    // متقدم" بس هنا للفورم البسيط كمان، عشان دين الذهب ميتحسبش "فلوس" غلط.
+    value_type: "currency" as "currency" | "gold" | "silver" | "other",
+    metal_karat: "",
+    unit_label: "",
+  });
   const [saving, setSaving] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<Record<string, any>>({});
@@ -185,6 +199,9 @@ function PeopleInner() {
   useEffect(() => { load(); }, []);
   useEffect(() => {
     fetch("/api/me").then((r) => r.json()).then((d) => setMyAccountName(d.user?.name || "")).catch(() => {});
+    // Round 47 — لازم قائمة الحسابات عشان سؤال "خصم من حساب؟ / أضيفه
+    // لحسابك؟" وقت تسجيل السداد.
+    fetch("/api/accounts").then((r) => r.json()).then((d) => setAccounts(d.accounts || [])).catch(() => {});
   }, []);
 
   const submit = async () => {
@@ -198,6 +215,10 @@ function PeopleInner() {
     }
     if (!form.amount || parseFloat(form.amount) <= 0) {
       setFormWarning("المبلغ لازم يتملى برقم أكبر من صفر");
+      return;
+    }
+    if (form.value_type === "gold" && !form.metal_karat) {
+      setFormWarning("لازم تحدد عيار الدهب");
       return;
     }
     setFormWarning("");
@@ -224,6 +245,9 @@ function PeopleInner() {
           currency: form.currency,
           debt_date: form.debt_date || undefined,
           due_date: form.due_date || null,
+          value_type: form.value_type,
+          metal_karat: form.value_type === "gold" ? form.metal_karat : undefined,
+          unit_label: form.value_type !== "currency" ? form.unit_label || undefined : undefined,
         }),
       });
       if (!res.ok) {
@@ -233,7 +257,7 @@ function PeopleInner() {
         return;
       }
       setShowForm(false);
-      setForm({ person_id: "", new_person: "", title: "", reason: "", amount: "", currency: "EGP", debt_date: todayISO(), due_date: "" });
+      setForm({ person_id: "", new_person: "", title: "", reason: "", amount: "", currency: "EGP", debt_date: todayISO(), due_date: "", value_type: "currency", metal_karat: "", unit_label: "" });
       load();
     } catch {
       setFormWarning("مفيش اتصال بالإنترنت، حاول تاني");
@@ -243,21 +267,45 @@ function PeopleInner() {
   };
 
   const submitPayment = async () => {
-    if (!payFor || !payAmount) return;
+    if (!payFor) return;
+    const amt = payMode === "full" ? Number(payFor.remaining_amount) : parseFloat(payAmount);
+    if (!amt || amt <= 0) return;
+    // Round 47 — "خصم من حساب نعم/لا... اختار الحساب": لو اختارت "نعم" لازم
+    // تحدد حساب فعلي قبل ما نكمل، وإلا السداد هيتسجل من غير أي أثر على أي
+    // حساب (نفس سلوك قبل الراوند ده، بس دلوقتي باختيار واعي مش لأن مفيش خيار).
+    if (payUseAccount && !payAccountId) {
+      setPayError("لازم تختار الحساب");
+      return;
+    }
     setPayError("");
     try {
       const res = await fetch(`/api/debts/${payFor.id}/payments`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount: parseFloat(payAmount), receipt_url: receiptDataUrl || undefined }),
+        body: JSON.stringify({
+          amount: amt,
+          receipt_url: receiptDataUrl || undefined,
+          account_id: payUseAccount ? payAccountId : undefined,
+        }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         setPayError(data.error || "حصل خطأ ومتسجلش السداد، حاول تاني");
         return;
       }
+      const data = await res.json().catch(() => ({}));
+      // Round 47 fix — باج "مربع المتبقي جوه الكارت مش بيتحدث بعد سداد
+      // جزئي": editDraft (state منفصل تمامًا عن قائمة الديون) كان بيتملى مرة
+      // واحدة بس وقت فتح الكارت (toggleExpand)، وبعد كده مبيتحدثش تاني — حتى
+      // لو الكارت فاضل مفتوح وسددنا جزء منه. `load()` بيحدّث `debts` بس مش
+      // `editDraft`. نحدّثه هنا يدويًا بالقيمة الحقيقية الراجعة من السيرفر.
+      if (expandedId === payFor.id) {
+        setEditDraft((d) => ({ ...d, remaining_amount: String(data.remaining ?? 0) }));
+      }
       setPayFor(null);
       setPayAmount("");
+      setPayUseAccount(null);
+      setPayAccountId("");
       setReceiptDataUrl(null);
       load();
     } catch {
@@ -730,14 +778,39 @@ function PeopleInner() {
           )}
           <input placeholder="اسم الدين (مثال: سلفة شقة)" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
           <input placeholder="السبب (اختياري)" value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
-          <div className="grid grid-cols-2 gap-2">
-            <input placeholder="المبلغ" type="number" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
-            <select value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm">
-              <option value="EGP">جنيه</option>
-              <option value="USD">دولار</option>
-              <option value="SAR">ريال</option>
+          <div>
+            <label className="text-[10px] text-neutral-400">نوع الدين</label>
+            <select value={form.value_type} onChange={(e) => setForm({ ...form, value_type: e.target.value as any })} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm">
+              <option value="currency">مبلغ مالي</option>
+              <option value="gold">ذهب</option>
+              <option value="silver">فضة</option>
+              <option value="other">قيمة أخرى (بضاعة، إلخ)</option>
             </select>
           </div>
+          {form.value_type === "currency" ? (
+            <div className="grid grid-cols-2 gap-2">
+              <input placeholder="المبلغ" type="number" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+              <select value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm">
+                <option value="EGP">جنيه</option>
+                <option value="USD">دولار</option>
+                <option value="SAR">ريال</option>
+              </select>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-2">
+              <input placeholder={form.value_type === "other" ? "الكمية" : "الوزن (جرام)"} type="number" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+              {form.value_type === "gold" ? (
+                <select value={form.metal_karat} onChange={(e) => setForm({ ...form, metal_karat: e.target.value })} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm">
+                  <option value="">العيار</option>
+                  <option value="18">عيار 18</option>
+                  <option value="21">عيار 21</option>
+                  <option value="24">عيار 24</option>
+                </select>
+              ) : (
+                <input placeholder="وحدة القياس (مثال: كرتونة)" value={form.unit_label} onChange={(e) => setForm({ ...form, unit_label: e.target.value })} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+              )}
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="text-[10px] text-neutral-400">تاريخ الدين</label>
@@ -959,6 +1032,11 @@ function PeopleInner() {
                   <div>
                     <p className="font-medium text-sm">{d.people?.name} — {d.title}</p>
                     {d.reason && <p className="text-xs text-neutral-400">{d.reason}</p>}
+                    {d.value_type && d.value_type !== "currency" && (
+                      <p className="text-[10px] text-amber-600 dark:text-amber-400 font-medium mt-0.5">
+                        {VALUE_TYPE_LABEL[d.value_type]}{d.value_type === "gold" && d.metal_karat ? ` — عيار ${d.metal_karat}` : ""}
+                      </p>
+                    )}
                   </div>
                   <div className="flex items-center gap-2">
                     <span className={`text-[10px] px-2 py-0.5 rounded-full ${STATUS_COLOR[d.status]}`}>{STATUS_LABEL[d.status]}</span>
@@ -1021,12 +1099,20 @@ function PeopleInner() {
 
                   {editError && <p className="text-xs text-red-500">{editError}</p>}
 
-                  <div className="flex gap-2">
-                    {(d.status === "open" || d.status === "overdue") && (
-                      <button onClick={() => { setPayFor(d); setPayAmount(""); setReceiptDataUrl(null); setPayError(""); }} className="flex-1 text-xs bg-orange-50 dark:bg-orange-950 text-orange-700 dark:text-orange-300 rounded-lg py-2">
+                  {(d.status === "open" || d.status === "overdue") && (
+                    <div className="flex gap-2">
+                      <button onClick={() => { setPayFor(d); setPayMode("partial"); setPayAmount(""); setPayUseAccount(null); setPayAccountId(""); setReceiptDataUrl(null); setPayError(""); }} className="flex-1 text-xs bg-orange-50 dark:bg-orange-950 text-orange-700 dark:text-orange-300 rounded-lg py-2">
                         تسجيل سداد جزئي
                       </button>
-                    )}
+                      {/* Round 47 — "اعمل متاح على كل دين مكتوب عليه تم سدد
+                          الدين": تسوية الدين بالكامل بضغطة واحدة، مع سؤال
+                          الحساب (خصم/إضافة) جوه نفس مودال السداد تحت. */}
+                      <button onClick={() => { setPayFor(d); setPayMode("full"); setPayAmount(String(d.remaining_amount)); setPayUseAccount(null); setPayAccountId(""); setReceiptDataUrl(null); setPayError(""); }} className="flex-1 flex items-center justify-center gap-1 text-xs bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 rounded-lg py-2">
+                        <CheckCircle2 size={13} /> تم سداد الدين
+                      </button>
+                    </div>
+                  )}
+                  <div className="flex gap-2">
                     <button onClick={() => saveEdit(d.id)} className="flex-1 flex items-center justify-center gap-1 text-xs bg-orange-600 text-white rounded-lg py-2">
                       <Pencil size={13} /> حفظ التعديل
                     </button>
@@ -1138,10 +1224,47 @@ function PeopleInner() {
 
       {payFor && (
         <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50" onClick={() => setPayFor(null)}>
-          <div className="bg-white dark:bg-neutral-900 rounded-t-2xl sm:rounded-2xl w-full max-w-sm p-4 space-y-3" onClick={(e) => e.stopPropagation()}>
-            <p className="font-semibold text-sm">سداد جزئي — {payFor.title}</p>
+          <div className="bg-white dark:bg-neutral-900 rounded-t-2xl sm:rounded-2xl w-full max-w-sm p-4 space-y-3 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <p className="font-semibold text-sm">{payMode === "full" ? "تم سداد الدين بالكامل" : "سداد جزئي"} — {payFor.title}</p>
             <p className="text-xs text-neutral-400">الباقي: {fmt(Number(payFor.remaining_amount), payFor.currency)}</p>
-            <input autoFocus type="number" placeholder="المبلغ المدفوع" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+            {payMode === "partial" && (
+              <input autoFocus type="number" placeholder="المبلغ المدفوع" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm" />
+            )}
+
+            {/* Round 47 — "يسألني لو الدين عليا يقولي خصم من حساب نعم/لا...
+                لو مستحقات لي... يقولي أضيفه لحسابك لا/نعم اختيار الحساب" */}
+            <div className="space-y-1.5 bg-neutral-50 dark:bg-neutral-900/60 rounded-lg p-2.5">
+              <p className="text-xs font-medium">
+                {payFor.direction === "i_owe" ? "تخصم المبلغ ده من حساب؟" : "تضيف المبلغ ده لحسابك؟"}
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setPayUseAccount(true)}
+                  className={`flex-1 rounded-lg py-1.5 text-xs font-medium ${payUseAccount === true ? "bg-orange-600 text-white" : "border border-neutral-300 dark:border-neutral-700"}`}
+                >
+                  نعم
+                </button>
+                <button
+                  onClick={() => { setPayUseAccount(false); setPayAccountId(""); }}
+                  className={`flex-1 rounded-lg py-1.5 text-xs font-medium ${payUseAccount === false ? "bg-orange-600 text-white" : "border border-neutral-300 dark:border-neutral-700"}`}
+                >
+                  لا
+                </button>
+              </div>
+              {payUseAccount === true && (
+                accounts.length > 0 ? (
+                  <select value={payAccountId} onChange={(e) => setPayAccountId(e.target.value)} className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm">
+                    <option value="">-- اختار الحساب --</option>
+                    {accounts.map((a) => (
+                      <option key={a.id} value={a.id}>{a.name} ({a.currency})</option>
+                    ))}
+                  </select>
+                ) : (
+                  <p className="text-[11px] text-neutral-400">مفيش حسابات مسجلة — أضف حساب من صفحة الحسابات الأول</p>
+                )
+              )}
+            </div>
+
             <label className="flex items-center gap-2 text-xs text-orange-600 dark:text-orange-400 border border-dashed border-orange-200 dark:border-orange-900 rounded-lg px-3 py-2 cursor-pointer">
               <Paperclip size={14} />
               {receiptDataUrl ? "تم إرفاق إيصال — دوس لتغييره" : "إرفاق صورة إيصال (إيداع، فودافون كاش، إنستاباي...)"}

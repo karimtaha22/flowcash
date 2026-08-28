@@ -5,6 +5,7 @@ import Card from "@/components/Card";
 import Switch from "@/components/Switch";
 import { shrinkImage } from "@/lib/image";
 import { shareFile } from "@/lib/shareFile";
+import { showExportError } from "@/lib/exportToast";
 import { todayISO, daysInMonth, firstWeekdayOfMonth, parseISO, ARABIC_MONTHS, addDays } from "@/lib/laha/dates";
 import {
   cycleInfo, cycleRegularity, PRODUCTIVITY_MAP, detectGapFillers, waterRetentionInsight, describeTravelRange,
@@ -14,7 +15,10 @@ import { pregnancyInfo, fetalSizeLabel, weekBucket, gestationalMonth } from "@/l
 import { GENDER_REVEAL_DUA, genderRevealCongrats } from "@/lib/laha/genderReveal";
 import {
   Heart, Baby, Calendar, Scale, StickyNote, Footprints, Timer, Stethoscope,
-  Sparkles, PartyPopper, Copy, Lock, Unlock, Check, X, Wand2, ChevronRight, ChevronLeft, Search,
+  // Round 47 — "Party Popper 🎉 شيله من أي مكان": استبدلناها بأيقونة Gift
+  // (هدية) في كل الأماكن التلاتة اللي كانت مستخدمة فيها — نفس روح الاحتفال
+  // بمناسبة الحفلة من غير ما تكون نفس الأيقونة اللي طلبت شيلها بالاسم.
+  Sparkles, Gift, Copy, Lock, Unlock, Check, X, Wand2, ChevronRight, ChevronLeft, Search,
   CalendarRange, Zap, Users, Plane, Printer, RefreshCw, ExternalLink, FileDown, Trash2, Pencil,
   type LucideIcon,
 } from "lucide-react";
@@ -107,7 +111,7 @@ const TABS_PREGNANCY_GROUPS: TabGroup[] = [
     key: "family", label: "المولود والعائلة", icon: Wand2,
     items: [
       { key: "names", label: "أسماء المولود", icon: Wand2 },
-      { key: "reveal", label: "تيم بينك/بلو", icon: PartyPopper },
+      { key: "reveal", label: "تيم بينك/بلو", icon: Gift },
       { key: "partner", label: "الشريك", icon: Users },
     ],
   },
@@ -315,9 +319,9 @@ function CycleHomeTab({ settings }: { settings: Settings }) {
   useEffect(() => { load(); }, []);
 
   useEffect(() => {
-    setInfo(cycleInfo(periods, settings.avg_cycle_length));
+    setInfo(cycleInfo(periods, settings.avg_cycle_length, todayISO(), settings.avg_period_length));
     setRegularity(cycleRegularity(periods));
-  }, [periods, settings.avg_cycle_length]);
+  }, [periods, settings.avg_cycle_length, settings.avg_period_length]);
 
   const activePeriod = periods.find((p) => !p.end_date);
 
@@ -402,6 +406,7 @@ function CycleHomeTab({ settings }: { settings: Settings }) {
       <CycleCalendar
         periods={periods}
         avgCycleLength={settings.avg_cycle_length}
+        avgPeriodLength={settings.avg_period_length}
         activePeriodId={activePeriod?.id || null}
         busy={busy}
         onStart={startPeriodOn}
@@ -460,9 +465,9 @@ function CycleHomeTab({ settings }: { settings: Settings }) {
 const DOW_LABELS = ["أحد", "إثنين", "ثلاثاء", "أربعاء", "خميس", "جمعة", "سبت"];
 
 function CycleCalendar({
-  periods, avgCycleLength, activePeriodId, busy, onStart, onEnd, onDelete, travelRange,
+  periods, avgCycleLength, avgPeriodLength, activePeriodId, busy, onStart, onEnd, onDelete, travelRange,
 }: {
-  periods: any[]; avgCycleLength: number; activePeriodId: string | null; busy: boolean;
+  periods: any[]; avgCycleLength: number; avgPeriodLength?: number; activePeriodId: string | null; busy: boolean;
   onStart: (d: string) => void; onEnd: (d: string) => void; onDelete: (id: string) => void;
   travelRange?: { start: string; end: string } | null;
 }) {
@@ -494,7 +499,7 @@ function CycleCalendar({
   const cells: (string | null)[] = [...Array(startOffset).fill(null), ...Array.from({ length: numDays }, (_, i) => `${viewY}-${String(viewM).padStart(2, "0")}-${String(i + 1).padStart(2, "0")}`)];
 
   const categoryOf = (dateISO: string): "period" | "ovulation" | "fertile" | "safe" => {
-    const info = cycleInfo(periods, avgCycleLength, dateISO);
+    const info = cycleInfo(periods, avgCycleLength, dateISO, avgPeriodLength);
     if (!info) return "safe";
     if (info.isPeriodDay) return "period";
     if (info.ovulationDate === dateISO) return "ovulation";
@@ -618,8 +623,8 @@ function PlanningTab({ settings }: { settings: Settings }) {
     catch (e: any) { alert(e.message); } finally { setBusy(false); }
   };
 
-  const plan = tripStart && tripEnd ? describeTravelRange(periods, settings.avg_cycle_length, tripStart, tripEnd) : null;
-  const info = cycleInfo(periods, settings.avg_cycle_length);
+  const plan = tripStart && tripEnd ? describeTravelRange(periods, settings.avg_cycle_length, tripStart, tripEnd, settings.avg_period_length) : null;
+  const info = cycleInfo(periods, settings.avg_cycle_length, todayISO(), settings.avg_period_length);
   const currentPhase = info?.phase || null;
   const lastPeriod = [...periods].sort((a, b) => (a.start_date < b.start_date ? 1 : -1))[0] || null;
 
@@ -679,6 +684,7 @@ function PlanningTab({ settings }: { settings: Settings }) {
           <CycleCalendar
             periods={periods}
             avgCycleLength={settings.avg_cycle_length}
+            avgPeriodLength={settings.avg_period_length}
             activePeriodId={activePeriod?.id || null}
             busy={busy}
             onStart={startPeriodOn}
@@ -1016,11 +1022,11 @@ function WeightTab({ settings }: { settings: Settings }) {
     (async () => {
       try {
         const d = await api("/api/laha/periods");
-        const info = cycleInfo(d.periods || [], settings.avg_cycle_length);
+        const info = cycleInfo(d.periods || [], settings.avg_cycle_length, todayISO(), settings.avg_period_length);
         setPhase(info?.phase || null);
       } catch { setPhase(null); }
     })();
-  }, [mode, settings.avg_cycle_length]);
+  }, [mode, settings.avg_cycle_length, settings.avg_period_length]);
 
   const add = async () => {
     const val = Number(w);
@@ -1379,10 +1385,18 @@ function AppointmentsTab() {
 
   const exportPdf = async () => {
     const selected = appts.filter((a) => exportSelected[a.id]);
-    if (!selected.length) return;
+    if (!selected.length) {
+      // Round 47 — الزرار أصلًا disabled في الحالة دي، لكن لو حصلت بأي شكل
+      // (حالة قديمة متعلقة، إلخ) لازم تبان مش تتجاهل بصمت — "التصدير صامت".
+      showExportError("اختاري كارت متابعة واحد على الأقل قبل التصدير");
+      return;
+    }
     setExporting(true);
     const node = document.createElement("div");
-    node.style.cssText = "position:fixed;left:-9999px;width:700px;background:#fff;padding:24px;font-family:sans-serif;direction:rtl;color:#111";
+    // Round 47 — نفس نمط باقي تصديرات الـPDF بالضبط (top:0 صريح + خط Cairo
+    // بدل sans-serif عام) — كانت الفروق دي مش سبب "الصمت" نفسه، لكنها كانت
+    // بتخلي التصدير ده الوحيد المختلف شكليًا عن كل تصدير تاني في التطبيق.
+    node.style.cssText = "position:fixed;left:-9999px;top:0;width:700px;background:#fff;padding:24px;font-family:Cairo,sans-serif;direction:rtl;color:#111";
     const cards = selected
       .slice()
       .sort((a, b) => (a.appt_date < b.appt_date ? 1 : -1))
@@ -1404,6 +1418,7 @@ function AppointmentsTab() {
     document.body.appendChild(node);
     try {
       const html2canvas = (await import("html2canvas-pro")).default;
+      if (document.fonts?.ready) await document.fonts.ready;
       const canvas = await html2canvas(node, { scale: 2, backgroundColor: "#ffffff" });
       const { jsPDF } = await import("jspdf");
       // Round 46 — باج الشكل "البايظ": كنا بنحط canvas.width/height الخام
@@ -1418,8 +1433,12 @@ function AppointmentsTab() {
       const pdf = new jsPDF({ unit: "px", format: [w, h] });
       pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, w, h);
       await shareFile(pdf.output("dataurlstring"), "تقرير-متابعة-الحمل.pdf", "application/pdf");
-    } catch {
-      alert("حصل خطأ في التصدير");
+    } catch (e: any) {
+      // Round 47 — "تصدير متابعة الطبيب صامت": alert() ممكن يتمنع بصمت في
+      // بعض الـwebviews المدمجة (تليجرام، PWA standalone، إلخ) فيحس المستخدم
+      // إن الزرار "مايعملش حاجة" — showExportError بديل مضمون الظهور
+      // (عنصر HTML فعلي مش نافذة متصفح).
+      showExportError(e?.message ? `حصل خطأ في التصدير: ${e.message}` : "حصل خطأ في التصدير");
     } finally {
       document.body.removeChild(node);
       setExporting(false);
@@ -1771,6 +1790,11 @@ function BabyNamesTab({ settings, saveSettings }: { settings: Settings; saveSett
   };
   const toggleSelect = async (id: string, selected: boolean) => { await api(`/api/laha/baby-names/${id}`, { method: "PATCH", body: JSON.stringify({ selected }) }); load(); loadPoll(); };
   const del = async (id: string) => { await api(`/api/laha/baby-names/${id}`, { method: "DELETE" }); load(); };
+  // Round 47 — "عاوزه علامه مختلفة وواضحة... تدوس عليها الأم وده يبقى اسم
+  // المولود النهائي": علامة مستقلة عن القلب (اللي معناه "مرشّح لتصويت
+  // العيلة" بس) — is_final هي "الاسم اللي استقرينا عليه فعلًا". مسموح
+  // بواحد بس لكل نوع (السيرفر بيفرض القيد ده تلقائيًا).
+  const toggleFinal = async (id: string, isFinal: boolean) => { await api(`/api/laha/baby-names/${id}`, { method: "PATCH", body: JSON.stringify({ is_final: isFinal }) }); load(); };
 
   const addManualName = async () => {
     const name = manualName.trim();
@@ -1803,18 +1827,21 @@ function BabyNamesTab({ settings, saveSettings }: { settings: Settings; saveSett
     }
   };
 
-  // Round 46 — طلب المستخدم: لما الاسم يتحدد (يتحط عليه قلب/يتعمله selected)،
-  // علامة "تم اختيار الاسم" تظهر في مربع لوحدها فوق كارت اسم الأب، بلون نيون
-  // بينك ونور بيمشي جوه الاسم نفسه (`.neon-name-text` في globals.css).
-  const selectedNames = names.filter((n) => n.selected);
+  // Round 46 — لما الاسم يتحدد، علامة "تم اختيار الاسم" تظهر في مربع لوحدها
+  // فوق كارت اسم الأب، بلون نيون بينك ونور بيمشي جوه الاسم نفسه
+  // (`.neon-name-text` في globals.css).
+  // Round 47 — البادچ ده كان بيعتمد على "selected" (القلب — مجرد ترشيح
+  // لتصويت العيلة)، والمستخدمة وضّحت إنها عاوزة علامة تانية مختلفة تمامًا
+  // تحدد "الاسم النهائي" فعليًا (is_final) — البادچ دلوقتي بيعتمد عليها هي.
+  const finalNames = names.filter((n) => n.is_final);
 
   return (
     <div className="space-y-3">
-      {selectedNames.length > 0 && (
+      {finalNames.length > 0 && (
         <Card className="text-center space-y-2 border-pink-300/60 dark:border-pink-800/60">
           <p className="text-[11px] font-semibold text-pink-500 tracking-wide">تم اختيار الاسم</p>
           <div className="flex flex-wrap justify-center gap-x-5 gap-y-1">
-            {selectedNames.map((n) => (
+            {finalNames.map((n) => (
               <p key={n.id} className="neon-name-text text-2xl font-extrabold">{n.name}</p>
             ))}
           </div>
@@ -1915,7 +1942,7 @@ function BabyNamesTab({ settings, saveSettings }: { settings: Settings; saveSett
         </div>
  <p className="text-[10px] text-neutral-400">دوسي على القلب عشان ترشحي الاسم للتصويت العائلي تحت — دوسي "تحديث" عشان تشوفي أحدث عدد الأصوات</p>
         {names.map((n) => (
-          <div key={n.id} className="flex items-center justify-between gap-2 text-xs">
+          <div key={n.id} className={`flex items-center justify-between gap-2 text-xs rounded-lg ${n.is_final ? "bg-pink-50 dark:bg-pink-950/30 p-1.5 -mx-1.5" : ""}`}>
             <div className="flex-1">
               <p className="font-medium">{n.name}</p>
               {n.meaning && <p className="text-neutral-400">{n.meaning}</p>}
@@ -1924,6 +1951,21 @@ function BabyNamesTab({ settings, saveSettings }: { settings: Settings; saveSett
                 <p className="text-pink-500 mt-0.5">{voteCounts[n.id]} صوت من العيلة</p>
               )}
             </div>
+            {/* Round 47 — علامة "الاسم النهائي": مستقلة تمامًا عن القلب،
+                ومختلفة بصريًا عنه (نص/بادچ واضح بدل أيقونة قلب تانية) —
+                طلب المستخدمة الصريح "علامه مختلفة وواضحة". ظاهرة بس على
+                الأسماء اللي عليها قلب أصلًا (مرشّحة لتصويت العيلة). */}
+            {n.selected && (
+              n.is_final ? (
+                <button onClick={() => toggleFinal(n.id, false)} className="shrink-0 flex items-center gap-1 text-[10px] font-semibold text-white bg-pink-500 rounded-full px-2 py-1">
+                  <Check size={11} /> الاسم النهائي
+                </button>
+              ) : (
+                <button onClick={() => toggleFinal(n.id, true)} className="shrink-0 text-[10px] font-medium text-pink-500 border border-pink-300 dark:border-pink-800 rounded-full px-2 py-1">
+                  اجعليه نهائي
+                </button>
+              )
+            )}
             <button onClick={() => toggleSelect(n.id, !n.selected)} className={n.selected ? "text-pink-500" : "text-neutral-300"}>
               <Heart size={16} fill={n.selected ? "currentColor" : "none"} />
             </button>
@@ -1967,10 +2009,10 @@ function SkincareAdviceTab({ settings }: { settings: Settings }) {
   useEffect(() => {
     (async () => {
       const d = await api("/api/laha/periods");
-      const info = cycleInfo(d.periods || [], settings.avg_cycle_length);
+      const info = cycleInfo(d.periods || [], settings.avg_cycle_length, todayISO(), settings.avg_period_length);
       setPhase(info?.phase || "follicular");
     })();
-  }, [settings.avg_cycle_length]);
+  }, [settings.avg_cycle_length, settings.avg_period_length]);
 
   const ask = async () => {
     if (!phase) return;
@@ -2190,7 +2232,7 @@ function GenderRevealTab() {
   if (!party) {
     return (
       <Card className="text-center space-y-3 py-8">
-        <PartyPopper className="mx-auto text-pink-400" size={32} />
+        <Gift className="mx-auto text-pink-400" size={32} />
         <p className="text-sm text-neutral-500">ابدئي حفلة "تيم بينك ولا تيم بلو؟" — هتقدري تدّي الموبايل بعدها للدكتور أو صديقتك المقربة يسجلوا نوع الجنين برقم سري تحت إيديهم بس.</p>
         <button onClick={createParty} className="bg-pink-500 text-white rounded-xl py-2.5 px-6 text-sm font-medium">ابدئي الحفلة</button>
       </Card>
@@ -2275,8 +2317,12 @@ function ShareVoteCard({ party, votes, onRefresh }: { party: any; votes: { boy: 
             <span className="text-sky-600 dark:text-sky-400">ولد {votes.boy}</span>
             <span className="text-pink-600 dark:text-pink-400">{votes.girl} بنت</span>
           </div>
-          <button onClick={refresh} className="text-neutral-400 flex items-center gap-1 text-[10px]">
-            <RefreshCw size={12} className={refreshing ? "animate-spin" : ""} /> تحديث
+          {/* Round 47 — "كبر مفتاح التحديث عند الأم واديله لون مختلف علشان
+              يبان": كان زرار نص صغير رمادي بالكاد يتلاحظ — بقى بادچ بلون
+              وردي بارز وحجم أكبر، متسق مع مفاتيح التحديث التانية في نفس
+              الصفحة لكن بلون مميز عشان يبان وسط كارت التصويت. */}
+          <button onClick={refresh} className="flex items-center gap-1.5 text-xs font-semibold text-white bg-pink-500 rounded-full px-3 py-1.5">
+            <RefreshCw size={16} className={refreshing ? "animate-spin" : ""} /> تحديث
           </button>
         </div>
         <div className="h-4 rounded-full overflow-hidden flex bg-neutral-100 dark:bg-neutral-800">
@@ -2457,7 +2503,13 @@ function MotherRoom({ party, votes, onRefresh }: { party: any; votes: { boy: num
   // exportGroupReferral في reminders/page.tsx (بناء عقدة HTML مخفية،
   // html2canvas-pro لتحويلها لصورة، jsPDF لتغليفها).
   const exportGuestbook = async () => {
-    if (!entries.length) return;
+    if (!entries.length) {
+      // Round 47 — "تصدير الجيست بوك عند الأم بايظ": أول سبب حقيقي لقيناه —
+      // الدالة كانت بترجع من غير أي رسالة لو القائمة فاضية، فيبان الزرار
+      // "معملش حاجة".
+      showExportError("مفيش تهاني متسجلة لسه في الجيست بوك عشان نصدرها");
+      return;
+    }
     setExportingGuestbook(true);
     const node = document.createElement("div");
     node.style.cssText = "position:fixed;left:-9999px;top:0;width:700px;background:#fff;direction:rtl;font-family:Cairo,sans-serif;padding:24px;";
@@ -2485,6 +2537,11 @@ function MotherRoom({ party, votes, onRefresh }: { party: any; votes: { boy: num
       const pdf = new jsPDF({ unit: "px", format: [w, h] });
       pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, w, h);
       await shareFile(pdf.output("dataurlstring"), "جيست-بوك-الحفلة.pdf", "application/pdf");
+    } catch (e: any) {
+      // Round 47 fix — السبب الحقيقي وراء "بايظ": الدالة دي كانت من غير أي
+      // catch خالص، فأي خطأ (حتى بسيط زي مهلة الشبكة) كان بيفشل بصمت تمامًا
+      // من غير ما المستخدمة تعرف إن حاجة غلط أصلًا.
+      showExportError(e?.message ? `حصل خطأ في التصدير: ${e.message}` : "حصل خطأ في التصدير");
     } finally {
       document.body.removeChild(node);
       setExportingGuestbook(false);
@@ -2507,7 +2564,7 @@ function MotherRoom({ party, votes, onRefresh }: { party: any; votes: { boy: num
           {party.selected_name ? (
             <p className={`text-2xl font-extrabold ${party.gender === "boy" ? "text-sky-500" : "text-pink-500"}`}>{party.selected_name}</p>
           ) : (
-            <PartyPopper className={`mx-auto ${party.gender === "boy" ? "text-sky-500" : "text-pink-500"}`} size={36} />
+            <Gift className={`mx-auto ${party.gender === "boy" ? "text-sky-500" : "text-pink-500"}`} size={36} />
           )}
           <p className="text-sm text-neutral-600 dark:text-neutral-300 leading-relaxed">{GENDER_REVEAL_DUA}</p>
           <h2 className="text-lg font-bold">{genderRevealCongrats(party.gender)}</h2>

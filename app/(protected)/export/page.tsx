@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import Card from "@/components/Card";
 import { fmt } from "@/lib/format";
 import { toEGP, fromEGP, type FxRates } from "@/lib/fx";
+import { shareFile } from "@/lib/shareFile";
+import { showExportError } from "@/lib/exportToast";
 import { FileDown, FileSpreadsheet } from "lucide-react";
 
 interface Account { id: string; name: string; currency: string; parent_account_id?: string | null; balance?: number }
@@ -33,6 +35,7 @@ export default function ExportPage() {
   const [rates, setRates] = useState<FxRates | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
   const [familyAccounts, setFamilyAccounts] = useState<Account[]>([]);
+  const [exportingPdf, setExportingPdf] = useState(false);
 
   useEffect(() => {
     fetch("/api/accounts").then((r) => r.json()).then((d) => setAccounts(d.accounts || []));
@@ -124,32 +127,86 @@ export default function ExportPage() {
     downloadBlob("﻿" + header + body, `كشف-${label || "حساب"}.csv`, "text/csv;charset=utf-8;");
   };
 
+  // jsPDF's built-in fonts can't shape/render Arabic at all — doc.text()
+  // with Arabic input came out completely garbled. Same fix used for
+  // debt/gam3eya exports: build the statement as a styled, off-screen HTML
+  // table (Cairo font, RTL) and rasterize it with html2canvas-pro, then wrap
+  // the resulting image in a jsPDF sized to match — this sidesteps jsPDF's
+  // text-shaping entirely, so Arabic renders exactly as the browser drew it.
   const exportPDF = async () => {
+    // Round 47 — "كل التصدير PDF بايظ في جميع البرنامج": الدالة دي كانت من
+    // غير أي try/catch خالص — أي استثناء (شبكة، مشاركة، إلخ) كان بيبقى
+    // unhandled promise rejection بصمت تمامًا، وده أرجح سبب حقيقي وراء بلاغ
+    // "صامت" العام (كشف الحساب استخدام شائع جدًا). دلوقتي زي كل تصدير تاني.
+    setExportingPdf(true);
+    const node = document.createElement("div");
+    try {
+    node.style.position = "fixed";
+    node.style.left = "-9999px";
+    node.style.top = "0";
+    node.style.width = "700px";
+    node.style.background = "#ffffff";
+    node.style.padding = "24px";
+    node.style.fontFamily = "Cairo, sans-serif";
+    node.style.direction = "rtl";
+    node.style.color = "#111827";
+    const rowsHtml = rows
+      .map((r) => {
+        const eq = toBase(Math.abs(r.amount), r.currency);
+        const desc = String(r.description || "").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        return `
+          <tr>
+            <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;white-space:nowrap;">${r.date}</td>
+            <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;white-space:nowrap;">${r.type}${r.account ? " · " + r.account : ""}</td>
+            <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;">${desc}</td>
+            <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;font-weight:600;white-space:nowrap;">${fmt(Math.abs(r.amount), r.currency)}</td>
+            <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:10px;color:#9ca3af;white-space:nowrap;">${eq !== null ? "≈ " + fmt(eq, baseCurrency) : ""}</td>
+          </tr>`;
+      })
+      .join("");
+    node.innerHTML = `
+      <div style="text-align:center;margin-bottom:16px;">
+        <p style="font-size:12px;color:#ea580c;font-weight:700;">FlowCash</p>
+        <h2 style="font-size:17px;margin:6px 0 2px;">كشف حساب${label ? " — " + label : ""}</h2>
+        <p style="font-size:11px;color:#6b7280;margin:0;">${from || to ? `الفترة: ${from || "البداية"} إلى ${to || "الآن"}` : "كل الفترة"}</p>
+      </div>
+      <table style="width:100%;border-collapse:collapse;">
+        <thead>
+          <tr style="background:#f9fafb;">
+            <th style="padding:6px 4px;font-size:11px;text-align:right;">التاريخ</th>
+            <th style="padding:6px 4px;font-size:11px;text-align:right;">النوع</th>
+            <th style="padding:6px 4px;font-size:11px;text-align:right;">الوصف</th>
+            <th style="padding:6px 4px;font-size:11px;text-align:right;">المبلغ</th>
+            <th style="padding:6px 4px;font-size:11px;text-align:right;">≈ ${baseCurrency}</th>
+          </tr>
+        </thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+      <div style="border-top:1px solid #e5e7eb;margin-top:16px;padding-top:10px;text-align:center;">
+        <img src="/icons/icon-192.png" style="width:28px;height:28px;border-radius:6px;margin-bottom:4px;" />
+        <p style="font-size:10px;color:#9ca3af;margin:0;">تم الإنشاء بواسطة FlowCash — ${new Date().toLocaleDateString("ar-EG")}</p>
+        <p style="font-size:9px;color:#d1d5db;margin:2px 0 0;">© 2022–2026 IDEA-EG · www.ideaeg.online</p>
+      </div>
+    `;
+    document.body.appendChild(node);
+    const html2canvas = (await import("html2canvas-pro")).default;
+    if (document.fonts?.ready) await document.fonts.ready;
+    const canvas = await html2canvas(node, { scale: 2, backgroundColor: "#ffffff" });
+    document.body.removeChild(node);
+
     const { jsPDF } = await import("jspdf");
-    const doc = new jsPDF();
-    doc.setFontSize(14);
-    doc.text(`Statement: ${label}`, 14, 16);
-    doc.setFontSize(9);
-    doc.text(`Range: ${from || "-"} to ${to || "-"}`, 14, 23);
-    let y = 34;
-    doc.setFontSize(10);
-    doc.text("Date", 14, y);
-    doc.text("Type", 50, y);
-    doc.text("Description", 85, y);
-    doc.text("Amount", 155, y);
-    doc.text(`≈ ${baseCurrency}`, 185, y);
-    y += 6;
-    for (const r of rows) {
-      if (y > 280) { doc.addPage(); y = 20; }
-      const eq = toBase(Math.abs(r.amount), r.currency);
-      doc.text(String(r.date), 14, y);
-      doc.text(String(r.type), 50, y);
-      doc.text(String(r.description || "").slice(0, 35), 85, y);
-      doc.text(`${r.amount} ${r.currency}`, 155, y);
-      doc.text(eq !== null ? eq.toFixed(0) : "-", 185, y);
-      y += 6;
+    const w = canvas.width / 2;
+    const h = canvas.height / 2;
+    const pdf = new jsPDF({ unit: "px", format: [w, h] });
+    pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, w, h);
+    const pdfDataUrl = pdf.output("dataurlstring");
+    await shareFile(pdfDataUrl, `كشف-${label || "حساب"}.pdf`, "application/pdf");
+    } catch (e: any) {
+      if (document.body.contains(node)) document.body.removeChild(node);
+      showExportError(e?.message ? `حصل خطأ في التصدير: ${e.message}` : "حصل خطأ في التصدير");
+    } finally {
+      setExportingPdf(false);
     }
-    doc.save(`statement-${label || "account"}.pdf`);
   };
 
   return (
@@ -227,8 +284,8 @@ export default function ExportPage() {
             <button onClick={exportCSV} className="flex-1 flex items-center justify-center gap-1 text-sm bg-neutral-800 dark:bg-neutral-700 text-white rounded-lg py-2">
               <FileSpreadsheet size={15} /> تصدير Excel
             </button>
-            <button onClick={exportPDF} className="flex-1 flex items-center justify-center gap-1 text-sm bg-orange-600 text-white rounded-lg py-2">
-              <FileDown size={15} /> تصدير PDF
+            <button disabled={exportingPdf} onClick={exportPDF} className="flex-1 flex items-center justify-center gap-1 text-sm bg-orange-600 text-white rounded-lg py-2 disabled:opacity-60">
+              <FileDown size={15} /> {exportingPdf ? "جاري التصدير..." : "تصدير PDF"}
             </button>
           </div>
           <div className="space-y-1.5">

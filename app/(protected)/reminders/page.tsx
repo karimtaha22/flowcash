@@ -4,6 +4,7 @@ import Card from "@/components/Card";
 import Switch from "@/components/Switch";
 import { shrinkImage } from "@/lib/image";
 import { shareFile } from "@/lib/shareFile";
+import { showExportError } from "@/lib/exportToast";
 import { fmt } from "@/lib/format";
 import { MEAL_TIMING_LABELS, MEDICATION_FORM_LABELS, SCHEDULE_TYPE_LABELS } from "@/lib/medicationSchedule";
 import { lookupDefaultUnit } from "@/lib/groceryDefaultUnits";
@@ -768,6 +769,12 @@ function GroceryTab() {
       const pdf = new jsPDF({ unit: "px", format: [w, h] });
       pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, w, h);
       await shareFile(pdf.output("dataurlstring"), `${title}.pdf`, "application/pdf");
+    } catch (e: any) {
+      // Round 47 — "كل التصدير PDF بايظ في جميع البرنامج": فحص شامل لكل
+      // دوال التصدير في الملف ده طلع أغلبها من غير أي catch خالص (try/finally
+      // بس) — أي خطأ (شبكة، مشاركة، إلخ) كان بيفشل بصمت تمامًا. showExportError
+      // بديل مضمون الظهور لـalert() (اللي ممكن يتمنع في webviews مدمجة).
+      showExportError(e?.message ? `حصل خطأ في التصدير: ${e.message}` : "حصل خطأ في التصدير");
     } finally {
       setExporting(false);
     }
@@ -780,6 +787,8 @@ function GroceryTab() {
     try {
       const canvas = await rasterizeRows(rows, total, title);
       await shareFile(canvas.toDataURL("image/png"), `${title}.png`, "image/png");
+    } catch (e: any) {
+      showExportError(e?.message ? `حصل خطأ في التصدير: ${e.message}` : "حصل خطأ في التصدير");
     } finally {
       setExportingImg(false);
     }
@@ -1844,6 +1853,8 @@ function MedicationsTab() {
       const pdf = new jsPDF({ unit: "px", format: [w, h] });
       pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, w, h);
       await shareFile(pdf.output("dataurlstring"), "جدول-الأدوية.pdf", "application/pdf");
+    } catch (e: any) {
+      showExportError(e?.message ? `حصل خطأ في التصدير: ${e.message}` : "حصل خطأ في التصدير");
     } finally {
       setExporting(false);
     }
@@ -1856,6 +1867,8 @@ function MedicationsTab() {
     try {
       const canvas = await rasterizeSchedule();
       await shareFile(canvas.toDataURL("image/png"), "جدول-الأدوية.png", "image/png");
+    } catch (e: any) {
+      showExportError(e?.message ? `حصل خطأ في التصدير: ${e.message}` : "حصل خطأ في التصدير");
     } finally {
       setExportingImg(false);
     }
@@ -1990,6 +2003,8 @@ function MedicationsTab() {
       } finally {
         document.body.removeChild(node);
       }
+    } catch (e: any) {
+      showExportError(e?.message ? `حصل خطأ في التصدير: ${e.message}` : "حصل خطأ في التصدير");
     } finally {
       setExportingGroupId(null);
     }
@@ -2500,6 +2515,8 @@ function HealthSection({ groups }: { groups: any[] }) {
     setExportingLabImgId(lab.id);
     try {
       await shareFile(lab.image, `تحليل-${lab.id.slice(0, 8)}.jpg`, "image/jpeg");
+    } catch (e: any) {
+      showExportError(e?.message ? `حصل خطأ في التصدير: ${e.message}` : "حصل خطأ في التصدير");
     } finally {
       setExportingLabImgId(null);
     }
@@ -2528,6 +2545,8 @@ function HealthSection({ groups }: { groups: any[] }) {
       const pdf = new jsPDF({ unit: "px", format: [pageW, pageH] });
       pdf.addImage(lab.image, "JPEG", 0, 0, pageW, pageH);
       await shareFile(pdf.output("dataurlstring"), `تحليل-${lab.id.slice(0, 8)}.pdf`, "application/pdf");
+    } catch (e: any) {
+      showExportError(e?.message ? `حصل خطأ في التصدير: ${e.message}` : "حصل خطأ في التصدير");
     } finally {
       setExportingLabId(null);
     }

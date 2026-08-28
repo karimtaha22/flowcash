@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
     supabaseAdmin.from("laha_gender_reveal_votes").select("id", { count: "exact", head: true }).eq("party_id", party.id).eq("vote", "boy"),
     supabaseAdmin.from("laha_gender_reveal_votes").select("id", { count: "exact", head: true }).eq("party_id", party.id).eq("vote", "girl"),
     party.popped
-      ? supabaseAdmin.from("laha_baby_names").select("name,gender").eq("user_id", userId).eq("selected", true).order("created_at", { ascending: false }).limit(20)
+      ? supabaseAdmin.from("laha_baby_names").select("name,gender,is_final").eq("user_id", userId).eq("selected", true).order("created_at", { ascending: false }).limit(20)
       : Promise.resolve({ data: null }),
   ]);
   const { count: guestbookCount } = await supabaseAdmin
@@ -47,7 +47,13 @@ export async function GET(req: NextRequest) {
     .select("id", { count: "exact", head: true })
     .eq("party_id", party.id);
 
-  const selectedName = party.popped && selectedNames?.length ? (selectedNames.find((n: any) => n.gender === party.gender)?.name || null) : null;
+  // Round 47 — "الاسم النهائي": لو الأم أكدت اسم نهائي (is_final) بنفس
+  // النوع اللي اتكشف، هو اللي بيظهر — غير كده نرجع لأي اسم "مختار"
+  // (متعلّم/مرشّح لتصويت العيلة) بنفس النوع زي ما كان قبل كده، عشان
+  // الحفلات القديمة اللي معندهاش اسم نهائي متحدد لسه تفضل شغالة.
+  const namesForGender = (selectedNames || []).filter((n: any) => n.gender === party.gender);
+  const finalName = namesForGender.find((n: any) => n.is_final)?.name;
+  const selectedName = party.popped ? (finalName || namesForGender[0]?.name || null) : null;
 
   return NextResponse.json({
     party: publicPartyShape(party, unlocked, selectedName),

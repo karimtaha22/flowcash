@@ -16,19 +16,19 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ tok
     supabaseAdmin.from("laha_gender_reveal_votes").select("id", { count: "exact", head: true }).eq("party_id", party.id).eq("vote", "girl"),
     supabaseAdmin
       .from("laha_baby_names")
-      .select("name,gender")
+      .select("name,gender,is_final")
       .eq("user_id", party.user_id)
       .eq("selected", true)
       .order("created_at", { ascending: false })
       .limit(20),
   ]);
 
-  // اسم النقطة الديناميكي: لو النوع اتكشف وفيه اسم مختار بنفس النوع،
-  // استخدميه — غير كده "البيبي" العامة.
+  // اسم النقطة الديناميكي: لو النوع اتكشف وفيه اسم "نهائي" (is_final) بنفس
+  // النوع، استخدميه — غير كده نرجع لأي اسم "مختار" بنفس النوع (Round 47).
   let giftName: string | null = null;
   if (party.popped && party.gender && selectedName?.length) {
-    const match = selectedName.find((n: any) => n.gender === party.gender);
-    giftName = match?.name || null;
+    const namesForGender = selectedName.filter((n: any) => n.gender === party.gender);
+    giftName = namesForGender.find((n: any) => n.is_final)?.name || namesForGender[0]?.name || null;
   }
 
   return NextResponse.json({
