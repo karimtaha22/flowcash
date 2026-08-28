@@ -9,7 +9,7 @@ import { useFontScale, type FontScale } from "@/lib/useFontScale";
 import { formatHijriFromDate } from "@/lib/hijri";
 import { isValidPhone } from "@/lib/phone";
 import { shrinkImage } from "@/lib/image";
-import { Moon, Sun, LogOut, ShieldCheck, ShieldAlert, Plane, Fingerprint, TimerOff, Coins, Tags, Users, ChevronDown, Type, CalendarClock, Minus, Plus, Send, BellRing, Camera, BadgeCheck } from "lucide-react";
+import { Moon, Sun, LogOut, ShieldCheck, ShieldAlert, Plane, Fingerprint, TimerOff, Coins, Tags, Users, ChevronDown, Type, CalendarClock, Minus, Plus, Send, BellRing, Camera, BadgeCheck, Archive } from "lucide-react";
 
 // Round 32 — نص التحميل الموحّد لأي عملية بتكلّم Gemini في التطبيق كله.
 const AI_LOADING_TEXT = "جاري الاتصال بخوادم IDEA...";
@@ -552,6 +552,16 @@ export default function SettingsPage() {
           تحويل العملة بيظهر دايمًا بغض النظر عن وضع السفر — الوضع ده لتفاصيل سفر إضافية لاحقًا.
         </p>
       </Card>
+
+      {/* Round 48 — "في الإعدادات تعمل مفتاح اسمه الأرشيف": الديون اللي
+          اتسددت بالكامل (أو اتعملها أرشفة يدوية) بتتحط هنا — راجع
+          app/(protected)/debts-archive/page.tsx. */}
+      <a href="/debts-archive">
+        <Card className="flex items-center gap-2 text-sm">
+          <Archive size={18} />
+          أرشيف الديون المسددة
+        </Card>
+      </a>
 
       <Card className="space-y-1">
         <button onClick={() => setCategoriesOpen((s) => !s)} className="w-full flex items-center justify-between">

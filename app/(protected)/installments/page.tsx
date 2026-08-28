@@ -6,6 +6,7 @@ import { fmt } from "@/lib/format";
 import { shrinkImage } from "@/lib/image";
 import { shareFile } from "@/lib/shareFile";
 import { isValidPhone } from "@/lib/phone";
+import { renderHtmlToCanvas, canvasToPdf } from "@/lib/pdfExport";
 import InstallmentCalculatorModal from "@/components/InstallmentCalculator";
 import { PaymentAccountsEditor, ACCOUNT_TYPE_LABELS, emptyAccount, type PaymentAccount } from "@/components/PeopleManager";
 import {
@@ -1183,17 +1184,6 @@ function Gam3eyaCard({
     setExporting(true);
     setExportError("");
     try {
-      const node = document.createElement("div");
-      node.style.position = "fixed";
-      node.style.left = "-9999px";
-      node.style.top = "0";
-      node.style.width = "420px";
-      node.style.background = "#ffffff";
-      node.style.padding = "24px";
-      node.style.fontFamily = "Cairo, sans-serif";
-      node.style.direction = "rtl";
-      node.style.color = "#111827";
-
       const rowsHtml = sortedParticipants
         .map((p) => {
           const myPayment = g.gam3eya_payments.find((x) => x.participant_id === p.id && x.month_index === currentMonth);
@@ -1231,7 +1221,7 @@ function Gam3eyaCard({
            </div>`
         : "";
 
-      node.innerHTML = `
+      const html = `
         <div style="text-align:center;margin-bottom:16px;">
           <p style="font-size:12px;color:#ea580c;font-weight:700;">FlowCash</p>
         </div>
@@ -1252,21 +1242,16 @@ function Gam3eyaCard({
           <p style="font-size:9px;color:#d1d5db;margin:2px 0 0;">© 2022–2026 IDEA-EG · www.ideaeg.online</p>
         </div>
       `;
-      document.body.appendChild(node);
-      const html2canvas = (await import("html2canvas-pro")).default;
-      const canvas = await html2canvas(node, { scale: 2, backgroundColor: "#ffffff" });
-      document.body.removeChild(node);
+      // Round 48 — بناء الالتقاط + الـPDF بقى جوه lib/pdfExport.ts (نفس نقطة
+      // الإصلاح المشتركة لكل تصديرات التطبيق).
+      const canvas = await renderHtmlToCanvas(html, 420);
 
       const filenameBase = `جمعية-${(g.name || "بدون اسم").trim()}`.replace(/[\\/:*?"<>|]/g, "").slice(0, 60);
       if (format === "image") {
         const dataUrl = canvas.toDataURL("image/png");
         await shareFile(dataUrl, `${filenameBase}.png`);
       } else {
-        const { jsPDF } = await import("jspdf");
-        const w = canvas.width / 2;
-        const h = canvas.height / 2;
-        const pdf = new jsPDF({ unit: "px", format: [w, h] });
-        pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, w, h);
+        const pdf = await canvasToPdf(canvas);
         const pdfDataUrl = pdf.output("dataurlstring");
         await shareFile(pdfDataUrl, `${filenameBase}.pdf`, "application/pdf");
       }

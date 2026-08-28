@@ -5,12 +5,14 @@ import Card from "@/components/Card";
 import { fmt } from "@/lib/format";
 import {
   Plus, ChevronDown, Trash2, Pencil, Paperclip, Download, Share2, FileDown, Image as ImageIcon,
-  Camera, Link2, Copy, ShieldCheck, ShieldAlert, AlertTriangle, CheckCircle2, X, ScanLine,
+  Camera, Link2, Copy, ShieldCheck, ShieldAlert, AlertTriangle, CheckCircle2, X, ScanLine, Archive,
 } from "lucide-react";
 import { shrinkImage } from "@/lib/image";
 import { downloadFile, shareFile } from "@/lib/shareFile";
 import { isValidPhone } from "@/lib/phone";
 import ReceiptActions from "@/components/ReceiptActions";
+import { renderHtmlToCanvas, canvasToPdf } from "@/lib/pdfExport";
+import { showToast } from "@/lib/toast";
 
 // Round 25 fix — "مفتاح نسخ الرابط مش بينسخ": the old combined
 // shareOrCopyText tried navigator.share first and only fell back to
@@ -94,6 +96,7 @@ interface Debt {
   debt_events?: DebtEvent[];
   creditor_name?: string;
   debtor_name?: string;
+  archived_at?: string | null;
 }
 
 const WITNESS_MODE_LABEL: Record<string, string> = { two_men: "رجلين", man_two_women: "رجل وامرأتان" };
@@ -302,6 +305,13 @@ function PeopleInner() {
       if (expandedId === payFor.id) {
         setEditDraft((d) => ({ ...d, remaining_amount: String(data.remaining ?? 0) }));
       }
+      // Round 48 — "لما الدين يتسد يتشال من القايمة و حط مربع يظهر ٥ ثواني
+      // ويختفي": الدين اتقفل بالكامل هيتشال من القايمة تلقائيًا (الأرشفة
+      // بتحصل في الباك إند نفسه — راجع POST /api/debts/[id]/payments)، هنا
+      // بنعرض التوست بس.
+      if (data.status === "paid") {
+        showToast("تم نقل الدين المسدد إلى الأرشيف — يمكنك مراجعة الأرشيف من الإعدادات", "success", 5000);
+      }
       setPayFor(null);
       setPayAmount("");
       setPayUseAccount(null);
@@ -350,6 +360,28 @@ function PeopleInner() {
       load();
     } catch {
       setEditError("مفيش اتصال بالإنترنت، حاول تاني");
+    }
+  };
+
+  // Round 48 — نقل يدوي لدين مقفول للأرشيف (راجع تعليق زرار "نقل إلى
+  // الأرشيف" جوه الكارت).
+  const [archivingId, setArchivingId] = useState<string | null>(null);
+  const archiveDebt = async (id: string) => {
+    setArchivingId(id);
+    try {
+      const res = await fetch(`/api/debts/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ archive: true }),
+      });
+      if (!res.ok) { setEditError("حصل خطأ ومتنقلش الدين للأرشيف، حاول تاني"); return; }
+      showToast("تم نقل الدين إلى الأرشيف — يمكنك مراجعة الأرشيف من الإعدادات", "success", 5000);
+      setExpandedId(null);
+      load();
+    } catch {
+      setEditError("مفيش اتصال بالإنترنت، حاول تاني");
+    } finally {
+      setArchivingId(null);
     }
   };
 
@@ -531,17 +563,7 @@ function PeopleInner() {
     try {
       const paidAmt = Number(d.original_amount) - Number(d.remaining_amount);
       const dirLabel = d.direction === "owed_to_me" ? "دين مستحق لي" : "دين مستحق عليّ";
-      const node = document.createElement("div");
-      node.style.position = "fixed";
-      node.style.left = "-9999px";
-      node.style.top = "0";
-      node.style.width = "380px";
-      node.style.background = "#ffffff";
-      node.style.padding = "24px";
-      node.style.fontFamily = "Cairo, sans-serif";
-      node.style.direction = "rtl";
-      node.style.color = "#111827";
-      node.innerHTML = `
+      const html = `
         <div style="text-align:center;margin-bottom:16px;">
           <p style="font-size:12px;color:#ea580c;font-weight:700;">FlowCash</p>
         </div>
@@ -642,29 +664,18 @@ function PeopleInner() {
           <p style="font-size:9px;color:#d1d5db;margin:2px 0 0;">© 2022–2026 IDEA-EG · www.ideaeg.online</p>
         </div>
       `;
-      document.body.appendChild(node);
-      // html2canvas (plain) throws "Attempting to parse an unsupported color
-      // function 'lab'/'oklch'" the moment it walks up to <body>/<html> and
-      // hits a Tailwind v4 utility color — Tailwind v4 generates its palette
-      // with oklch(), and Chrome's getComputedStyle serializes some of those
-      // as lab(), which the original html2canvas's color parser has never
-      // supported (open upstream issue, unresolved). html2canvas-pro is a
-      // maintained fork with the exact same API that adds lab/lch/oklab/
-      // oklch support — a straight swap, no other code here changes.
-      const html2canvas = (await import("html2canvas-pro")).default;
-      const canvas = await html2canvas(node, { scale: 2, backgroundColor: "#ffffff" });
-      document.body.removeChild(node);
+      // Round 48 — بناء الالتقاط + الـPDF بقى جوه lib/pdfExport.ts (نفس نقطة
+      // الإصلاح المشتركة لكل تصديرات التطبيق — يحل "الصندوق الفاضي" ويقلل
+      // حجم الملف). html2canvas-pro (بدل html2canvas العادي) لسه مستخدم
+      // جوه الملف المشترك عشان يدعم ألوان oklch/lab اللي Tailwind v4 بيولّدها.
+      const canvas = await renderHtmlToCanvas(html, 380);
 
       const filenameBase = `دين-${(d.people?.name || "").trim()}-${d.title}`.replace(/[\\/:*?"<>|]/g, "").slice(0, 60);
       if (format === "image") {
         const dataUrl = canvas.toDataURL("image/png");
         await shareFile(dataUrl, `${filenameBase}.png`);
       } else {
-        const { jsPDF } = await import("jspdf");
-        const w = canvas.width / 2;
-        const h = canvas.height / 2;
-        const pdf = new jsPDF({ unit: "px", format: [w, h] });
-        pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, w, h);
+        const pdf = await canvasToPdf(canvas);
         // use shareFile (native share sheet + hardened download fallback)
         // instead of pdf.save() directly — pdf.save() relies on the same
         // detached-anchor .click() pattern that fails silently in some
@@ -1111,6 +1122,19 @@ function PeopleInner() {
                         <CheckCircle2 size={13} /> تم سداد الدين
                       </button>
                     </div>
+                  )}
+                  {/* Round 48 — مفتاح أرشفة يدوي لأي دين مقفول (مسدد أو
+                      معدوم) لسه مش في الأرشيف — شبكة أمان لو الأرشفة
+                      التلقائية (وقت السداد الكامل) متطبقتش (زي ديون قديمة
+                      من قبل الميزة دي، أو دين اتعمل عليه معدوم يدوي). */}
+                  {(d.status === "paid" || d.status === "written_off") && (
+                    <button
+                      disabled={archivingId === d.id}
+                      onClick={() => archiveDebt(d.id)}
+                      className="w-full flex items-center justify-center gap-1.5 text-xs bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 rounded-lg py-2 disabled:opacity-60"
+                    >
+                      <Archive size={13} /> {archivingId === d.id ? "جاري النقل..." : "نقل إلى الأرشيف"}
+                    </button>
                   )}
                   <div className="flex gap-2">
                     <button onClick={() => saveEdit(d.id)} className="flex-1 flex items-center justify-center gap-1 text-xs bg-orange-600 text-white rounded-lg py-2">

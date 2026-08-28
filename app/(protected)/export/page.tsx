@@ -5,6 +5,7 @@ import { fmt } from "@/lib/format";
 import { toEGP, fromEGP, type FxRates } from "@/lib/fx";
 import { shareFile } from "@/lib/shareFile";
 import { showExportError } from "@/lib/exportToast";
+import { renderHtmlToCanvas, canvasToPdf } from "@/lib/pdfExport";
 import { FileDown, FileSpreadsheet } from "lucide-react";
 
 interface Account { id: string; name: string; currency: string; parent_account_id?: string | null; balance?: number }
@@ -89,7 +90,11 @@ export default function ExportPage() {
       if (!personId) { setLoading(false); return; }
       const person = people.find((p) => p.id === personId);
       setLabel(person?.name || "");
-      const d = await fetch(`/api/debts?person_id=${personId}`).then((r) => r.json());
+      // Round 48 — GET /api/debts بقى بيستبعد الديون المؤرشفة (المسددة)
+      // افتراضيًا (راجع تعليق الراوت). كشف حساب الشخص هنا تاريخي بطبيعته —
+      // لازم يفضل يشمل الديون المسددة القديمة كمان، فبنمرر ?archived=all
+      // صراحة عشان ميختفوش من الكشف.
+      const d = await fetch(`/api/debts?person_id=${personId}&archived=all`).then((r) => r.json());
       const flat: any[] = [];
       for (const debt of d.debts || []) {
         flat.push({
@@ -138,23 +143,16 @@ export default function ExportPage() {
     // غير أي try/catch خالص — أي استثناء (شبكة، مشاركة، إلخ) كان بيبقى
     // unhandled promise rejection بصمت تمامًا، وده أرجح سبب حقيقي وراء بلاغ
     // "صامت" العام (كشف الحساب استخدام شائع جدًا). دلوقتي زي كل تصدير تاني.
+    // Round 48 — بناء العنصر المخفي + الالتقاط + تحويله لـPDF مضغوط بقى
+    // كله جوه lib/pdfExport.ts (نفس النقطة المشتركة لكل تصديرات التطبيق —
+    // راجع تعليق الملف نفسه لتفاصيل سبب "الصندوق الفاضي" وإصلاحه).
     setExportingPdf(true);
-    const node = document.createElement("div");
     try {
-    node.style.position = "fixed";
-    node.style.left = "-9999px";
-    node.style.top = "0";
-    node.style.width = "700px";
-    node.style.background = "#ffffff";
-    node.style.padding = "24px";
-    node.style.fontFamily = "Cairo, sans-serif";
-    node.style.direction = "rtl";
-    node.style.color = "#111827";
-    const rowsHtml = rows
-      .map((r) => {
-        const eq = toBase(Math.abs(r.amount), r.currency);
-        const desc = String(r.description || "").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-        return `
+      const rowsHtml = rows
+        .map((r) => {
+          const eq = toBase(Math.abs(r.amount), r.currency);
+          const desc = String(r.description || "").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+          return `
           <tr>
             <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;white-space:nowrap;">${r.date}</td>
             <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;white-space:nowrap;">${r.type}${r.account ? " · " + r.account : ""}</td>
@@ -162,9 +160,9 @@ export default function ExportPage() {
             <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;font-weight:600;white-space:nowrap;">${fmt(Math.abs(r.amount), r.currency)}</td>
             <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:10px;color:#9ca3af;white-space:nowrap;">${eq !== null ? "≈ " + fmt(eq, baseCurrency) : ""}</td>
           </tr>`;
-      })
-      .join("");
-    node.innerHTML = `
+        })
+        .join("");
+      const html = `
       <div style="text-align:center;margin-bottom:16px;">
         <p style="font-size:12px;color:#ea580c;font-weight:700;">FlowCash</p>
         <h2 style="font-size:17px;margin:6px 0 2px;">كشف حساب${label ? " — " + label : ""}</h2>
@@ -188,21 +186,11 @@ export default function ExportPage() {
         <p style="font-size:9px;color:#d1d5db;margin:2px 0 0;">© 2022–2026 IDEA-EG · www.ideaeg.online</p>
       </div>
     `;
-    document.body.appendChild(node);
-    const html2canvas = (await import("html2canvas-pro")).default;
-    if (document.fonts?.ready) await document.fonts.ready;
-    const canvas = await html2canvas(node, { scale: 2, backgroundColor: "#ffffff" });
-    document.body.removeChild(node);
-
-    const { jsPDF } = await import("jspdf");
-    const w = canvas.width / 2;
-    const h = canvas.height / 2;
-    const pdf = new jsPDF({ unit: "px", format: [w, h] });
-    pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, w, h);
-    const pdfDataUrl = pdf.output("dataurlstring");
-    await shareFile(pdfDataUrl, `كشف-${label || "حساب"}.pdf`, "application/pdf");
+      const canvas = await renderHtmlToCanvas(html, 700);
+      const pdf = await canvasToPdf(canvas);
+      const pdfDataUrl = pdf.output("dataurlstring");
+      await shareFile(pdfDataUrl, `كشف-${label || "حساب"}.pdf`, "application/pdf");
     } catch (e: any) {
-      if (document.body.contains(node)) document.body.removeChild(node);
       showExportError(e?.message ? `حصل خطأ في التصدير: ${e.message}` : "حصل خطأ في التصدير");
     } finally {
       setExportingPdf(false);

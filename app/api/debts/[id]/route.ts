@@ -24,6 +24,23 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ debt: data });
   }
 
+  // Round 48 — "في الإعدادات تعمل مفتاح اسمه الأرشيف... ومفتاح رجوع الدين
+  // يرجعه": أرشفة/استرجاع يدوي — منفصل عن الأرشفة التلقائية اللي بتحصل
+  // وقت تسوية الدين بالكامل (راجع POST /api/debts/[id]/payments). ده بيدي
+  // إمكانية أرشفة أي دين مقفول (مسدد أو معدوم) حتى لو الأرشفة التلقائية
+  // مكانتش انطبقت (زي دين متعمل عليه written_off يدوي)، واسترجاعه تاني.
+  if (body.archive === true || body.restore === true) {
+    const { data, error } = await supabaseAdmin
+      .from("debts")
+      .update({ archived_at: body.archive === true ? new Date().toISOString() : null })
+      .eq("id", id)
+      .eq("user_id", userId)
+      .select()
+      .single();
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ debt: data });
+  }
+
   const { data: before } = await supabaseAdmin.from("debts").select("due_date,is_advanced").eq("id", id).eq("user_id", userId).single();
 
   const allowed = ["title", "reason", "currency", "due_date", "debt_date", "status", "person_id", "original_amount", "remaining_amount"];

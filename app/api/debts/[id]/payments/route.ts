@@ -17,9 +17,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const newRemaining = Number(debt.remaining_amount) - paidAmount;
   const newStatus = newRemaining <= 0 ? "paid" : debt.status === "overdue" ? "overdue" : "open";
+  // Round 48 — "لما الدين يتسدد يتشال من القايمة، ويتحط في الأرشيف": أي
+  // دين بيتقفل بالكامل هنا بيترحّل تلقائيًا للأرشيف (archived_at) — قائمة
+  // الديون العادية بتستبعد الأرشيف تلقائيًا (راجع GET /api/debts أسفل
+  // ونفس المنطق جوه app/(protected)/people/page.tsx).
   await supabaseAdmin
     .from("debts")
-    .update({ remaining_amount: Math.max(newRemaining, 0), status: newStatus, updated_at: new Date().toISOString() })
+    .update({
+      remaining_amount: Math.max(newRemaining, 0),
+      status: newStatus,
+      updated_at: new Date().toISOString(),
+      ...(newStatus === "paid" ? { archived_at: new Date().toISOString() } : {}),
+    })
     .eq("id", id);
 
   // audit-log on the public live link — only for advanced debts (see

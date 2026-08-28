@@ -271,6 +271,32 @@ const CATEGORY_NOTE: Record<DayCategory, string> = {
   safe: "يوم آمن ومناسب لأي نشاط عادي.",
 };
 
+// Round 48 — "أي يوم أقف عليه، اديني مختصر عنه... بس بالصيغ الطبية": ترتيب
+// عربي لأيام الدورة (حد أقصى ١٥ يوم — نفس الحد الأقصى المفروض على
+// avgPeriodLength جوه cycleInfo أعلاه) عشان جملة زي "اليوم الثالث من
+// الدورة الشهرية" تتبني صح.
+const ORDINAL_DAY: string[] = [
+  "", "الأول", "الثاني", "الثالث", "الرابع", "الخامس", "السادس", "السابع",
+  "الثامن", "التاسع", "العاشر", "الحادي عشر", "الثاني عشر", "الثالث عشر",
+  "الرابع عشر", "الخامس عشر",
+];
+
+// ملخص طبي مختصر ليوم واحد في التقويم — بيُستخدم لما المستخدمة تدوس على
+// يوم في تقويم الدورة عشان تعرف حالته على طول من غير ما تحسب بنفسها.
+export function dayMedicalSummary(periods: PeriodLike[], avgCycleLength: number, dateISO: string, avgPeriodLength = 6): string | null {
+  const info = cycleInfo(periods, avgCycleLength, dateISO, avgPeriodLength);
+  if (!info) return null;
+  if (info.isPeriodDay) {
+    const label = ORDINAL_DAY[info.dayInCycle] || `رقم ${info.dayInCycle}`;
+    return `اليوم ${label} من الدورة الشهرية (الطمث).`;
+  }
+  if (info.ovulationDate === dateISO) return "يوم التبويض — أعلى معدل خصوبة في الدورة كلها.";
+  if (info.fertileStart && info.fertileEnd && dateISO >= info.fertileStart && dateISO <= info.fertileEnd) {
+    return "ضمن نافذة الخصوبة المحيطة بالتبويض — احتمال الحمل فيها مرتفع.";
+  }
+  return "يوم آمن نسبيًا — خارج نافذة التبويض المتوقعة وأيام الدورة.";
+}
+
 export interface TravelSegment {
   category: DayCategory;
   fromDayIndex: number; // ١-based جوه الرحلة

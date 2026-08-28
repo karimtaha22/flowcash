@@ -5,6 +5,7 @@ import Switch from "@/components/Switch";
 import { shrinkImage } from "@/lib/image";
 import { shareFile } from "@/lib/shareFile";
 import { showExportError } from "@/lib/exportToast";
+import { renderHtmlToCanvas, canvasToPdf } from "@/lib/pdfExport";
 import { fmt } from "@/lib/format";
 import { MEAL_TIMING_LABELS, MEDICATION_FORM_LABELS, SCHEDULE_TYPE_LABELS } from "@/lib/medicationSchedule";
 import { lookupDefaultUnit } from "@/lib/groceryDefaultUnits";
@@ -711,16 +712,6 @@ function GroceryTab() {
   // للـ HTML بمتصفح Chromium وتصويره — الفرق واضح لما نستخدم fmt() (بترجع
   // رمز عملة عربي "ج.م" بدل الحروف اللاتينية) بدل التركيب اليدوي.
   const rasterizeRows = async (rows: { label: string; optionLabel: string; price: number; currency: string; qty: number; qtyLabel?: string }[], total: number, title: string) => {
-    const node = document.createElement("div");
-    node.style.position = "fixed";
-    node.style.left = "-9999px";
-    node.style.top = "0";
-    node.style.width = "700px";
-    node.style.background = "#ffffff";
-    node.style.padding = "24px";
-    node.style.fontFamily = "Cairo, sans-serif";
-    node.style.direction = "rtl";
-    node.style.color = "#111827";
     const cellWrap = "word-break:break-word;overflow-wrap:anywhere;";
     const rowsHtml = rows
       .map(
@@ -732,7 +723,7 @@ function GroceryTab() {
         </tr>`
       )
       .join("");
-    node.innerHTML = `
+    const html = `
       <div style="text-align:center;margin-bottom:16px;">
         <p style="font-size:12px;color:#ea580c;font-weight:700;">FlowCash</p>
         <h2 style="font-size:17px;margin:6px 0 2px;">${escapeHtml(title)}</h2>
@@ -749,25 +740,16 @@ function GroceryTab() {
       <div style="border-top:1px solid #e5e7eb;margin-top:12px;padding-top:10px;text-align:center;">
         <p style="font-size:10px;color:#9ca3af;margin:0;">تم الإنشاء بواسطة FlowCash — ${new Date().toLocaleDateString("ar-EG")}</p>
       </div>`;
-    document.body.appendChild(node);
-    try {
-      const html2canvas = (await import("html2canvas-pro")).default;
-      if (document.fonts?.ready) await document.fonts.ready;
-      return await html2canvas(node, { scale: 2, backgroundColor: "#ffffff" });
-    } finally {
-      document.body.removeChild(node);
-    }
+    // Round 48 — بناء الالتقاط بقى جوه lib/pdfExport.ts (نفس نقطة الإصلاح
+    // المشتركة لكل تصديرات التطبيق).
+    return renderHtmlToCanvas(html, 700);
   };
 
   const exportRows = async (rows: { label: string; optionLabel: string; price: number; currency: string; qty: number }[], total: number, title: string) => {
     setExporting(true);
     try {
       const canvas = await rasterizeRows(rows, total, title);
-      const { jsPDF } = await import("jspdf");
-      const w = canvas.width / 2;
-      const h = canvas.height / 2;
-      const pdf = new jsPDF({ unit: "px", format: [w, h] });
-      pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, w, h);
+      const pdf = await canvasToPdf(canvas);
       await shareFile(pdf.output("dataurlstring"), `${title}.pdf`, "application/pdf");
     } catch (e: any) {
       // Round 47 — "كل التصدير PDF بايظ في جميع البرنامج": فحص شامل لكل
@@ -1788,17 +1770,7 @@ function MedicationsTab() {
   // ياخده المريض للدكتور، مش مبني جوه التصدير العام. نفس إصلاحات الـ Round
   // 34 لباج التنسيق (table-layout: fixed + word-break + إعزال أرقام
   // المتبقي/العبوة اللي كانت بتتقلب بصريًا برضو).
-  const buildScheduleNode = () => {
-    const node = document.createElement("div");
-    node.style.position = "fixed";
-    node.style.left = "-9999px";
-    node.style.top = "0";
-    node.style.width = "700px";
-    node.style.background = "#ffffff";
-    node.style.padding = "24px";
-    node.style.fontFamily = "Cairo, sans-serif";
-    node.style.direction = "rtl";
-    node.style.color = "#111827";
+  const buildScheduleHtml = () => {
     const cellWrap = "word-break:break-word;overflow-wrap:anywhere;";
     const medRows = meds
       .map(
@@ -1809,7 +1781,7 @@ function MedicationsTab() {
         </tr>`
       )
       .join("");
-    node.innerHTML = `
+    return `
       <div style="text-align:center;margin-bottom:16px;">
         <p style="font-size:12px;color:#ea580c;font-weight:700;">FlowCash</p>
         <h2 style="font-size:17px;margin:6px 0 2px;">جدول الأدوية</h2>
@@ -1828,30 +1800,16 @@ function MedicationsTab() {
       <div style="border-top:1px solid #e5e7eb;margin-top:16px;padding-top:10px;text-align:center;">
         <p style="font-size:10px;color:#9ca3af;margin:0;">تم الإنشاء بواسطة FlowCash — ${new Date().toLocaleDateString("ar-EG")}</p>
       </div>`;
-    return node;
   };
 
-  const rasterizeSchedule = async () => {
-    const node = buildScheduleNode();
-    document.body.appendChild(node);
-    try {
-      const html2canvas = (await import("html2canvas-pro")).default;
-      if (document.fonts?.ready) await document.fonts.ready;
-      return await html2canvas(node, { scale: 2, backgroundColor: "#ffffff" });
-    } finally {
-      document.body.removeChild(node);
-    }
-  };
+  // Round 48 — بقت جوه lib/pdfExport.ts (نفس نقطة الإصلاح المشتركة).
+  const rasterizeSchedule = async () => renderHtmlToCanvas(buildScheduleHtml(), 700);
 
   const exportSchedule = async () => {
     setExporting(true);
     try {
       const canvas = await rasterizeSchedule();
-      const { jsPDF } = await import("jspdf");
-      const w = canvas.width / 2;
-      const h = canvas.height / 2;
-      const pdf = new jsPDF({ unit: "px", format: [w, h] });
-      pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, w, h);
+      const pdf = await canvasToPdf(canvas);
       await shareFile(pdf.output("dataurlstring"), "جدول-الأدوية.pdf", "application/pdf");
     } catch (e: any) {
       showExportError(e?.message ? `حصل خطأ في التصدير: ${e.message}` : "حصل خطأ في التصدير");
@@ -1913,16 +1871,6 @@ function MedicationsTab() {
         }
       }
 
-      const node = document.createElement("div");
-      node.style.position = "fixed";
-      node.style.left = "-9999px";
-      node.style.top = "0";
-      node.style.width = "700px";
-      node.style.background = "#ffffff";
-      node.style.padding = "24px";
-      node.style.fontFamily = "Cairo, sans-serif";
-      node.style.direction = "rtl";
-      node.style.color = "#111827";
       const cellWrap = "word-break:break-word;overflow-wrap:anywhere;";
       const rows = groupMeds
         .map(
@@ -1960,7 +1908,7 @@ function MedicationsTab() {
           </div>`
         : "";
 
-      node.innerHTML = `
+      const html = `
         <div style="text-align:center;margin-bottom:16px;">
           <p style="font-size:12px;color:#ea580c;font-weight:700;">FlowCash</p>
           <h2 style="font-size:17px;margin:6px 0 2px;">كشف أدوية — ${escapeHtml(g.name)}</h2>
@@ -1975,34 +1923,26 @@ function MedicationsTab() {
         <div style="border-top:1px solid #e5e7eb;margin-top:16px;padding-top:10px;text-align:center;">
           <p style="font-size:10px;color:#9ca3af;margin:0;">تم الإنشاء بواسطة FlowCash — ${new Date().toLocaleDateString("ar-EG")}${opts.attachLabs && labImages.length ? ` — مرفق ${labImages.length} نتيجة تحليل في الصفحات التالية` : ""}</p>
         </div>`;
-      document.body.appendChild(node);
-      try {
-        const html2canvas = (await import("html2canvas-pro")).default;
-        if (document.fonts?.ready) await document.fonts.ready;
-        const canvas = await html2canvas(node, { scale: 2, backgroundColor: "#ffffff" });
-        const { jsPDF } = await import("jspdf");
-        const w = canvas.width / 2;
-        const h = canvas.height / 2;
-        const pdf = new jsPDF({ unit: "px", format: [w, h] });
-        pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, w, h);
-        for (const imgUrl of labImages) {
-          try {
-            const dims = await new Promise<{ w: number; h: number }>((resolve, reject) => {
-              const img = new Image();
-              img.onload = () => resolve({ w: img.width, h: img.height });
-              img.onerror = reject;
-              img.src = imgUrl;
-            });
-            pdf.addPage([dims.w, dims.h], dims.w >= dims.h ? "landscape" : "portrait");
-            pdf.addImage(imgUrl, "JPEG", 0, 0, dims.w, dims.h);
-          } catch {
-            // صورة تحليل واحدة فشلت تتحمل — نكمل بالباقي بدل ما نوقف التصدير كله
-          }
+      // Round 48 — بناء الالتقاط + الـPDF الأساسي بقى جوه lib/pdfExport.ts
+      // (نفس نقطة الإصلاح المشتركة)، وبعدين بنضيف صفحات التحاليل يدويًا
+      // فوق نفس الـpdf زي ما كان بالظبط.
+      const canvas = await renderHtmlToCanvas(html, 700);
+      const pdf = await canvasToPdf(canvas);
+      for (const imgUrl of labImages) {
+        try {
+          const dims = await new Promise<{ w: number; h: number }>((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => resolve({ w: img.width, h: img.height });
+            img.onerror = reject;
+            img.src = imgUrl;
+          });
+          pdf.addPage([dims.w, dims.h], dims.w >= dims.h ? "landscape" : "portrait");
+          pdf.addImage(imgUrl, "JPEG", 0, 0, dims.w, dims.h);
+        } catch {
+          // صورة تحليل واحدة فشلت تتحمل — نكمل بالباقي بدل ما نوقف التصدير كله
         }
-        await shareFile(pdf.output("dataurlstring"), `كشف-${g.name}.pdf`, "application/pdf");
-      } finally {
-        document.body.removeChild(node);
       }
+      await shareFile(pdf.output("dataurlstring"), `كشف-${g.name}.pdf`, "application/pdf");
     } catch (e: any) {
       showExportError(e?.message ? `حصل خطأ في التصدير: ${e.message}` : "حصل خطأ في التصدير");
     } finally {

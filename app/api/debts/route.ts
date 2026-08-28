@@ -8,6 +8,13 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const direction = searchParams.get("direction");
   const person_id = searchParams.get("person_id");
+  // Round 48 — "لما الدين يتسدد يتشال من القايمة": الافتراضي (من غير
+  // ?archived) بيستبعد الديون المؤرشفة خالص — صفحة الديون العادية بقت
+  // نضيفة تلقائيًا. صفحة الأرشيف الجديدة (الإعدادات → الأرشيف) بتمرر
+  // ?archived=1 عشان تشوف الديون المؤرشفة بس. كشف حساب شخص (تصدير) بيمرر
+  // ?archived=all عشان يشوف كل تاريخ الشخص (مسدد وغير مسدد) — إلغاء دين من
+  // القايمة العادية معناهوش إخفاؤه من كشف حساب تاريخي.
+  const archived = searchParams.get("archived");
 
   let query = supabaseAdmin
     .from("debts")
@@ -19,6 +26,8 @@ export async function GET(req: NextRequest) {
 
   if (direction) query = query.eq("direction", direction);
   if (person_id) query = query.eq("person_id", person_id);
+  if (archived === "1") query = query.not("archived_at", "is", null);
+  else if (archived !== "all") query = query.is("archived_at", null);
 
   const { data, error } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

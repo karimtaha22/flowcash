@@ -6,19 +6,23 @@ import Switch from "@/components/Switch";
 import { shrinkImage } from "@/lib/image";
 import { shareFile } from "@/lib/shareFile";
 import { showExportError } from "@/lib/exportToast";
+import { renderHtmlToCanvas, canvasToPdf } from "@/lib/pdfExport";
 import { todayISO, daysInMonth, firstWeekdayOfMonth, parseISO, ARABIC_MONTHS, addDays } from "@/lib/laha/dates";
 import {
   cycleInfo, cycleRegularity, PRODUCTIVITY_MAP, detectGapFillers, waterRetentionInsight, describeTravelRange,
-  type CyclePhase,
+  dayMedicalSummary, type CyclePhase,
 } from "@/lib/laha/cycle";
 import { pregnancyInfo, fetalSizeLabel, weekBucket, gestationalMonth } from "@/lib/laha/pregnancy";
 import { GENDER_REVEAL_DUA, genderRevealCongrats } from "@/lib/laha/genderReveal";
 import {
   Heart, Baby, Calendar, Scale, StickyNote, Footprints, Timer, Stethoscope,
-  // Round 47 — "Party Popper 🎉 شيله من أي مكان": استبدلناها بأيقونة Gift
-  // (هدية) في كل الأماكن التلاتة اللي كانت مستخدمة فيها — نفس روح الاحتفال
-  // بمناسبة الحفلة من غير ما تكون نفس الأيقونة اللي طلبت شيلها بالاسم.
-  Sparkles, Gift, Copy, Lock, Unlock, Check, X, Wand2, ChevronRight, ChevronLeft, Search,
+  // Round 47 — "Party Popper 🎉 شيله من أي مكان": استبدلناها بأيقونة Gift.
+  // Round 48 — المستخدمة طلبت شيل Gift كمان من كل حتة "من غير أي بديل من
+  // دماغي" — اتشالت من كل الأماكن الزخرفية (كارت الاحتفال). المكان الوحيد
+  // اللي محتاج أيقونة إجباريًا (تبويب "تيم بينك/بلو" في القائمة الجانبية،
+  // كل التبويبات التانية ليها أيقونة) — سألتها واختارت "دائرتين متقابلتين"
+  // = أيقونة Blend (نفس شكل رمز البولد/جيرل التقليدي بدايرتين متداخلتين).
+  Sparkles, Blend, Copy, Lock, Unlock, Check, X, Wand2, ChevronRight, ChevronLeft, Search,
   CalendarRange, Zap, Users, Plane, Printer, RefreshCw, ExternalLink, FileDown, Trash2, Pencil,
   type LucideIcon,
 } from "lucide-react";
@@ -111,7 +115,7 @@ const TABS_PREGNANCY_GROUPS: TabGroup[] = [
     key: "family", label: "المولود والعائلة", icon: Wand2,
     items: [
       { key: "names", label: "أسماء المولود", icon: Wand2 },
-      { key: "reveal", label: "تيم بينك/بلو", icon: Gift },
+      { key: "reveal", label: "تيم بينك/بلو", icon: Blend },
       { key: "partner", label: "الشريك", icon: Users },
     ],
   },
@@ -519,6 +523,10 @@ function CycleCalendar({
   };
 
   const selectedExactPeriod = selected ? periods.find((p) => p.start_date === selected) : null;
+  // Round 48 — "أي يوم أقف عليه، اديني مختصر عنه... بالصيغ الطبية": ملخص
+  // طبي مختصر لليوم المحدد (يوم دورة رقم كام / يوم تبويض / نافذة خصوبة /
+  // يوم آمن) — راجع lib/laha/cycle.ts's dayMedicalSummary.
+  const selectedSummary = selected ? dayMedicalSummary(periods, avgCycleLength, selected, avgPeriodLength) : null;
   const todayIso = todayISO();
 
   return (
@@ -569,6 +577,9 @@ function CycleCalendar({
       {selected && (
         <div className="rounded-xl bg-neutral-50 dark:bg-neutral-800 p-3 space-y-2">
           <p className="text-xs font-medium text-center">{fmtDate(selected)}</p>
+          {selectedSummary && (
+            <p className="text-[11px] text-center text-pink-600 dark:text-pink-400 leading-relaxed">{selectedSummary}</p>
+          )}
           <div className="flex flex-wrap gap-2 justify-center">
             <button disabled={busy} onClick={() => { onStart(selected); setSelected(null); }} className="text-xs bg-rose-500 text-white rounded-lg px-3 py-1.5">تعيين كبداية الدورة</button>
             <button disabled={busy || !activePeriodId} onClick={() => { onEnd(selected); setSelected(null); }} className="text-xs bg-neutral-500 text-white rounded-lg px-3 py-1.5 disabled:opacity-40">تعيين كنهاية الدورة</button>
@@ -1392,11 +1403,6 @@ function AppointmentsTab() {
       return;
     }
     setExporting(true);
-    const node = document.createElement("div");
-    // Round 47 — نفس نمط باقي تصديرات الـPDF بالضبط (top:0 صريح + خط Cairo
-    // بدل sans-serif عام) — كانت الفروق دي مش سبب "الصمت" نفسه، لكنها كانت
-    // بتخلي التصدير ده الوحيد المختلف شكليًا عن كل تصدير تاني في التطبيق.
-    node.style.cssText = "position:fixed;left:-9999px;top:0;width:700px;background:#fff;padding:24px;font-family:Cairo,sans-serif;direction:rtl;color:#111";
     const cards = selected
       .slice()
       .sort((a, b) => (a.appt_date < b.appt_date ? 1 : -1))
@@ -1414,24 +1420,13 @@ function AppointmentsTab() {
           </div>`;
       })
       .join("");
-    node.innerHTML = `<h2 style="text-align:center;margin-bottom:16px">تقرير متابعة الحمل</h2>${cards}`;
-    document.body.appendChild(node);
+    const html = `<h2 style="text-align:center;margin-bottom:16px">تقرير متابعة الحمل</h2>${cards}`;
     try {
-      const html2canvas = (await import("html2canvas-pro")).default;
-      if (document.fonts?.ready) await document.fonts.ready;
-      const canvas = await html2canvas(node, { scale: 2, backgroundColor: "#ffffff" });
-      const { jsPDF } = await import("jspdf");
-      // Round 46 — باج الشكل "البايظ": كنا بنحط canvas.width/height الخام
-      // (بعد تكبير html2canvas بمقياس 2x) كمقاس صفحة PDF بالحرف — ده بيطلّع
-      // صفحة ضخمة فعليًا (أضعاف حجمها الطبيعي)، فيبان النص كبير جدًا ومبعثر
-      // لما يتفتح. الحل: نقسم على الـ2x قبل ما نحدد مقاس الصفحة (نفس النمط
-      // المتبع في كل تصديرات PDF التانية بالتطبيق — reminders/page.tsx،
-      // app/(protected)/export/page.tsx، إلخ) — الصورة نفسها فضلت بالدقة
-      // العالية (عشان تطلع واضحة)، بس مقاس الصفحة بقى بمقاس المحتوى الحقيقي.
-      const w = canvas.width / 2;
-      const h = canvas.height / 2;
-      const pdf = new jsPDF({ unit: "px", format: [w, h] });
-      pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, w, h);
+      // Round 48 — "حل نهائي لتصدير PDF بايظ في أي مكان": بناء الالتقاط
+      // والـPDF بقى جوه lib/pdfExport.ts (نفس نقطة الإصلاح المشتركة لكل
+      // تصديرات التطبيق — راجع تعليق الملف نفسه لتفاصيل السبب والإصلاح).
+      const canvas = await renderHtmlToCanvas(html, 700);
+      const pdf = await canvasToPdf(canvas);
       await shareFile(pdf.output("dataurlstring"), "تقرير-متابعة-الحمل.pdf", "application/pdf");
     } catch (e: any) {
       // Round 47 — "تصدير متابعة الطبيب صامت": alert() ممكن يتمنع بصمت في
@@ -1440,7 +1435,6 @@ function AppointmentsTab() {
       // (عنصر HTML فعلي مش نافذة متصفح).
       showExportError(e?.message ? `حصل خطأ في التصدير: ${e.message}` : "حصل خطأ في التصدير");
     } finally {
-      document.body.removeChild(node);
       setExporting(false);
     }
   };
@@ -1618,10 +1612,16 @@ function AppointmentsTab() {
 
       {appts.length > 0 && (
         <Card className="space-y-2">
-          <div className="flex items-center justify-between">
-            <p className="text-xs font-semibold">تصدير للطبيب</p>
-            <button onClick={() => setExportOpen((v) => !v)} className="text-neutral-400 text-[11px]">{exportOpen ? "إخفاء" : "اختيار الكروت"}</button>
-          </div>
+          <p className="text-xs font-semibold">تصدير للطبيب</p>
+          {/* Round 48 — "خلي كلمة اختيار الكروت في النص وكبيرة ولون مختلف":
+              كانت نص رمادي صغير مرمي على يمين العنوان. بقت زرار مستقل في
+              النص، بخط أكبر ولون وردي مميز يتماشى مع باقي هوية "لها". */}
+          <button
+            onClick={() => setExportOpen((v) => !v)}
+            className="w-full text-center text-sm font-bold text-pink-600 dark:text-pink-400 py-1"
+          >
+            {exportOpen ? "إخفاء الكروت" : "اختيار الكروت"}
+          </button>
           {exportOpen && (
             <div className="space-y-1.5 max-h-48 overflow-y-auto">
               <label className="flex items-center gap-2 text-xs font-medium">
@@ -1640,7 +1640,17 @@ function AppointmentsTab() {
               ))}
             </div>
           )}
-          <button onClick={exportPdf} disabled={exporting || !appts.some((a) => exportSelected[a.id])} className="w-full flex items-center justify-center gap-1.5 bg-neutral-800 dark:bg-neutral-200 text-white dark:text-neutral-900 rounded-lg py-2 text-xs font-medium disabled:opacity-50">
+          <button
+            onClick={() => {
+              // Round 48 — "لو مجرد توست تصدير، يظهر الكروت وتختار منها":
+              // بدل زرار متعطّل (أو توست بيقول روحي اختاري) لو مفيش كروت
+              // متحددة لسه، الدوسة نفسها بتفتح قائمة الاختيار على طول.
+              if (!appts.some((a) => exportSelected[a.id])) { setExportOpen(true); return; }
+              exportPdf();
+            }}
+            disabled={exporting}
+            className="w-full flex items-center justify-center gap-1.5 bg-neutral-800 dark:bg-neutral-200 text-white dark:text-neutral-900 rounded-lg py-2 text-xs font-medium disabled:opacity-50"
+          >
             <FileDown size={14} /> {exporting ? "جاري التصدير..." : "تصدير PDF"}
           </button>
         </Card>
@@ -2232,7 +2242,8 @@ function GenderRevealTab() {
   if (!party) {
     return (
       <Card className="text-center space-y-3 py-8">
-        <Gift className="mx-auto text-pink-400" size={32} />
+        {/* Round 48 — "شيل أيقونة هدية ومتحطش حاجة من دماغك": اتشالت من هنا
+            من غير أي بديل، بناءً على طلب صريح. */}
         <p className="text-sm text-neutral-500">ابدئي حفلة "تيم بينك ولا تيم بلو؟" — هتقدري تدّي الموبايل بعدها للدكتور أو صديقتك المقربة يسجلوا نوع الجنين برقم سري تحت إيديهم بس.</p>
         <button onClick={createParty} className="bg-pink-500 text-white rounded-xl py-2.5 px-6 text-sm font-medium">ابدئي الحفلة</button>
       </Card>
@@ -2511,8 +2522,6 @@ function MotherRoom({ party, votes, onRefresh }: { party: any; votes: { boy: num
       return;
     }
     setExportingGuestbook(true);
-    const node = document.createElement("div");
-    node.style.cssText = "position:fixed;left:-9999px;top:0;width:700px;background:#fff;direction:rtl;font-family:Cairo,sans-serif;padding:24px;";
     const rowsHtml = entries.map((e) => `
       <div style="border:1px solid #e5e5e5;border-radius:10px;padding:12px;margin-bottom:10px;">
         <p style="font-weight:700;font-size:14px;margin:0 0 4px;">${escapeHtml(e.guest_name)}</p>
@@ -2522,20 +2531,16 @@ function MotherRoom({ party, votes, onRefresh }: { party: any; votes: { boy: num
           ${e.sent_gift && e.payment_screenshot ? " · بعتت نقطة" : ""}
         </p>
       </div>`).join("");
-    node.innerHTML = `
+    const html = `
       <h1 style="font-size:18px;font-weight:700;margin:0 0 4px;">جيست بوك حفلة تيم بينك ولا تيم بلو؟</h1>
       <p style="font-size:12px;color:#888;margin:0 0 16px;">${entries.length} تهنئة</p>
       ${rowsHtml}`;
-    document.body.appendChild(node);
     try {
-      const html2canvas = (await import("html2canvas-pro")).default;
-      if (document.fonts?.ready) await document.fonts.ready;
-      const canvas = await html2canvas(node, { scale: 2, backgroundColor: "#ffffff" });
-      const { jsPDF } = await import("jspdf");
-      const w = canvas.width / 2;
-      const h = canvas.height / 2;
-      const pdf = new jsPDF({ unit: "px", format: [w, h] });
-      pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, w, h);
+      // Round 48 — "حل نهائي لتصدير PDF بايظ في أي مكان": بناء الالتقاط
+      // والـPDF بقى جوه lib/pdfExport.ts (نفس نقطة الإصلاح المشتركة — راجع
+      // تعليق الملف نفسه لتفاصيل سبب "الصندوق الفاضي" وإصلاحه).
+      const canvas = await renderHtmlToCanvas(html, 700);
+      const pdf = await canvasToPdf(canvas);
       await shareFile(pdf.output("dataurlstring"), "جيست-بوك-الحفلة.pdf", "application/pdf");
     } catch (e: any) {
       // Round 47 fix — السبب الحقيقي وراء "بايظ": الدالة دي كانت من غير أي
@@ -2543,7 +2548,6 @@ function MotherRoom({ party, votes, onRefresh }: { party: any; votes: { boy: num
       // من غير ما المستخدمة تعرف إن حاجة غلط أصلًا.
       showExportError(e?.message ? `حصل خطأ في التصدير: ${e.message}` : "حصل خطأ في التصدير");
     } finally {
-      document.body.removeChild(node);
       setExportingGuestbook(false);
     }
   };
@@ -2560,11 +2564,11 @@ function MotherRoom({ party, votes, onRefresh }: { party: any; votes: { boy: num
       ) : (
         <Card className="text-center space-y-2 bg-gradient-to-b from-pink-50 to-sky-50 dark:from-pink-950 dark:to-sky-950 border-none">
           {/* Round 46 — طلب المستخدم: لو فيه اسم "مختار" بنفس النوع، يتحط
-              مكان أيقونة الاحتفال بدل ما تفضل أيقونة عامة من غير معنى. */}
-          {party.selected_name ? (
+              مكان أيقونة الاحتفال بدل ما تفضل أيقونة عامة من غير معنى.
+              Round 48 — أيقونة "هدية" الاحتياطية اتشالت من غير بديل (طلب
+              صريح: "شيل أيقونة هدية ومتحطش حاجة من دماغك"). */}
+          {party.selected_name && (
             <p className={`text-2xl font-extrabold ${party.gender === "boy" ? "text-sky-500" : "text-pink-500"}`}>{party.selected_name}</p>
-          ) : (
-            <Gift className={`mx-auto ${party.gender === "boy" ? "text-sky-500" : "text-pink-500"}`} size={36} />
           )}
           <p className="text-sm text-neutral-600 dark:text-neutral-300 leading-relaxed">{GENDER_REVEAL_DUA}</p>
           <h2 className="text-lg font-bold">{genderRevealCongrats(party.gender)}</h2>
